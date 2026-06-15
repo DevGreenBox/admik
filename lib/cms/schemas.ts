@@ -199,6 +199,22 @@ export const CmsSectionReorderSchema = z.object({
     .min(1),
 });
 
+/** Переключение видимости секции (Server Action setCmsSectionEnabled). */
+export const CmsSectionSetEnabledSchema = z.object({
+  id: uuidSchema,
+  enabled: z.boolean(),
+});
+
+/** Идентификатор секции (Server Action deleteCmsSection). */
+export const CmsSectionIdSchema = z.object({
+  id: uuidSchema,
+});
+
+/** Идентификатор страницы (delete/publish/unpublish). */
+export const CmsPageIdSchema = z.object({
+  id: uuidSchema,
+});
+
 /** SEO/sitemap-поля страницы — общий фрагмент для create/update. */
 const sitemapPrioritySchema = z.number().min(0).max(1).optional();
 const sitemapChangefreqSchema = z.enum(
@@ -246,6 +262,7 @@ export const CmsPageListFilterSchema = z.object({
 });
 
 export type CmsSectionInput = z.infer<typeof CmsSectionInputSchema>;
+export type CmsSectionReorderInput = z.infer<typeof CmsSectionReorderSchema>;
 export type CmsPageCreateInput = z.infer<typeof CmsPageCreateSchema>;
 export type CmsPageUpdateInput = z.infer<typeof CmsPageUpdateSchema>;
 export type CmsPageListFilter = z.infer<typeof CmsPageListFilterSchema>;

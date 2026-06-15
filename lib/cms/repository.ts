@@ -178,6 +178,24 @@ export async function getCmsPageById(
 }
 
 /**
+ * Список опубликованных страниц (для витрины — навигация: slug/title/SEO).
+ * Только status='published'; без секций (их тянет getPublishedCmsPageBySlug).
+ * Сортировка по published_at DESC (свежие выше).
+ */
+export async function listPublishedCmsPages(): Promise<CmsPage[]> {
+  const rows = await sql<Record<string, unknown>[]>`
+    SELECT id, slug, title, status, published_at,
+           seo_title, seo_description, og_image_url, canonical_url, noindex,
+           sitemap_priority, sitemap_changefreq,
+           created_by, updated_by, created_at, updated_at
+    FROM cms_pages
+    WHERE status = 'published'
+    ORDER BY published_at DESC NULLS LAST, title ASC
+  `;
+  return rows.map(mapCmsPage);
+}
+
+/**
  * Опубликованная страница по slug со связанными секциями (для витрины).
  * Только status='published'. Null, если нет/не опубликована.
  */
