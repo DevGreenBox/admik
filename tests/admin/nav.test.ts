@@ -68,13 +68,32 @@ describe('admin/nav — buildAdminNav', () => {
     expect(labels(result)).toContain('Каталог');
   });
 
-  it('manager видит «Заказы», но не видит «Пользователи»', () => {
+  it('manager видит «Заказы» и «Промокоды», но не видит «Пользователи»', () => {
     const manager = makeUser({ roles: ['manager'] });
     const result = buildAdminNav(manager, {});
     expect(labels(result)).toContain('Заказы');
+    // «Промокоды» — пункт модуля orders под правом orders.write (есть у manager).
+    expect(labels(result)).toContain('Промокоды');
     expect(labels(result)).not.toContain('Пользователи');
     // manager не имеет roles.manage / users.read → нет Ролей и Пользователей.
     expect(labels(result)).not.toContain('Роли');
+  });
+
+  it('при выключенном модуле orders скрыты и «Заказы», и «Промокоды»', () => {
+    const owner = makeUser({ isOwner: true });
+    const result = buildAdminNav(owner, { ADMIK_MODULES: 'catalog,cdek,cms' });
+    expect(labels(result)).not.toContain('Заказы');
+    expect(labels(result)).not.toContain('Промокоды');
+    expect(labels(result)).toContain('Каталог');
+  });
+
+  it('пользователь только с orders.read видит «Заказы», но не «Промокоды»', () => {
+    // «Промокоды» требует orders.write — read-only пользователь его не видит.
+    const user = makeUser({});
+    user.permissions = buildPermissionSet([{ permissions: ['orders.read'] }]);
+    const result = buildAdminNav(user, {});
+    expect(labels(result)).toContain('Заказы');
+    expect(labels(result)).not.toContain('Промокоды');
   });
 
   it('«Дашборд» виден всегда (нет требований по модулю/праву)', () => {
