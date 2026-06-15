@@ -1,0 +1,187 @@
+import { describe, expect, it } from 'vitest';
+
+import {
+  slugSchema,
+  moneySchema,
+  ProductCreateSchema,
+  ProductUpdateSchema,
+  CategoryCreateSchema,
+  CategoryMoveSchema,
+  VariantCreateSchema,
+  AttributeCreateSchema,
+  ProductAttributeItemSchema,
+  StockSetSchema,
+  StockAdjustSchema,
+} from '@/lib/catalog/schemas';
+
+const UUID = '11111111-1111-4111-8111-111111111111';
+const UUID2 = '22222222-2222-4222-8222-222222222222';
+
+// ЮНИТ: Zod-схемы — всегда зелёные, без БД.
+
+describe('slugSchema', () => {
+  it('принимает валидный slug', () => {
+    expect(slugSchema.safeParse('foo-bar-2').success).toBe(true);
+  });
+  it('отклоняет двойные/краевые дефисы и верхний регистр', () => {
+    expect(slugSchema.safeParse('Foo').success).toBe(false);
+    expect(slugSchema.safeParse('foo--bar').success).toBe(false);
+    expect(slugSchema.safeParse('-foo').success).toBe(false);
+    expect(slugSchema.safeParse('').success).toBe(false);
+  });
+});
+
+describe('moneySchema — цена NUMERIC ≥ 0', () => {
+  it('принимает 0, целые и дробные (≤2 знака)', () => {
+    for (const v of ['0', '100', '99.99', '1234567.50']) {
+      expect(moneySchema.safeParse(v).success).toBe(true);
+    }
+  });
+  it('отклоняет отрицательные', () => {
+    expect(moneySchema.safeParse('-1').success).toBe(false);
+    expect(moneySchema.safeParse('-0.01').success).toBe(false);
+  });
+  it('отклоняет >2 знаков после точки и нечисловое', () => {
+    expect(moneySchema.safeParse('1.999').success).toBe(false);
+    expect(moneySchema.safeParse('abc').success).toBe(false);
+  });
+});
+
+describe('ProductCreateSchema', () => {
+  it('валидный минимальный вход с дефолтами', () => {
+    const res = ProductCreateSchema.safeParse({
+      sku: 'SKU-1',
+      slug: 'product-1',
+      name: 'Товар',
+    });
+    expect(res.success).toBe(true);
+    if (res.success) {
+      expect(res.data.status).toBe('draft');
+      expect(res.data.basePrice).toBe('0');
+      expect(res.data.categoryIds).toEqual([]);
+    }
+  });
+
+  it('отрицательная цена отклонена', () => {
+    const res = ProductCreateSchema.safeParse({
+      sku: 'SKU-1',
+      slug: 'p',
+      name: 'X',
+      basePrice: '-5',
+    });
+    expect(res.success).toBe(false);
+  });
+
+  it('невалидный slug отклонён', () => {
+    const res = ProductCreateSchema.safeParse({
+      sku: 'SKU',
+      slug: 'Bad Slug',
+      name: 'X',
+    });
+    expect(res.success).toBe(false);
+  });
+
+  it('primaryCategoryId должна входить в categoryIds', () => {
+    const bad = ProductCreateSchema.safeParse({
+      sku: 'S',
+      slug: 's',
+      name: 'X',
+      categoryIds: [UUID],
+      primaryCategoryId: UUID2,
+    });
+    expect(bad.success).toBe(false);
+
+    const good = ProductCreateSchema.safeParse({
+      sku: 'S',
+      slug: 's',
+      name: 'X',
+      categoryIds: [UUID, UUID2],
+      primaryCategoryId: UUID2,
+    });
+    expect(good.success).toBe(true);
+  });
+});
+
+describe('ProductUpdateSchema', () => {
+  it('требует id', () => {
+    expect(ProductUpdateSchema.safeParse({ name: 'X' }).success).toBe(false);
+    expect(ProductUpdateSchema.safeParse({ id: UUID, name: 'X' }).success).toBe(true);
+  });
+});
+
+describe('CategoryCreateSchema / CategoryMoveSchema', () => {
+  it('категория с дефолтами', () => {
+    const res = CategoryCreateSchema.safeParse({ slug: 'cat', name: 'Кат' });
+    expect(res.success).toBe(true);
+    if (res.success) {
+      expect(res.data.isActive).toBe(true);
+      expect(res.data.sort).toBe(0);
+    }
+  });
+  it('move принимает null-родителя (корень)', () => {
+    expect(CategoryMoveSchema.safeParse({ id: UUID, parentId: null }).success).toBe(true);
+    expect(CategoryMoveSchema.safeParse({ id: UUID, parentId: UUID2 }).success).toBe(true);
+  });
+});
+
+describe('VariantCreateSchema', () => {
+  it('priceOverride отрицательный отклонён', () => {
+    expect(
+      VariantCreateSchema.safeParse({
+        productId: UUID,
+        sku: 'V-1',
+        priceOverride: '-1',
+      }).success,
+    ).toBe(false);
+  });
+  it('валидный вариант', () => {
+    expect(
+      VariantCreateSchema.safeParse({ productId: UUID, sku: 'V-1' }).success,
+    ).toBe(true);
+  });
+});
+
+describe('AttributeCreateSchema', () => {
+  it('код только латиница/цифры/подчёркивание', () => {
+    expect(AttributeCreateSchema.safeParse({ code: 'color', name: 'Цвет' }).success).toBe(true);
+    expect(AttributeCreateSchema.safeParse({ code: 'Цвет', name: 'Цвет' }).success).toBe(false);
+    expect(AttributeCreateSchema.safeParse({ code: 'co lor', name: 'X' }).success).toBe(false);
+  });
+  it('неизвестный type отклонён', () => {
+    expect(
+      AttributeCreateSchema.safeParse({ code: 'c', name: 'X', type: 'json' }).success,
+    ).toBe(false);
+  });
+});
+
+describe('ProductAttributeItemSchema — value_id или value_text обязателен', () => {
+  it('без значений отклонён', () => {
+    expect(ProductAttributeItemSchema.safeParse({ attributeId: UUID }).success).toBe(false);
+  });
+  it('с valueId — ок', () => {
+    expect(
+      ProductAttributeItemSchema.safeParse({ attributeId: UUID, valueId: UUID2 }).success,
+    ).toBe(true);
+  });
+  it('с valueText — ок', () => {
+    expect(
+      ProductAttributeItemSchema.safeParse({ attributeId: UUID, valueText: 'M' }).success,
+    ).toBe(true);
+  });
+});
+
+describe('StockSetSchema / StockAdjustSchema', () => {
+  it('quantity ≥ 0', () => {
+    expect(StockSetSchema.safeParse({ productId: UUID, quantity: 0 }).success).toBe(true);
+    expect(StockSetSchema.safeParse({ productId: UUID, quantity: -1 }).success).toBe(false);
+    expect(StockSetSchema.safeParse({ productId: UUID, quantity: 1.5 }).success).toBe(false);
+  });
+  it('warehouseCode по умолчанию main', () => {
+    const res = StockSetSchema.safeParse({ productId: UUID, quantity: 5 });
+    expect(res.success && res.data.warehouseCode).toBe('main');
+  });
+  it('adjust: delta=0 отклонён, ненулевой ок', () => {
+    expect(StockAdjustSchema.safeParse({ productId: UUID, delta: 0 }).success).toBe(false);
+    expect(StockAdjustSchema.safeParse({ productId: UUID, delta: -3 }).success).toBe(true);
+  });
+});
