@@ -1,0 +1,743 @@
+/**
+ * Слой доступа к данным модуля orders (docs/07 §3.4, §4.2, §6, ADR-010).
+ *
+ * Всё через `sql` (tagged templates → параметризация, анти-SQLi). Серверный
+ * расчёт корзины и создание заказа — ИСТОЧНИК ИСТИНЫ по ценам/итогу
+ * (anti-tamper): цены НИКОГДА не берутся из тела запроса витрины, только из
+ * каталога (lib/catalog/repository). Чистая бизнес-логика расчёта — в
+ * pricing.ts/promo.ts (юнит-тесты без БД); здесь — загрузка данных, транзакции,
+ * атомарный резерв остатков, выдача номера, идемпотентность.
+ *
+ * Деньги — строки NUMERIC(14,2); арифметика идёт в копейках (money.ts).
+ */
+
+import type { TransactionSql } from 'postgres';
+
+import { sql } from '@/lib/db/client';
+import { getEnv } from '@/lib/config/env';
+import { getProductById } from '@/lib/catalog/repository';
+import { effectiveCompareAt } from '@/lib/catalog/pricing';
+import type { ProductDetail, ProductVariant } from '@/lib/catalog/types';
+
+import { fromMinor, normalizeMoney, toMinor } from './money';
+import {
+  calculateQuote,
+  effectiveUnitPriceMinor,
+  type AppliedPromo,
+  type PricedLine,
+  type QuoteResult,
+} from './pricing';
+import { validatePromo, type PromoValidationResult } from './promo';
+import type { Order, OrderItem, PromoCode } from './types';
+import type { CartQuoteInput, CreateOrderInput } from './schemas';
+
+// Сентинель для COALESCE(variant_id, ...) в inventory_unit_uniq (0010).
+const NIL_UUID = '00000000-0000-0000-0000-000000000000';
+const MAIN_WAREHOUSE = 'main';
+
+// =============================================================================
+// Мапперы row→domain.
+// =============================================================================
+
+function asDate(v: unknown): Date {
+  return v instanceof Date ? v : new Date(v as string);
+}
+function asJson(v: unknown): Record<string, unknown> {
+  if (v && typeof v === 'object') return v as Record<string, unknown>;
+  if (typeof v === 'string') {
+    try {
+      return JSON.parse(v) as Record<string, unknown>;
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+function numOrNull(v: unknown): number | null {
+  return v === null || v === undefined ? null : Number(v);
+}
+function strOrNull(v: unknown): string | null {
+  return v === null || v === undefined ? null : String(v);
+}
+
+/** promo_codes row → PromoCode (camelCase). */
+export function mapPromoCode(row: Record<string, unknown>): PromoCode {
+  return {
+    id: String(row.id),
+    code: String(row.code),
+    kind: row.kind as PromoCode['kind'],
+    value: String(row.value),
+    minOrderTotal: String(row.min_order_total),
+    maxDiscount: strOrNull(row.max_discount),
+    usageLimit: numOrNull(row.usage_limit),
+    perCustomerLimit: numOrNull(row.per_customer_limit),
+    usedCount: Number(row.used_count),
+    startsAt: row.starts_at ? asDate(row.starts_at) : null,
+    endsAt: row.ends_at ? asDate(row.ends_at) : null,
+    isActive: Boolean(row.is_active),
+    bogoBuyQty: numOrNull(row.bogo_buy_qty),
+    bogoPayQty: numOrNull(row.bogo_pay_qty),
+    comment: String(row.comment ?? ''),
+    createdAt: asDate(row.created_at),
+    updatedAt: asDate(row.updated_at),
+  };
+}
+
+/** orders row → Order (camelCase). */
+export function mapOrder(row: Record<string, unknown>): Order {
+  return {
+    id: String(row.id),
+    number: String(row.number),
+    status: row.status as Order['status'],
+    itemsTotal: String(row.items_total),
+    discountTotal: String(row.discount_total),
+    deliveryTotal: String(row.delivery_total),
+    grandTotal: String(row.grand_total),
+    currency: String(row.currency),
+    paymentMethod: row.payment_method as Order['paymentMethod'],
+    paymentStatus: row.payment_status as Order['paymentStatus'],
+    paidAt: row.paid_at ? asDate(row.paid_at) : null,
+    paymentRef: strOrNull(row.payment_ref),
+    deliveryType: row.delivery_type as Order['deliveryType'],
+    deliveryStatus: row.delivery_status as Order['deliveryStatus'],
+    deliveryCity: strOrNull(row.delivery_city),
+    deliveryAddress: strOrNull(row.delivery_address),
+    deliveryPvzCode: strOrNull(row.delivery_pvz_code),
+    deliveryCost: strOrNull(row.delivery_cost),
+    cdekUuid: strOrNull(row.cdek_uuid),
+    cdekTrack: strOrNull(row.cdek_track),
+    promoCodeId: strOrNull(row.promo_code_id),
+    promoCode: strOrNull(row.promo_code),
+    customerId: strOrNull(row.customer_id),
+    customerName: String(row.customer_name),
+    customerEmail: String(row.customer_email),
+    customerPhone: String(row.customer_phone),
+    comment: String(row.comment ?? ''),
+    idempotencyKey: strOrNull(row.idempotency_key),
+    source: row.source as Order['source'],
+    ip: strOrNull(row.ip),
+    createdAt: asDate(row.created_at),
+    updatedAt: asDate(row.updated_at),
+  };
+}
+
+/** order_items row → OrderItem (camelCase). */
+export function mapOrderItem(row: Record<string, unknown>): OrderItem {
+  return {
+    id: String(row.id),
+    orderId: String(row.order_id),
+    productId: strOrNull(row.product_id),
+    variantId: strOrNull(row.variant_id),
+    nameSnapshot: String(row.name_snapshot),
+    skuSnapshot: String(row.sku_snapshot),
+    attributesSnapshot: asJson(row.attributes_snapshot),
+    unitPrice: String(row.unit_price),
+    compareAtSnapshot: strOrNull(row.compare_at_snapshot),
+    quantity: Number(row.quantity),
+    lineTotal: String(row.line_total),
+    createdAt: asDate(row.created_at),
+  };
+}
+
+// =============================================================================
+// Промокоды (чтение + счётчики для лимитов, §3.4).
+// =============================================================================
+
+/** Промокод по коду (citext — регистронезависимо); null если нет. */
+export async function getPromoByCode(code: string): Promise<PromoCode | null> {
+  const rows = await sql<Record<string, unknown>[]>`
+    SELECT id, code, kind, value, min_order_total, max_discount, usage_limit,
+           per_customer_limit, used_count, starts_at, ends_at, is_active,
+           bogo_buy_qty, bogo_pay_qty, comment, created_at, updated_at
+    FROM promo_codes WHERE code = ${code} LIMIT 1
+  `;
+  return rows[0] ? mapPromoCode(rows[0]) : null;
+}
+
+/** Число применений промокода данным покупателем (email) — для per_customer_limit. */
+export async function countCustomerRedemptions(
+  promoCodeId: string,
+  customerEmail: string,
+): Promise<number> {
+  const rows = await sql<{ n: string }[]>`
+    SELECT count(*)::text AS n FROM promo_redemptions
+    WHERE promo_code_id = ${promoCodeId} AND customer_email = ${customerEmail}
+  `;
+  return Number(rows[0]?.n ?? 0);
+}
+
+/**
+ * Промокод + контекст лимитов в один проход (used_count из строки, redemptions
+ * по email если задан). Возвращает null, если кода нет.
+ */
+export async function getPromoWithCounts(
+  code: string,
+  customerEmail?: string,
+): Promise<{ promo: PromoCode; customerRedemptions: number } | null> {
+  const promo = await getPromoByCode(code);
+  if (!promo) return null;
+  const customerRedemptions = customerEmail
+    ? await countCustomerRedemptions(promo.id, customerEmail)
+    : 0;
+  return { promo, customerRedemptions };
+}
+
+// =============================================================================
+// Загрузка цен/остатков позиций из каталога (anti-tamper, ADR-010).
+// =============================================================================
+
+/** Резолв-результат одной позиции: либо ценовая строка, либо проблема. */
+export interface ResolvedLine extends PricedLine {
+  productId: string;
+  variantId: string | null;
+  attributesSnapshot: Record<string, unknown>;
+  /** Доступно к продаже (quantity − reserved) для этого юнита. */
+  available: number;
+  /** Достаточно ли остатка под запрошенный qty. */
+  inStock: boolean;
+}
+
+export type LineResolution =
+  | { ok: true; line: ResolvedLine }
+  | { ok: false; reason: 'product_not_found' | 'variant_not_found' | 'inactive' };
+
+/** Доступный остаток юнита (product/variant/main) из ProductDetail.inventory. */
+function availableFor(product: ProductDetail, variantId: string | null): number {
+  const row = product.inventory.find(
+    (i) =>
+      i.warehouseCode === MAIN_WAREHOUSE &&
+      (variantId === null ? i.variantId === null : i.variantId === variantId),
+  );
+  if (!row) return 0;
+  return Math.max(0, row.quantity - row.reserved);
+}
+
+/**
+ * Резолвит одну позицию витрины в ценовую строку ИЗ КАТАЛОГА (цена не из
+ * запроса). variantId приоритетен; иначе берётся товар без варианта.
+ */
+export async function resolveCartLine(input: {
+  productId?: string;
+  variantId?: string;
+  qty: number;
+}): Promise<LineResolution> {
+  // Загружаем товар: либо напрямую по productId, либо найдя владельца варианта.
+  let product: ProductDetail | null = null;
+  let variant: ProductVariant | null = null;
+
+  if (input.variantId) {
+    // Найти товар-владельца варианта.
+    const owner = await sql<{ product_id: string }[]>`
+      SELECT product_id FROM product_variants WHERE id = ${input.variantId} LIMIT 1
+    `;
+    if (!owner[0]) return { ok: false, reason: 'variant_not_found' };
+    product = await getProductById(owner[0].product_id);
+    if (!product) return { ok: false, reason: 'product_not_found' };
+    variant = product.variants.find((v) => v.id === input.variantId) ?? null;
+    if (!variant) return { ok: false, reason: 'variant_not_found' };
+    if (!variant.isActive || product.status !== 'active') {
+      return { ok: false, reason: 'inactive' };
+    }
+  } else if (input.productId) {
+    product = await getProductById(input.productId);
+    if (!product) return { ok: false, reason: 'product_not_found' };
+    if (product.status !== 'active') return { ok: false, reason: 'inactive' };
+  } else {
+    return { ok: false, reason: 'product_not_found' };
+  }
+
+  const unitMinor = effectiveUnitPriceMinor({
+    basePrice: product.basePrice,
+    priceOverride: variant?.priceOverride ?? null,
+    priceDelta: variant?.priceDelta ?? null,
+  });
+
+  const compareAtNum = effectiveCompareAt(
+    variant?.compareAtPrice ?? null,
+    product.compareAtPrice,
+  );
+  const compareAt =
+    compareAtNum != null && compareAtNum > Number(fromMinor(unitMinor))
+      ? normalizeMoney(compareAtNum)
+      : null;
+
+  const variantId = variant?.id ?? null;
+  const available = availableFor(product, variantId);
+
+  return {
+    ok: true,
+    line: {
+      productId: product.id,
+      variantId,
+      name: variant ? `${product.name} — ${variant.name}` : product.name,
+      sku: variant?.sku ?? product.sku,
+      unitPrice: fromMinor(unitMinor),
+      compareAt,
+      qty: input.qty,
+      attributesSnapshot: variant?.attributesCache ?? product.attributesCache ?? {},
+      available,
+      inStock: available >= input.qty,
+    },
+  };
+}
+
+// =============================================================================
+// Доставка (заглушка под СДЭК Этап 4; реальный расчёт — §7).
+// =============================================================================
+
+/**
+ * Базовая стоимость доставки (копейки) — ЗАГЛУШКА Этапа 3. СДЭК-расчёт по
+ * городу/ПВЗ приходит в Этапе 4 (§7). Самовывоз (pickup) → 0.
+ * Здесь нет тарифа в env, поэтому курьер/ПВЗ → 0 (порог/free_delivery всё равно
+ * обрабатываются в pricing); место стыковки помечено TODO.
+ */
+function stubDeliveryCost(deliveryType: string | undefined): string {
+  // TODO(Этап 4, §7): заменить на расчёт СДЭК по городу/типу/ПВЗ.
+  if (deliveryType === 'pickup') return '0.00';
+  return '0.00';
+}
+
+// =============================================================================
+// quoteCart — серверный расчёт корзины (POST /cart/quote). Ничего не создаёт.
+// =============================================================================
+
+export interface QuoteCartResult {
+  quote: QuoteResult;
+  currency: string;
+  /** Проблемные позиции (не найдены/неактивны/нет остатка). */
+  issues: Array<{
+    index: number;
+    code: 'product_not_found' | 'variant_not_found' | 'inactive' | 'out_of_stock';
+  }>;
+  /** Результат валидации промокода (если код передан). */
+  promo: PromoValidationResult | null;
+  /** Достаточно ли остатка по всем позициям (можно оформлять). */
+  fulfillable: boolean;
+}
+
+/**
+ * Серверный расчёт корзины: грузит цены/остатки из каталога, проверяет
+ * доступность, валидирует промокод, считает итог. НЕ создаёт заказ и НЕ резервирует.
+ */
+export async function quoteCart(
+  input: CartQuoteInput & { customerEmail?: string; now?: Date },
+): Promise<QuoteCartResult> {
+  const env = getEnv();
+  const currency = env.SHOP_CURRENCY;
+  const freeThreshold = env.SHOP_FREE_DELIVERY_THRESHOLD;
+
+  const issues: QuoteCartResult['issues'] = [];
+  const lines: PricedLine[] = [];
+
+  for (let i = 0; i < input.items.length; i++) {
+    const res = await resolveCartLine(input.items[i]!);
+    if (!res.ok) {
+      issues.push({ index: i, code: res.reason });
+      continue;
+    }
+    if (!res.line.inStock) {
+      issues.push({ index: i, code: 'out_of_stock' });
+    }
+    lines.push(res.line);
+  }
+
+  // Промокод (валидируем по itemsTotal, копейки).
+  const itemsMinor = lines.reduce((acc, l) => acc + toMinor(l.unitPrice) * l.qty, 0);
+  let promoResult: PromoValidationResult | null = null;
+  let appliedPromo: AppliedPromo | null = null;
+  if (input.promoCode) {
+    const found = await getPromoWithCounts(input.promoCode, input.customerEmail);
+    if (!found) {
+      promoResult = {
+        valid: false,
+        reason: 'inactive',
+        message: 'Промокод не найден.',
+      };
+    } else {
+      promoResult = validatePromo(found.promo, {
+        itemsTotal: fromMinor(itemsMinor),
+        now: input.now,
+        usedCount: found.promo.usedCount,
+        customerRedemptions: found.customerRedemptions,
+      });
+      if (promoResult.valid) appliedPromo = promoResult.promo;
+    }
+  }
+
+  const quote = calculateQuote({
+    lines,
+    promo: appliedPromo,
+    delivery: {
+      cost: stubDeliveryCost(input.delivery?.type),
+      freeThreshold,
+    },
+  });
+
+  const fulfillable =
+    issues.length === 0 && lines.length === input.items.length && lines.length > 0;
+
+  return { quote, currency, issues, promo: promoResult, fulfillable };
+}
+
+// =============================================================================
+// Номер заказа (атомарная выдача, §2.7).
+// =============================================================================
+
+/**
+ * Выдаёт следующий человекочитаемый номер заказа атомарно (UPSERT + RETURNING).
+ * Формат: `[ПРЕФИКС-]ГОД-NNNNNN`. ВЫЗЫВАТЬ ВНУТРИ ТРАНЗАКЦИИ (передать tx).
+ */
+export async function nextOrderNumber(
+  tx: TransactionSql,
+  now: Date = new Date(),
+): Promise<string> {
+  const env = getEnv();
+  const year = String(now.getUTCFullYear());
+  const rows = await tx<{ last_value: string }[]>`
+    INSERT INTO order_number_counters (scope, last_value)
+    VALUES (${year}, 1)
+    ON CONFLICT (scope)
+    DO UPDATE SET last_value = order_number_counters.last_value + 1
+    RETURNING last_value
+  `;
+  const seq = Number(rows[0]!.last_value);
+  const padded = String(seq).padStart(6, '0');
+  const prefix = env.SHOP_ORDER_PREFIX ? `${env.SHOP_ORDER_PREFIX}-` : '';
+  return `${prefix}${year}-${padded}`;
+}
+
+// =============================================================================
+// Резерв остатков (атомарно, гонко-безопасно, §6).
+// =============================================================================
+
+/**
+ * Атомарный резерв одного юнита: reserved += qty при наличии доступного остатка.
+ * Возвращает true, если зарезервировано (affected = 1); false → нет остатка.
+ * ВЫЗЫВАТЬ ВНУТРИ ТРАНЗАКЦИИ.
+ */
+export async function reserveUnit(
+  tx: TransactionSql,
+  unit: { productId: string; variantId: string | null; qty: number },
+): Promise<boolean> {
+  const variantKey = unit.variantId ?? NIL_UUID;
+  const rows = await tx<{ id: string }[]>`
+    UPDATE inventory
+       SET reserved = reserved + ${unit.qty}, updated_at = now()
+     WHERE product_id = ${unit.productId}
+       AND COALESCE(variant_id, ${NIL_UUID}::uuid) = ${variantKey}::uuid
+       AND warehouse_code = ${MAIN_WAREHOUSE}
+       AND quantity - reserved >= ${unit.qty}
+    RETURNING id
+  `;
+  return rows.length === 1;
+}
+
+/** Возврат резерва (отмена до отгрузки, §6): reserved -= qty. */
+export async function releaseReservation(
+  tx: TransactionSql,
+  unit: { productId: string; variantId: string | null; qty: number },
+): Promise<boolean> {
+  const variantKey = unit.variantId ?? NIL_UUID;
+  const rows = await tx<{ id: string }[]>`
+    UPDATE inventory
+       SET reserved = reserved - ${unit.qty}, updated_at = now()
+     WHERE product_id = ${unit.productId}
+       AND COALESCE(variant_id, ${NIL_UUID}::uuid) = ${variantKey}::uuid
+       AND warehouse_code = ${MAIN_WAREHOUSE}
+       AND reserved >= ${unit.qty}
+    RETURNING id
+  `;
+  return rows.length === 1;
+}
+
+/** Списание (отгрузка, §6): quantity -= qty, reserved -= qty. */
+export async function commitReservation(
+  tx: TransactionSql,
+  unit: { productId: string; variantId: string | null; qty: number },
+): Promise<boolean> {
+  const variantKey = unit.variantId ?? NIL_UUID;
+  const rows = await tx<{ id: string }[]>`
+    UPDATE inventory
+       SET quantity = quantity - ${unit.qty},
+           reserved = reserved - ${unit.qty},
+           updated_at = now()
+     WHERE product_id = ${unit.productId}
+       AND COALESCE(variant_id, ${NIL_UUID}::uuid) = ${variantKey}::uuid
+       AND warehouse_code = ${MAIN_WAREHOUSE}
+       AND reserved >= ${unit.qty}
+       AND quantity >= ${unit.qty}
+    RETURNING id
+  `;
+  return rows.length === 1;
+}
+
+// =============================================================================
+// createOrder — транзакция (ре-валидация, резерв, номер, вставка, промо, история).
+// =============================================================================
+
+export interface CreateOrderContext {
+  source?: 'storefront' | 'admin';
+  ip?: string | null;
+  actorUserId?: string | null;
+  now?: Date;
+}
+
+export type CreateOrderResult =
+  | { ok: true; order: Order; reused: boolean }
+  | {
+      ok: false;
+      code: 'out_of_stock' | 'invalid_item' | 'invalid_promo';
+      message: string;
+    };
+
+/**
+ * Создаёт заказ атомарно (ADR-010, §4.2):
+ *  1) ре-валидация цен/остатков ЗАНОВО из каталога (вне транзакции — чтение);
+ *  2) транзакция: атомарный резерв всех позиций (gonko-safe), выдача номера,
+ *     вставка orders+order_items (снимок), история(new), учёт промокода;
+ *  3) идемпотентность по idempotency_key (повтор → существующий заказ).
+ */
+export async function createOrder(
+  input: CreateOrderInput,
+  ctx: CreateOrderContext = {},
+): Promise<CreateOrderResult> {
+  const env = getEnv();
+  const now = ctx.now ?? new Date();
+  const source = ctx.source ?? 'storefront';
+
+  // Идемпотентность: если такой ключ уже есть — вернуть существующий заказ.
+  if (input.idempotencyKey) {
+    const existing = await sql<Record<string, unknown>[]>`
+      SELECT * FROM orders WHERE idempotency_key = ${input.idempotencyKey} LIMIT 1
+    `;
+    if (existing[0]) {
+      return { ok: true, order: mapOrder(existing[0]), reused: true };
+    }
+  }
+
+  // Ре-валидация цен/остатков из каталога (чтение, anti-tamper).
+  const resolved: ResolvedLine[] = [];
+  for (const item of input.items) {
+    const res = await resolveCartLine(item);
+    if (!res.ok) {
+      return { ok: false, code: 'invalid_item', message: `Позиция недоступна: ${res.reason}.` };
+    }
+    resolved.push(res.line);
+  }
+
+  // Расчёт итога (промокод валидируем заново внутри по актуальным счётчикам).
+  const itemsMinor = resolved.reduce((a, l) => a + toMinor(l.unitPrice) * l.qty, 0);
+  let appliedPromo: AppliedPromo | null = null;
+  let promoRow: PromoCode | null = null;
+  if (input.promoCode) {
+    const found = await getPromoWithCounts(input.promoCode, input.customer.email);
+    if (!found) {
+      return { ok: false, code: 'invalid_promo', message: 'Промокод не найден.' };
+    }
+    const v = validatePromo(found.promo, {
+      itemsTotal: fromMinor(itemsMinor),
+      now,
+      usedCount: found.promo.usedCount,
+      customerRedemptions: found.customerRedemptions,
+    });
+    if (!v.valid) {
+      return { ok: false, code: 'invalid_promo', message: v.message };
+    }
+    appliedPromo = v.promo;
+    promoRow = found.promo;
+  }
+
+  const quote = calculateQuote({
+    lines: resolved,
+    promo: appliedPromo,
+    delivery: {
+      cost: stubDeliveryCost(input.delivery.type),
+      freeThreshold: env.SHOP_FREE_DELIVERY_THRESHOLD,
+    },
+  });
+
+  try {
+    const order = await sql.begin(async (tx) => {
+      // Повторная проверка идемпотентности внутри транзакции (гонка двух запросов).
+      if (input.idempotencyKey) {
+        const dup = await tx<Record<string, unknown>[]>`
+          SELECT * FROM orders WHERE idempotency_key = ${input.idempotencyKey} LIMIT 1
+        `;
+        if (dup[0]) {
+          return { row: dup[0], reused: true } as const;
+        }
+      }
+
+      // 1) Атомарный резерв всех позиций. Любая нехватка → throw → ROLLBACK.
+      for (const l of resolved) {
+        const ok = await reserveUnit(tx, {
+          productId: l.productId,
+          variantId: l.variantId,
+          qty: l.qty,
+        });
+        if (!ok) {
+          throw new OutOfStockError(l.sku);
+        }
+      }
+
+      // 2) Промокод: атомарный инкремент used_count с проверкой лимита (гонка).
+      if (promoRow) {
+        const inc = await tx<{ used_count: number }[]>`
+          UPDATE promo_codes
+             SET used_count = used_count + 1, updated_at = now()
+           WHERE id = ${promoRow.id}
+             AND (usage_limit IS NULL OR used_count < usage_limit)
+          RETURNING used_count
+        `;
+        if (inc.length !== 1) {
+          throw new PromoExhaustedError();
+        }
+      }
+
+      // 3) Номер заказа (атомарно).
+      const number = await nextOrderNumber(tx, now);
+
+      // 4) Вставка заголовка заказа (суммы — серверные, ADR-010).
+      const [orderRow] = await tx<Record<string, unknown>[]>`
+        INSERT INTO orders (
+          number, status, items_total, discount_total, delivery_total, grand_total,
+          currency, payment_method, payment_status, delivery_type, delivery_city,
+          delivery_address, delivery_pvz_code, delivery_cost, promo_code_id, promo_code,
+          customer_name, customer_email, customer_phone, comment, idempotency_key,
+          source, ip
+        ) VALUES (
+          ${number}, 'new', ${quote.itemsTotal}, ${quote.discount}, ${quote.deliveryCost},
+          ${quote.grandTotal}, ${env.SHOP_CURRENCY}, ${input.paymentMethod}, 'pending',
+          ${input.delivery.type}, ${input.delivery.city ?? null},
+          ${input.delivery.address ?? null}, ${input.delivery.pvzCode ?? null},
+          ${quote.deliveryCost}, ${promoRow?.id ?? null}, ${appliedPromo?.code ?? null},
+          ${input.customer.name}, ${input.customer.email}, ${input.customer.phone},
+          ${input.comment ?? ''}, ${input.idempotencyKey ?? null}, ${source}, ${ctx.ip ?? null}
+        )
+        RETURNING *
+      `;
+      const orderId = String(orderRow!.id);
+
+      // 5) Позиции (СНИМОК каталога, ADR-010).
+      for (let i = 0; i < resolved.length; i++) {
+        const l = resolved[i]!;
+        const lineTotal = fromMinor(toMinor(l.unitPrice) * l.qty);
+        await tx`
+          INSERT INTO order_items (
+            order_id, product_id, variant_id, name_snapshot, sku_snapshot,
+            attributes_snapshot, unit_price, compare_at_snapshot, quantity, line_total
+          ) VALUES (
+            ${orderId}, ${l.productId}, ${l.variantId}, ${l.name}, ${l.sku},
+            ${tx.json(l.attributesSnapshot as Record<string, never>)}, ${l.unitPrice}, ${l.compareAt},
+            ${l.qty}, ${lineTotal}
+          )
+        `;
+      }
+
+      // 6) Учёт применения промокода (идемпотентность по UNIQUE(promo,order)).
+      if (promoRow) {
+        await tx`
+          INSERT INTO promo_redemptions (promo_code_id, order_id, customer_email, discount_applied)
+          VALUES (${promoRow.id}, ${orderId}, ${input.customer.email}, ${quote.discount})
+          ON CONFLICT (promo_code_id, order_id) DO NOTHING
+        `;
+      }
+
+      // 7) Начальная запись истории статуса.
+      await tx`
+        INSERT INTO order_status_history (order_id, kind, from_status, to_status, actor_user_id, comment)
+        VALUES (${orderId}, 'order', NULL, 'new', ${ctx.actorUserId ?? null}, '')
+      `;
+
+      return { row: orderRow!, reused: false } as const;
+    });
+
+    return { ok: true, order: mapOrder(order.row), reused: order.reused };
+  } catch (err) {
+    if (err instanceof OutOfStockError) {
+      return { ok: false, code: 'out_of_stock', message: `Недостаточно остатка: ${err.sku}.` };
+    }
+    if (err instanceof PromoExhaustedError) {
+      return { ok: false, code: 'invalid_promo', message: 'Лимит промокода исчерпан.' };
+    }
+    throw err;
+  }
+}
+
+class OutOfStockError extends Error {
+  constructor(public readonly sku: string) {
+    super(`out_of_stock:${sku}`);
+  }
+}
+class PromoExhaustedError extends Error {}
+
+// =============================================================================
+// Чтения заказов (админка/storefront).
+// =============================================================================
+
+export interface OrderWithItems {
+  order: Order;
+  items: OrderItem[];
+}
+
+/** Заказ по номеру + позиции; null если нет. */
+export async function getOrderByNumber(number: string): Promise<OrderWithItems | null> {
+  const rows = await sql<Record<string, unknown>[]>`
+    SELECT * FROM orders WHERE number = ${number} LIMIT 1
+  `;
+  if (!rows[0]) return null;
+  const order = mapOrder(rows[0]);
+  const itemRows = await sql<Record<string, unknown>[]>`
+    SELECT * FROM order_items WHERE order_id = ${order.id} ORDER BY created_at, id
+  `;
+  return { order, items: itemRows.map(mapOrderItem) };
+}
+
+/** Заказ по id + позиции; null если нет. */
+export async function getOrderById(id: string): Promise<OrderWithItems | null> {
+  const rows = await sql<Record<string, unknown>[]>`
+    SELECT * FROM orders WHERE id = ${id} LIMIT 1
+  `;
+  if (!rows[0]) return null;
+  const order = mapOrder(rows[0]);
+  const itemRows = await sql<Record<string, unknown>[]>`
+    SELECT * FROM order_items WHERE order_id = ${order.id} ORDER BY created_at, id
+  `;
+  return { order, items: itemRows.map(mapOrderItem) };
+}
+
+export interface ListOrdersFilter {
+  q?: string;
+  status?: Order['status'];
+  paymentStatus?: Order['paymentStatus'];
+  promoCodeId?: string;
+  limit?: number;
+  offset?: number;
+}
+
+/** Список заказов с фильтрами (для админки/storefront). */
+export async function listOrders(
+  filter: ListOrdersFilter = {},
+): Promise<{ rows: Order[]; total: number }> {
+  const limit = Math.min(Math.max(filter.limit ?? 50, 1), 200);
+  const offset = Math.max(filter.offset ?? 0, 0);
+  const q = filter.q ? `%${filter.q}%` : null;
+
+  const where = sql`
+    WHERE (${filter.status ?? null}::text IS NULL OR status = ${filter.status ?? null})
+      AND (${filter.paymentStatus ?? null}::text IS NULL OR payment_status = ${filter.paymentStatus ?? null})
+      AND (${filter.promoCodeId ?? null}::uuid IS NULL OR promo_code_id = ${filter.promoCodeId ?? null})
+      AND (${q}::text IS NULL OR number ILIKE ${q} OR customer_email ILIKE ${q} OR customer_phone ILIKE ${q})
+  `;
+
+  const [totalRows, rows] = await Promise.all([
+    sql<{ n: string }[]>`SELECT count(*)::text AS n FROM orders ${where}`,
+    sql<Record<string, unknown>[]>`
+      SELECT * FROM orders ${where}
+      ORDER BY created_at DESC
+      LIMIT ${limit} OFFSET ${offset}
+    `,
+  ]);
+
+  return { rows: rows.map(mapOrder), total: Number(totalRows[0]?.n ?? 0) };
+}
