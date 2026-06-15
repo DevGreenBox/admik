@@ -41,7 +41,7 @@ describe('db/migrations — СДЭК 0017/0018 (юнит)', () => {
     expect(byVersion['0018']).toBe('product_weight_dims');
   });
 
-  it('нумерация без пропусков 0001..0018 сплошняком, 0018 — последняя', async () => {
+  it('нумерация без пропусков 0001..0018 сплошняком, 0018 завершает диапазон СДЭК', async () => {
     const all = await listMigrations();
     const versions = all.map((m) => m.version);
     const expected = versions.map((_, i) => String(i + 1).padStart(4, '0'));
@@ -49,7 +49,9 @@ describe('db/migrations — СДЭК 0017/0018 (юнит)', () => {
     for (const v of CDEK_VERSIONS) {
       expect(versions).toContain(v);
     }
-    expect(versions[versions.length - 1]).toBe('0018');
+    // 0018 завершает диапазон СДЭК (Этап 4); цепочку миграций после Этапа 4
+    // продолжает Этап 5 (0019+), поэтому проверяем присутствие 0018, а не «хвост».
+    expect(versions).toContain('0018');
     expect(parseMigrationName('0017_cdek_shipments.sql')).toEqual({
       version: '0017',
       name: 'cdek_shipments',
