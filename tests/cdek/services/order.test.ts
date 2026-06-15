@@ -1,0 +1,268 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+/**
+ * Тесты OrderService (docs/08 §7.1).
+ *
+ * (а) ЧИСТЫЕ — normalizePhone, buildPayload (ПВЗ/курьер ветки), canCreateShipment,
+ *     deliveryModeFor. Без сети/БД, всегда зелёные.
+ * (б) createShipment — БД-зависим (repository + orders). Мокаем repository/orders
+ *     через vi.mock, чтобы проверить mock-создание (uuid/трек сохранён) и
+ *     идемпотентность повторного вызова без живой БД.
+ */
+
+// --- Моки БД-слоёв (до импорта тестируемого модуля). ---
+const repoState: { shipment: Record<string, unknown> | null } = { shipment: null };
+const createShipmentMock = vi.fn(async (input: Record<string, unknown>) => {
+  repoState.shipment = { id: 'sh-1', orderId: input.orderId, ...input };
+  return repoState.shipment;
+});
+const updateShipmentMock = vi.fn(async (_id: string, patch: Record<string, unknown>) => {
+  repoState.shipment = { ...(repoState.shipment ?? {}), ...patch };
+  return repoState.shipment;
+});
+const getShipmentMock = vi.fn(async () => repoState.shipment);
+const bumpRetryMock = vi.fn(async () => repoState.shipment);
+
+vi.mock('@/lib/cdek/repository', () => ({
+  getShipmentByOrderId: (...a: unknown[]) => getShipmentMock(...(a as [])),
+  getShipmentByCdekUuid: vi.fn(async () => null),
+  createShipment: (...a: unknown[]) => createShipmentMock(...(a as [Record<string, unknown>])),
+  updateShipmentByOrderId: (...a: unknown[]) =>
+    updateShipmentMock(...(a as [string, Record<string, unknown>])),
+  bumpShipmentRetry: (...a: unknown[]) => bumpRetryMock(...(a as [])),
+}));
+
+const getOrderByIdMock = vi.fn();
+vi.mock('@/lib/orders/repository', () => ({
+  getOrderById: (...a: unknown[]) => getOrderByIdMock(...(a as [])),
+  getOrderByNumber: vi.fn(async () => null),
+}));
+
+// sql — заглушка (UPDATE orders денормализация). vi.mock hoisted → строим внутри.
+vi.mock('@/lib/db/client', () => {
+  const fn = vi.fn(async () => []);
+  return { sql: Object.assign(fn, { begin: vi.fn(async (cb: (tx: unknown) => unknown) => cb(fn)) }) };
+});
+
+import {
+  OrderService,
+  normalizePhone,
+  buildPayload,
+  canCreateShipment,
+  deliveryModeFor,
+  type BuildPayloadOptions,
+} from '@/lib/cdek/services/order';
+import { CdekManager } from '@/lib/cdek/manager';
+import { getCdekConfig } from '@/lib/cdek/config';
+import type { Order, OrderItem } from '@/lib/orders/types';
+
+const mockCfg = getCdekConfig({ NODE_ENV: 'test' });
+
+function makeOrder(over: Partial<Order> = {}): Order {
+  return {
+    id: 'ord-1',
+    number: 'TC-2026-000123',
+    status: 'paid',
+    itemsTotal: '1000.00',
+    discountTotal: '0.00',
+    deliveryTotal: '0.00',
+    grandTotal: '1000.00',
+    currency: 'RUB',
+    paymentMethod: 'card',
+    paymentStatus: 'paid',
+    paidAt: new Date(),
+    paymentRef: null,
+    deliveryType: 'pvz',
+    deliveryStatus: 'pending',
+    deliveryCity: 'Москва',
+    deliveryAddress: null,
+    deliveryPvzCode: 'MSK1',
+    deliveryCost: '0.00',
+    cdekUuid: null,
+    cdekTrack: null,
+    promoCodeId: null,
+    promoCode: null,
+    customerId: null,
+    customerName: 'Иван Иванов',
+    customerEmail: 'ivan@example.com',
+    customerPhone: '+7 (912) 345-67-89',
+    comment: '',
+    idempotencyKey: null,
+    source: 'storefront',
+    ip: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    ...over,
+  };
+}
+
+function makeItem(over: Partial<OrderItem> = {}): OrderItem {
+  return {
+    id: 'it-1',
+    orderId: 'ord-1',
+    productId: 'p-1',
+    variantId: 'v-1',
+    nameSnapshot: 'Чехол',
+    skuSnapshot: 'SKU1',
+    attributesSnapshot: {},
+    unitPrice: '500.00',
+    compareAtSnapshot: null,
+    quantity: 2,
+    lineTotal: '1000.00',
+    createdAt: new Date(),
+    ...over,
+  };
+}
+
+const buildOpts: BuildPayloadOptions = {
+  defaultDimensions: mockCfg.defaultDimensions,
+  fromLocationCode: mockCfg.fromLocationCode,
+  shipmentPoint: null,
+  defaultTariffCode: mockCfg.defaultTariffCode,
+  sender: { name: 'ООО Тест', contactName: 'Менеджер', phone: '+79000000000', email: 's@e.ru', inn: '7700000000' },
+};
+
+describe('cdek/order — normalizePhone (чистая)', () => {
+  it('10 цифр → +7XXXXXXXXXX', () => {
+    expect(normalizePhone('9123456789')).toBe('+79123456789');
+  });
+  it('11 цифр с 8 → +7…', () => {
+    expect(normalizePhone('89123456789')).toBe('+79123456789');
+  });
+  it('11 цифр с 7 → +7…', () => {
+    expect(normalizePhone('79123456789')).toBe('+79123456789');
+  });
+  it('форматированный (+7 (912) …) → нормализуется', () => {
+    expect(normalizePhone('+7 (912) 345-67-89')).toBe('+79123456789');
+  });
+  it('слишком короткий → ошибка', () => {
+    expect(() => normalizePhone('12345')).toThrow();
+  });
+});
+
+describe('cdek/order — deliveryModeFor / canCreateShipment (чистые)', () => {
+  it('courier → door, pvz → pvz', () => {
+    expect(deliveryModeFor(makeOrder({ deliveryType: 'courier' }))).toBe('door');
+    expect(deliveryModeFor(makeOrder({ deliveryType: 'pvz' }))).toBe('pvz');
+  });
+  it('pickup → нельзя создавать', () => {
+    expect(canCreateShipment(makeOrder({ deliveryType: 'pickup' })).ok).toBe(false);
+  });
+  it('неоплаченный заказ → нельзя', () => {
+    const o = makeOrder({ paymentStatus: 'pending', status: 'awaiting_payment' });
+    expect(canCreateShipment(o).ok).toBe(false);
+  });
+  it('оплаченный курьерский → можно', () => {
+    expect(canCreateShipment(makeOrder({ deliveryType: 'courier', paymentStatus: 'paid' })).ok).toBe(true);
+  });
+});
+
+describe('cdek/order — buildPayload (чистая)', () => {
+  it('ПВЗ-режим → delivery_point = код ПВЗ', () => {
+    const p = buildPayload(makeOrder({ deliveryType: 'pvz', deliveryPvzCode: 'MSK1' }), [makeItem()], buildOpts);
+    expect(p.delivery_point).toBe('MSK1');
+    expect(p.to_location).toBeUndefined();
+    expect(p.type).toBe(1);
+    expect(p.number).toBe('TC-2026-000123');
+    expect(p.recipient.phones[0].number).toBe('+79123456789');
+  });
+
+  it('курьер (door) → to_location, без delivery_point', () => {
+    const p = buildPayload(
+      makeOrder({ deliveryType: 'courier', deliveryAddress: 'ул. Ленина, 1', deliveryPvzCode: null }),
+      [makeItem()],
+      buildOpts,
+    );
+    expect(p.delivery_point).toBeUndefined();
+    expect(p.to_location).toBeDefined();
+    expect(p.to_location?.address).toBe('ул. Ленина, 1');
+  });
+
+  it('from_location из конфига (нет shipment_point)', () => {
+    const p = buildPayload(makeOrder(), [makeItem()], buildOpts);
+    expect(p.from_location?.code).toBe(buildOpts.fromLocationCode);
+    expect(p.shipment_point).toBeUndefined();
+  });
+
+  it('shipment_point взаимоисключим с from_location', () => {
+    const p = buildPayload(makeOrder(), [makeItem()], { ...buildOpts, shipmentPoint: 'WH-1' });
+    expect(p.shipment_point).toBe('WH-1');
+    expect(p.from_location).toBeUndefined();
+  });
+
+  it('packages агрегирует вес позиций (qty × дефолт)', () => {
+    const p = buildPayload(makeOrder(), [makeItem({ quantity: 2 })], buildOpts);
+    // 2 × дефолтный вес магазина
+    expect(p.packages[0].weight).toBe(buildOpts.defaultDimensions.weightG * 2);
+    expect(p.packages[0].items).toHaveLength(1);
+    expect(p.packages[0].items[0].ware_key).toBe('v-1');
+  });
+
+  it('ПВЗ-режим без кода ПВЗ → ошибка', () => {
+    expect(() =>
+      buildPayload(makeOrder({ deliveryType: 'pvz', deliveryPvzCode: null }), [makeItem()], buildOpts),
+    ).toThrow();
+  });
+});
+
+describe('cdek/order — createShipment (mock-создание, repository замокан)', () => {
+  beforeEach(() => {
+    repoState.shipment = null;
+    vi.clearAllMocks();
+    getOrderByIdMock.mockResolvedValue({ order: makeOrder(), items: [makeItem()] });
+  });
+
+  it('mock: создаёт отправление с фейковым uuid/треком, is_mock=true', async () => {
+    const svc = new OrderService(new CdekManager({ config: mockCfg }));
+    const sh = await svc.createShipment('ord-1');
+    expect(createShipmentMock).toHaveBeenCalledTimes(1);
+    expect(String((sh as unknown as Record<string, unknown>).cdekUuid)).toMatch(/^mock-/);
+    expect(String((sh as unknown as Record<string, unknown>).cdekNumber)).toMatch(/^1\d{9}$/);
+    expect((sh as unknown as Record<string, unknown>).isMock).toBe(true);
+  });
+
+  it('идемпотентность: повторный createShipment не создаёт второе отправление', async () => {
+    const svc = new OrderService(new CdekManager({ config: mockCfg }));
+    const first = await svc.createShipment('ord-1');
+    createShipmentMock.mockClear();
+    // повтор — отправление уже с cdek_uuid → возвращается существующее
+    const second = await svc.createShipment('ord-1');
+    expect(createShipmentMock).not.toHaveBeenCalled();
+    expect((second as unknown as Record<string, unknown>).cdekUuid).toBe((first as unknown as Record<string, unknown>).cdekUuid);
+  });
+
+  it('pickup → precondition ошибка', async () => {
+    getOrderByIdMock.mockResolvedValue({ order: makeOrder({ deliveryType: 'pickup' }), items: [makeItem()] });
+    const svc = new OrderService(new CdekManager({ config: mockCfg }));
+    await expect(svc.createShipment('ord-1')).rejects.toThrow();
+  });
+});
+
+describe('cdek/order — createShipment (real, замоканный client)', () => {
+  beforeEach(() => {
+    repoState.shipment = null;
+    vi.clearAllMocks();
+    getOrderByIdMock.mockResolvedValue({ order: makeOrder(), items: [makeItem()] });
+  });
+
+  it('real: POST /v2/orders, uuid из entity сохраняется', async () => {
+    const realCfg = getCdekConfig({
+      NODE_ENV: 'test',
+      CDEK_ACCOUNT: 'acc',
+      CDEK_SECRET: 'sec',
+      CDEK_BASE_URL: 'https://api.edu.cdek.ru',
+    });
+    const fetchImpl = vi.fn(async (url: string) => {
+      expect(String(url)).toContain('/v2/orders');
+      return new Response(JSON.stringify({ entity: { uuid: 'real-uuid-1' } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch;
+    const tokenCache = { getToken: vi.fn(async () => 'tok'), invalidate: vi.fn(async () => {}) };
+    const svc = new OrderService(new CdekManager({ config: realCfg, fetchImpl, tokenCache }));
+    const sh = await svc.createShipment('ord-1');
+    expect((sh as unknown as Record<string, unknown>).cdekUuid).toBe('real-uuid-1');
+    expect((sh as unknown as Record<string, unknown>).isMock).toBe(false);
+  });
+});
