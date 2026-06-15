@@ -2,6 +2,11 @@ import Link from 'next/link';
 
 import { sql } from '@/lib/db/client';
 import { can } from '@/lib/auth/rbac';
+import { isModuleEnabled } from '@/lib/config/modules';
+import {
+  getShipmentByOrderId,
+  listStatusLogByOrderId,
+} from '@/lib/cdek/repository';
 import { formatPrice } from '@/lib/admin/format';
 import {
   deliveryTypeLabel,
@@ -23,6 +28,11 @@ import {
   DeliveryStatusBadge,
 } from '../_components/StatusBadges';
 import { OrderActionsPanel } from '../_components/OrderActionsPanel';
+import {
+  CdekBlock,
+  type CdekShipmentView,
+  type CdekStatusLogView,
+} from './_components/CdekBlock';
 
 /**
  * Карточка заказа админки (docs/07 §5, Пакет 3.E).
@@ -63,6 +73,42 @@ async function loadHistory(orderId: string): Promise<OrderStatusHistory[]> {
     ORDER BY created_at DESC, id DESC
   `;
   return rows.map(mapHistory);
+}
+
+/**
+ * Серверно подгружает отправление СДЭК и историю его статусов для блока СДЭК.
+ * Возвращает сериализуемые view (даты → ISO-строки) для клиентского компонента.
+ */
+async function loadCdek(
+  orderId: string,
+): Promise<{ shipment: CdekShipmentView | null; history: CdekStatusLogView[] }> {
+  const shipment = await getShipmentByOrderId(orderId);
+  const log = await listStatusLogByOrderId(orderId);
+  return {
+    shipment: shipment
+      ? {
+          id: shipment.id,
+          cdekUuid: shipment.cdekUuid,
+          cdekNumber: shipment.cdekNumber,
+          statusCode: shipment.statusCode,
+          statusName: shipment.statusName,
+          statusAt: shipment.statusAt ? shipment.statusAt.toISOString() : null,
+          pvzCode: shipment.pvzCode,
+          deliveryMode: shipment.deliveryMode,
+          printUrl: shipment.printUrl,
+          isMock: shipment.isMock,
+          error: shipment.error,
+        }
+      : null,
+    history: log.map((h) => ({
+      id: h.id,
+      statusCode: h.statusCode,
+      statusName: h.statusName,
+      cityName: h.cityName,
+      receivedAt: h.receivedAt.toISOString(),
+      isMock: h.isMock,
+    })),
+  };
 }
 
 /** Переводит код статуса в лейбл соответствующей машины (для ленты истории). */
@@ -116,6 +162,11 @@ export default async function OrderDetailPage({
   // UI-гейт панели действий (право orders.write); сервер всё равно проверяет
   // право внутри каждого Server Action — это лишь скрытие кнопок без права.
   const canWrite = can(guard.user, 'orders.write');
+
+  // Блок СДЭК: виден только при включённом модуле cdek и праве cdek.manage
+  // (сервер всё равно проверяет право внутри каждого Server Action).
+  const showCdek = isModuleEnabled('cdek') && can(guard.user, 'cdek.manage');
+  const cdek = showCdek ? await loadCdek(order.id) : null;
 
   return (
     <div>
@@ -290,6 +341,15 @@ export default async function OrderDetailPage({
               status={order.status}
               paymentStatus={order.paymentStatus}
               deliveryStatus={order.deliveryStatus}
+            />
+          ) : null}
+
+          {cdek ? (
+            <CdekBlock
+              orderId={order.id}
+              shipment={cdek.shipment}
+              history={cdek.history}
+              deliveryType={order.deliveryType}
             />
           ) : null}
         </div>

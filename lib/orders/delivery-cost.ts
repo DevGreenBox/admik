@@ -1,0 +1,179 @@
+/**
+ * Адаптер расчёта стоимости доставки (docs/08 §5, пакет E Этапа 4).
+ *
+ * РАЗВЯЗКА orders↔cdek. Слой lib/orders НЕ должен жёстко зависеть от lib/cdek —
+ * модуль cdek опционален (флаг в lib/config/modules) и может быть выключен на
+ * деплое. Поэтому здесь нет статического `import … from '@/lib/cdek'`: cdek
+ * подключается ЛЕНИВЫМ динамическим import-ом ТОЛЬКО когда:
+ *   1) модуль cdek включён (isModuleEnabled('cdek')), И
+ *   2) тип доставки требует расчёта (не pickup), И
+ *   3) есть назначение (cityCode | postalCode | pvzCode).
+ * Иначе работает дефолтный stub-провайдер (0.00) — поведение Этапа 3 сохранено,
+ * а сборка/тесты при выключенном cdek не тянут его транзитивно.
+ *
+ * ВЫБОР РЕШЕНИЯ (ленивый import vs реестр провайдеров): выбран ленивый
+ * динамический import внутри адаптера. Он строго слабее реестра по связанности
+ * (orders не знает о cdek на уровне типов и модульного графа), не требует точки
+ * регистрации при старте процесса и естественно ложится на module-gate. Чистая
+ * часть — `needsCdekProvider` (выбор провайдера) — тестируется без сети/cdek.
+ *
+ * Сети/БД здесь нет: при пустых CDEK_* менеджер СДЭК в mock-режиме (isCdekMock)
+ * считает по формуле §5.3. Порог бесплатной доставки и промокоды применяются
+ * ПОВЕРХ — в calculateQuote (lib/orders/pricing), не здесь.
+ */
+
+import { isModuleEnabled } from '@/lib/config/modules';
+import type { DeliveryType } from './types';
+
+/** Позиция корзины с (опц.) габаритами товара/варианта (миграция 0018, §3.3). */
+export interface DeliveryCostLine {
+  qty: number;
+  weightG?: number | null;
+  lengthCm?: number | null;
+  widthCm?: number | null;
+  heightCm?: number | null;
+}
+
+/** Назначение доставки (anti-tamper: отправление — серверное, см. cdek config). */
+export interface DeliveryDestination {
+  cityCode?: number;
+  postalCode?: string;
+  pvzCode?: string;
+  cityName?: string;
+}
+
+/** Вход расчёта стоимости доставки. */
+export interface DeliveryCostInput {
+  deliveryType: DeliveryType;
+  /** Позиции для агрегации упаковки (вес/габариты). */
+  lines: readonly DeliveryCostLine[];
+  destination: DeliveryDestination;
+  /** Явный код тарифа; иначе — дефолт магазина (CDEK_DEFAULT_TARIFF). */
+  tariffCode?: number;
+}
+
+/** Источник расчёта (для прозрачности/аудита). */
+export type DeliveryCostSource = 'stub' | 'cdek' | 'cdek_mock';
+
+/** Результат расчёта стоимости доставки. */
+export interface DeliveryCostResult {
+  /** Стоимость доставки (строка NUMERIC(14,2)). '0.00' для stub/pickup. */
+  cost: string;
+  /** Срок доставки (дней, минимум) — null для stub. */
+  etaDays: number | null;
+  periodMin: number | null;
+  periodMax: number | null;
+  tariffCode: number | null;
+  source: DeliveryCostSource;
+  provider: string;
+}
+
+/** Провайдер расчёта доставки (контракт развязки). */
+export interface DeliveryCostProvider {
+  quote(input: DeliveryCostInput): Promise<DeliveryCostResult>;
+}
+
+const STUB_RESULT: DeliveryCostResult = {
+  cost: '0.00',
+  etaDays: null,
+  periodMin: null,
+  periodMax: null,
+  tariffCode: null,
+  source: 'stub',
+  provider: 'stub',
+};
+
+/** Дефолтный провайдер 0.00 (поведение Этапа 3). */
+export const stubDeliveryProvider: DeliveryCostProvider = {
+  async quote(): Promise<DeliveryCostResult> {
+    return { ...STUB_RESULT };
+  },
+};
+
+/** Есть ли в назначении хоть один признак для расчёта СДЭК. */
+function hasDestination(d: DeliveryDestination): boolean {
+  return (
+    d.cityCode !== undefined ||
+    (d.postalCode !== undefined && d.postalCode !== '') ||
+    (d.pvzCode !== undefined && d.pvzCode !== '')
+  );
+}
+
+/**
+ * ЧИСТЫЙ выбор провайдера: нужен ли cdek-расчёт. pickup — никогда (самовывоз
+ * бесплатен). cdek выключен / нет назначения — stub. Тестируется без сети.
+ */
+export function needsCdekProvider(args: {
+  cdekEnabled: boolean;
+  deliveryType: DeliveryType;
+  hasDestination: boolean;
+}): boolean {
+  if (args.deliveryType === 'pickup') return false;
+  if (!args.cdekEnabled) return false;
+  return args.hasDestination;
+}
+
+/** deliveryType заказа → режим доставки СДЭК (для расчёта тарифа). */
+function toDeliveryMode(deliveryType: DeliveryType): 'pvz' | 'door' {
+  return deliveryType === 'courier' ? 'door' : 'pvz';
+}
+
+/**
+ * Расчёт стоимости доставки. Развязка orders↔cdek через ленивый импорт.
+ * Сам по себе НЕ применяет порог бесплатной доставки/промокоды — это делает
+ * calculateQuote поверх возвращённого cost.
+ */
+export async function computeDeliveryCost(
+  input: DeliveryCostInput,
+): Promise<DeliveryCostResult> {
+  const useCdek = needsCdekProvider({
+    cdekEnabled: isModuleEnabled('cdek'),
+    deliveryType: input.deliveryType,
+    hasDestination: hasDestination(input.destination),
+  });
+
+  if (!useCdek) {
+    return stubDeliveryProvider.quote(input);
+  }
+
+  // Ленивый импорт cdek ТОЛЬКО при включённом модуле — нет статической связки.
+  try {
+    const [{ Calculator }, { getCdekManager }] = await Promise.all([
+      import('@/lib/cdek/services/calculator'),
+      import('@/lib/cdek/manager'),
+    ]);
+    const manager = getCdekManager();
+    const calc = new Calculator(manager);
+
+    const result = await calc.calculate({
+      to: {
+        code: input.destination.cityCode,
+        postalCode: input.destination.postalCode,
+      },
+      lines: input.lines.map((l) => ({
+        qty: l.qty,
+        weightG: l.weightG ?? null,
+        lengthCm: l.lengthCm ?? null,
+        widthCm: l.widthCm ?? null,
+        heightCm: l.heightCm ?? null,
+      })),
+      tariffCode: input.tariffCode,
+    });
+    // deliveryMode влияет лишь на формулу mock-надбавки курьера; на расчёт по
+    // конкретному тарифу режим уже зашит в tariffCode — оставляем как есть.
+    void toDeliveryMode(input.deliveryType);
+
+    return {
+      cost: result.deliverySum,
+      etaDays: result.periodMin,
+      periodMin: result.periodMin,
+      periodMax: result.periodMax,
+      tariffCode: result.tariffCode,
+      source: manager.isMock ? 'cdek_mock' : 'cdek',
+      provider: 'cdek',
+    };
+  } catch {
+    // Любой сбой расчёта (сеть/конфиг) — деградация к stub, не ломаем quote.
+    return stubDeliveryProvider.quote(input);
+  }
+}

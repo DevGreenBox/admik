@@ -28,7 +28,12 @@ import {
   type QuoteResult,
 } from './pricing';
 import { validatePromo, type PromoValidationResult } from './promo';
-import type { Order, OrderItem, PromoCode } from './types';
+import {
+  computeDeliveryCost,
+  type DeliveryDestination,
+  type DeliveryCostLine,
+} from './delivery-cost';
+import type { DeliveryType, Order, OrderItem, PromoCode } from './types';
 import type { CartQuoteInput, CreateOrderInput } from './schemas';
 
 // Сентинель для COALESCE(variant_id, ...) в inventory_unit_uniq (0010).
@@ -282,19 +287,29 @@ export async function resolveCartLine(input: {
 }
 
 // =============================================================================
-// Доставка (заглушка под СДЭК Этап 4; реальный расчёт — §7).
+// Доставка (расчёт через адаптер lib/orders/delivery-cost, docs/08 §5).
 // =============================================================================
 
 /**
- * Базовая стоимость доставки (копейки) — ЗАГЛУШКА Этапа 3. СДЭК-расчёт по
- * городу/ПВЗ приходит в Этапе 4 (§7). Самовывоз (pickup) → 0.
- * Здесь нет тарифа в env, поэтому курьер/ПВЗ → 0 (порог/free_delivery всё равно
- * обрабатываются в pricing); место стыковки помечено TODO.
+ * Стоимость доставки через адаптер (развязка orders↔cdek). При выключенном
+ * модуле cdek / самовывозе / отсутствии назначения → '0.00' (поведение Этапа 3
+ * сохранено). При включённом cdek + назначении → расчёт СДЭК (mock без сети).
+ * Порог бесплатной доставки и промокоды применяются ПОВЕРХ — в calculateQuote.
  */
-function stubDeliveryCost(deliveryType: string | undefined): string {
-  // TODO(Этап 4, §7): заменить на расчёт СДЭК по городу/типу/ПВЗ.
-  if (deliveryType === 'pickup') return '0.00';
-  return '0.00';
+async function resolveDeliveryCost(args: {
+  deliveryType: DeliveryType | undefined;
+  lines: ReadonlyArray<{ qty: number }>;
+  city?: string;
+  pvzCode?: string;
+}): Promise<string> {
+  const deliveryType: DeliveryType = args.deliveryType ?? 'courier';
+  const destination: DeliveryDestination = {
+    cityName: args.city,
+    pvzCode: args.pvzCode,
+  };
+  const lines: DeliveryCostLine[] = args.lines.map((l) => ({ qty: l.qty }));
+  const res = await computeDeliveryCost({ deliveryType, lines, destination });
+  return res.cost;
 }
 
 // =============================================================================
@@ -364,11 +379,18 @@ export async function quoteCart(
     }
   }
 
+  const deliveryCost = await resolveDeliveryCost({
+    deliveryType: input.delivery?.type,
+    lines,
+    city: input.delivery?.city,
+    pvzCode: input.delivery?.pvzCode,
+  });
+
   const quote = calculateQuote({
     lines,
     promo: appliedPromo,
     delivery: {
-      cost: stubDeliveryCost(input.delivery?.type),
+      cost: deliveryCost,
       freeThreshold,
     },
   });
@@ -547,11 +569,18 @@ export async function createOrder(
     promoRow = found.promo;
   }
 
+  const deliveryCost = await resolveDeliveryCost({
+    deliveryType: input.delivery.type,
+    lines: resolved,
+    city: input.delivery.city,
+    pvzCode: input.delivery.pvzCode,
+  });
+
   const quote = calculateQuote({
     lines: resolved,
     promo: appliedPromo,
     delivery: {
-      cost: stubDeliveryCost(input.delivery.type),
+      cost: deliveryCost,
       freeThreshold: env.SHOP_FREE_DELIVERY_THRESHOLD,
     },
   });
