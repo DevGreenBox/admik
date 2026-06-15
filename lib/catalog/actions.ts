@@ -33,6 +33,7 @@ import {
   BrandLogoUploadSchema,
 } from './schemas';
 import { listCategoryEdges, countCategoryChildren } from './repository';
+import { CatalogError } from './errors';
 import { canMoveCategory } from './tree';
 import { rebuildProductAttributesCache } from './cache';
 import { slugify, uniquifySlug } from './slug';
@@ -51,16 +52,6 @@ import { slugify, uniquifySlug } from './slug';
 // -----------------------------------------------------------------------------
 // Общие хелперы.
 // -----------------------------------------------------------------------------
-
-/** Ошибка домена каталога — маппится defineAction в error:'internal' (или ловится). */
-export class CatalogError extends Error {
-  readonly code: string;
-  constructor(code: string, message: string) {
-    super(message);
-    this.code = code;
-    this.name = 'CatalogError';
-  }
-}
 
 /** Бросает, если модуль каталога выключен. */
 function assertCatalogEnabled(): void {

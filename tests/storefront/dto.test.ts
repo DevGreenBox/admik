@@ -1,0 +1,242 @@
+import { describe, it, expect } from 'vitest';
+import {
+  toBrandDto,
+  toFullBrandDto,
+  toProductListItemDto,
+  toProductDetailDto,
+  toVariantDto,
+  toCategoryTreeDto,
+  computeInStock,
+  effectiveVariantPrice,
+} from '@/lib/storefront/dto';
+import type {
+  Brand,
+  BrandRef,
+  CategoryTreeNode,
+  InventoryItem,
+  ProductDetail,
+  ProductListRow,
+  ProductVariant,
+} from '@/lib/catalog/types';
+
+const D = new Date('2026-06-01T00:00:00Z');
+
+const brandRef: BrandRef = {
+  id: 'b1',
+  slug: 'bosch',
+  name: 'Bosch',
+  logoKey: 'brands/bosch.png',
+  logoUrl: 'https://cdn/bosch.png',
+};
+
+describe('storefront/dto — бренды', () => {
+  it('toBrandDto отдаёт только slug/name/logoUrl (без logoKey/id)', () => {
+    const dto = toBrandDto(brandRef);
+    expect(dto).toEqual({
+      slug: 'bosch',
+      name: 'Bosch',
+      logoUrl: 'https://cdn/bosch.png',
+    });
+    // Не должно быть внутренних полей.
+    expect(dto).not.toHaveProperty('id');
+    expect(dto).not.toHaveProperty('logoKey');
+  });
+
+  it('toBrandDto(null) → null', () => {
+    expect(toBrandDto(null)).toBeNull();
+  });
+
+  it('toFullBrandDto скрывает id/sort/isActive/даты', () => {
+    const brand: Brand = {
+      id: 'b1',
+      slug: 'bosch',
+      name: 'Bosch',
+      description: 'desc',
+      logoKey: 'k',
+      logoUrl: 'u',
+      isActive: true,
+      sort: 5,
+      seoTitle: 't',
+      seoDescription: 'd',
+      createdAt: D,
+      updatedAt: D,
+    };
+    const dto = toFullBrandDto(brand);
+    expect(dto).not.toHaveProperty('id');
+    expect(dto).not.toHaveProperty('logoKey');
+    expect(dto).not.toHaveProperty('isActive');
+    expect(dto).not.toHaveProperty('sort');
+    expect(dto).not.toHaveProperty('createdAt');
+    expect(dto.slug).toBe('bosch');
+  });
+});
+
+describe('storefront/dto — список товаров', () => {
+  const row: ProductListRow = {
+    id: 'p1',
+    sku: 'SKU1',
+    slug: 'brake-pad',
+    name: 'Brake pad',
+    status: 'active',
+    basePrice: '790.00',
+    compareAtPrice: '1000.00',
+    discountPct: 21,
+    onSale: true,
+    isFeatured: true,
+    effectiveIsNew: true,
+    brand: brandRef,
+    totalStock: 3,
+    primaryMediaUrl: 'https://cdn/img.jpg',
+    createdAt: D,
+  };
+
+  it('маппит цену/скидку и inStock из остатка; не утекает status/id/sku', () => {
+    const dto = toProductListItemDto(row);
+    expect(dto.price).toBe('790.00');
+    expect(dto.compareAtPrice).toBe('1000.00');
+    expect(dto.discountPct).toBe(21);
+    expect(dto.onSale).toBe(true);
+    expect(dto.isNew).toBe(true);
+    expect(dto.isFeatured).toBe(true);
+    expect(dto.brand).toEqual({ slug: 'bosch', name: 'Bosch', logoUrl: 'https://cdn/bosch.png' });
+    expect(dto.imageUrl).toBe('https://cdn/img.jpg');
+    expect(dto.inStock).toBe(true);
+    // Внутренние поля наружу не отдаём.
+    expect(dto).not.toHaveProperty('id');
+    expect(dto).not.toHaveProperty('status');
+    expect(dto).not.toHaveProperty('totalStock');
+  });
+
+  it('inStock=false при нулевом остатке', () => {
+    expect(toProductListItemDto({ ...row, totalStock: 0 }).inStock).toBe(false);
+  });
+});
+
+describe('storefront/dto — computeInStock / цена варианта', () => {
+  const inv: InventoryItem[] = [
+    { id: 'i1', productId: 'p1', variantId: 'v1', warehouseCode: 'W', quantity: 0, reserved: 0, updatedAt: D },
+    { id: 'i2', productId: 'p1', variantId: 'v2', warehouseCode: 'W', quantity: 5, reserved: 0, updatedAt: D },
+  ];
+
+  it('computeInStock по товару — true, если есть положительный остаток', () => {
+    expect(computeInStock(inv)).toBe(true);
+  });
+
+  it('computeInStock по варианту — учитывает только его строки', () => {
+    expect(computeInStock(inv, 'v1')).toBe(false);
+    expect(computeInStock(inv, 'v2')).toBe(true);
+  });
+
+  it('effectiveVariantPrice: override, иначе base+delta', () => {
+    const base: ProductVariant = {
+      id: 'v', productId: 'p', sku: 's', name: '', priceOverride: null,
+      priceDelta: '50.00', compareAtPrice: null, isActive: true, sort: 0,
+      attributesCache: {}, createdAt: D, updatedAt: D,
+    };
+    expect(effectiveVariantPrice(base, '100.00')).toBe('150.00');
+    expect(effectiveVariantPrice({ ...base, priceOverride: '200.00' }, '100.00')).toBe('200.00');
+  });
+});
+
+describe('storefront/dto — карточка товара', () => {
+  const variant: ProductVariant = {
+    id: 'v1', productId: 'p1', sku: 'V1', name: 'M',
+    priceOverride: null, priceDelta: '0.00', compareAtPrice: null,
+    isActive: true, sort: 0, attributesCache: { size: 'M' }, createdAt: D, updatedAt: D,
+  };
+  const inactiveVariant: ProductVariant = { ...variant, id: 'v2', isActive: false };
+
+  const product: ProductDetail = {
+    id: 'p1', sku: 'SKU1', slug: 'coat', name: 'Coat', description: 'nice',
+    status: 'active', basePrice: '1000.00', compareAtPrice: '1500.00',
+    isFeatured: false, isNew: null, brandId: 'b1',
+    attributesCache: { color: 'white' }, seoTitle: null, seoDescription: null,
+    createdAt: D, updatedAt: D,
+    categories: [{ categoryId: 'c1', isPrimary: true }],
+    variants: [variant, inactiveVariant],
+    attributes: [],
+    media: [
+      { id: 'm1', productId: 'p1', variantId: null, storageKey: 'media/secret-key.jpg',
+        url: 'https://cdn/a.jpg', type: 'image', mime: 'image/jpeg', alt: 'a',
+        width: 10, height: 10, sizeBytes: 999, sort: 0, isPrimary: true, createdAt: D },
+    ],
+    inventory: [
+      { id: 'i1', productId: 'p1', variantId: 'v1', warehouseCode: 'W', quantity: 2, reserved: 0, updatedAt: D },
+    ],
+    brand: brandRef,
+  };
+
+  it('маппит цену/скидку, бренд, категории-slug, медиа без storageKey', () => {
+    const dto = toProductDetailDto(product, {
+      effectiveIsNew: true,
+      categorySlugs: ['outerwear'],
+    });
+    expect(dto.slug).toBe('coat');
+    expect(dto.price).toBe('1000.00');
+    expect(dto.discountPct).toBe(33); // round((1500-1000)/1500*100)
+    expect(dto.onSale).toBe(true);
+    expect(dto.isNew).toBe(true);
+    expect(dto.brand?.slug).toBe('bosch');
+    expect(dto.categories).toEqual(['outerwear']);
+    expect(dto.inStock).toBe(true);
+    // Медиа — без внутреннего storageKey/sizeBytes.
+    expect(dto.media[0]).not.toHaveProperty('storageKey');
+    expect(dto.media[0]).not.toHaveProperty('sizeBytes');
+    expect(dto.media[0]!.url).toBe('https://cdn/a.jpg');
+    // Внутренние поточные поля карточки не утекают.
+    expect(dto).not.toHaveProperty('id');
+    expect(dto).not.toHaveProperty('status');
+    expect(dto).not.toHaveProperty('attributesCache');
+  });
+
+  it('отдаёт только активные варианты, у варианта inStock и без сырого id остатка', () => {
+    const dto = toProductDetailDto(product, { effectiveIsNew: false, categorySlugs: [] });
+    expect(dto.variants).toHaveLength(1);
+    const v = dto.variants[0]!;
+    expect(v.id).toBe('v1');
+    expect(v.inStock).toBe(true);
+    expect(v.attributes).toEqual({ size: 'M' });
+    expect(v).not.toHaveProperty('priceDelta');
+    expect(v).not.toHaveProperty('productId');
+  });
+
+  it('toVariantDto наследует compareAtPrice товара, считает скидку', () => {
+    const dto = toVariantDto(variant, product);
+    // variant.compareAtPrice=null → наследует product 1500.
+    expect(dto.compareAtPrice).toBe('1500.00');
+    expect(dto.onSale).toBe(true);
+    expect(dto.discountPct).toBe(33);
+  });
+});
+
+describe('storefront/dto — дерево категорий', () => {
+  const tree: CategoryTreeNode[] = [
+    {
+      id: 'c1', parentId: null, slug: 'men', name: 'Men', description: '',
+      sort: 0, isActive: true, seoTitle: null, seoDescription: null,
+      createdAt: D, updatedAt: D,
+      children: [
+        {
+          id: 'c2', parentId: 'c1', slug: 'coats', name: 'Coats', description: 'd',
+          sort: 0, isActive: true, seoTitle: null, seoDescription: null,
+          createdAt: D, updatedAt: D, children: [],
+        },
+        {
+          id: 'c3', parentId: 'c1', slug: 'hidden', name: 'Hidden', description: '',
+          sort: 1, isActive: false, seoTitle: null, seoDescription: null,
+          createdAt: D, updatedAt: D, children: [],
+        },
+      ],
+    },
+  ];
+
+  it('скрывает неактивные ветви, отдаёт slug/name/description/children', () => {
+    const dto = toCategoryTreeDto(tree);
+    expect(dto).toHaveLength(1);
+    expect(dto[0]!.slug).toBe('men');
+    expect(dto[0]!.children).toHaveLength(1);
+    expect(dto[0]!.children[0]!.slug).toBe('coats');
+    expect(dto[0]!).not.toHaveProperty('id');
+    expect(dto[0]!).not.toHaveProperty('isActive');
+  });
+});
