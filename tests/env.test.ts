@@ -36,4 +36,22 @@ describe('config/env', () => {
     expect(env.REDIS_URL).toBeUndefined();
     expect(env.S3_BUCKET).toBeUndefined();
   });
+
+  it('заказы: дефолты порога доставки (0) и префикса номера (пусто)', () => {
+    const env = getEnv({ NODE_ENV: 'test' });
+    expect(env.SHOP_FREE_DELIVERY_THRESHOLD).toBe(0);
+    expect(env.SHOP_ORDER_PREFIX).toBe('');
+    // SHOP_CURRENCY уже существует — дефолт сохранён.
+    expect(env.SHOP_CURRENCY).toBe('RUB');
+  });
+
+  it('заказы: SHOP_FREE_DELIVERY_THRESHOLD приводится из строки env (coerce)', () => {
+    const env = getEnv({ SHOP_FREE_DELIVERY_THRESHOLD: '3000', SHOP_ORDER_PREFIX: 'GA' });
+    expect(env.SHOP_FREE_DELIVERY_THRESHOLD).toBe(3000);
+    expect(env.SHOP_ORDER_PREFIX).toBe('GA');
+  });
+
+  it('заказы: отрицательный порог доставки отклоняется', () => {
+    expect(() => getEnv({ SHOP_FREE_DELIVERY_THRESHOLD: '-100' })).toThrow();
+  });
 });

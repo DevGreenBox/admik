@@ -53,6 +53,15 @@ const envSchema = z.object({
   // Порог «новизны» товара в днях (docs/06 §3.2): если products.is_new IS NULL,
   // товар «новый», пока created_at в пределах SHOP_NEW_PRODUCT_DAYS. coerce — из строки env.
   SHOP_NEW_PRODUCT_DAYS: z.coerce.number().int().min(0).default(30),
+
+  // Заказы (Этап 3, docs/07 §3.3, §8 пакет F) — без хардкодов магазина:
+  // Порог бесплатной доставки. Если (items_total − discount_total) ≥ порога →
+  // delivery_total = 0. По умолчанию 0 = выключено (для Gang Auto = 3000).
+  // coerce — из строки env.
+  SHOP_FREE_DELIVERY_THRESHOLD: z.coerce.number().min(0).default(0),
+  // Префикс человекочитаемого номера заказа (docs/07 §2.7): `ПРЕФИКС-ГОД-NNNNNN`.
+  // По умолчанию пусто (номер вида `2026-000123`); для магазина задаётся в env.
+  SHOP_ORDER_PREFIX: z.string().default(''),
 });
 
 export type Env = z.infer<typeof envSchema>;
