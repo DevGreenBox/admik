@@ -99,7 +99,7 @@
 | № | Файл | Подсистема | Содержание |
 |---|---|---|---|
 | `0019` | `0019_shop_settings.sql` | 5.4 | `CREATE TABLE shop_settings` (setting_key citext PK, value jsonb, updated_at, updated_by FK→users), CHECK `jsonb_typeof(value)='object'`, GRANT |
-| `0020` | `0020_shop_settings_seed.sql` | 5.4 | Идемпотентный seed пустых ключей `branding/currency/units/module_overrides/seo`/`shop` (`ON CONFLICT DO NOTHING`) |
+| `0020` | `0020_shop_settings_seed.sql` | 5.4 | Идемпотентный seed пустых ключей `branding/currency/units/module_overrides/seo` (`ON CONFLICT DO NOTHING`) |
 | `0021` | `0021_seo_entity_fields.sql` | 5.3 | ALTER products/categories/brands: `og_title/og_description/og_image_key/canonical_url` text, `noindex` boolean DEFAULT false |
 | `0022` | `0022_cms_pages.sql` | 5.1 | `CREATE TABLE cms_pages` (slug citext UNIQUE, status триада, published_at, seo_*/og_image_url/canonical_url/noindex, sitemap_priority/changefreq, created_by/updated_by) |
 | `0023` | `0023_cms_page_sections.sql` | 5.1 | `CREATE TABLE cms_page_sections` (page_id FK CASCADE, section_key, type CHECK, content jsonb, display_order, enabled) + CHECK размера content; **опц.** `cms_page_revisions` в этой же миграции либо отдельной |
