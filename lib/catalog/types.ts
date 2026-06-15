@@ -70,8 +70,43 @@ export interface Product {
   status: ProductStatus;
   /** NUMERIC(14,2) как строка — точность не теряется. */
   basePrice: string;
+  /** Цена «было» для сравнения (docs/06 §3.1); null → нет акции. Скидка вычисляется. */
+  compareAtPrice: string | null;
+  /** Ручной флаг «Хит/Рекомендуемый» (docs/06 §3.2). */
+  isFeatured: boolean;
+  /** Троичная «новизна»: null → вычисляемо по дате; true/false → override (docs/06 §3.2). */
+  isNew: boolean | null;
+  /** Бренд товара (docs/06 §3.3); null → без бренда. */
+  brandId: string | null;
   /** Денормализованная проекция характеристик (ADR-007). */
   attributesCache: Record<string, unknown>;
+  seoTitle: string | null;
+  seoDescription: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/** Краткая ссылка на бренд для развёрнутой проекции товара (карточка/список). */
+export interface BrandRef {
+  id: string;
+  slug: string;
+  name: string;
+  logoKey: string | null;
+  logoUrl: string | null;
+}
+
+/** Бренд / производитель (brands, docs/06 §3.3). */
+export interface Brand {
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+  /** Ключ объекта логотипа в хранилище (как product_media.storage_key). */
+  logoKey: string | null;
+  /** Публичный URL логотипа (если хранилище его отдаёт). */
+  logoUrl: string | null;
+  isActive: boolean;
+  sort: number;
   seoTitle: string | null;
   seoDescription: string | null;
   createdAt: Date;
@@ -88,6 +123,8 @@ export interface ProductVariant {
   priceOverride: string | null;
   /** Надбавка к basePrice. */
   priceDelta: string;
+  /** Цена «было» на уровне варианта; null → наследуется от товара (docs/06 §3.1). */
+  compareAtPrice: string | null;
   isActive: boolean;
   sort: number;
   attributesCache: Record<string, unknown>;
@@ -167,6 +204,8 @@ export interface ProductDetail extends Product {
   attributes: ProductAttribute[];
   media: ProductMedia[];
   inventory: InventoryItem[];
+  /** Развёрнутый бренд (LEFT JOIN brands), если у товара есть brand_id. */
+  brand: BrandRef | null;
 }
 
 /** Строка списка товаров (компактная проекция для таблицы админки). */
@@ -177,6 +216,18 @@ export interface ProductListRow {
   name: string;
   status: ProductStatus;
   basePrice: string;
+  /** Цена «было» (docs/06 §3.1); null → нет акции. */
+  compareAtPrice: string | null;
+  /** Процент скидки (вычислен из base_price/compare_at_price); null → не на распродаже. */
+  discountPct: number | null;
+  /** Предикат «со скидкой» (compare_at_price > base_price). */
+  onSale: boolean;
+  /** Ручной флаг «Хит/Рекомендуемый». */
+  isFeatured: boolean;
+  /** Вычисленная «новизна» (учитывает override is_new и порог SHOP_NEW_PRODUCT_DAYS). */
+  effectiveIsNew: boolean;
+  /** Бренд товара (компактно), если есть. */
+  brand: BrandRef | null;
   /** Суммарный остаток по всем строкам inventory товара. */
   totalStock: number;
   /** URL главного изображения (is_primary), если есть. */

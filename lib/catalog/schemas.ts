@@ -111,6 +111,11 @@ export const ProductCreateSchema = z
     description: z.string().max(50000).optional().default(''),
     status: z.enum(PRODUCT_STATUSES).optional().default('draft'),
     basePrice: moneySchema.optional().default('0'),
+    // Акционные/каталожные расширения (docs/06 §3.1–§3.3, ADR-009):
+    compareAtPrice: moneySchema.nullish(),
+    isFeatured: z.boolean().optional().default(false),
+    isNew: z.boolean().nullish(), // троичная логика: null=вычисляемо, true/false=override
+    brandId: uuidSchema.nullish(),
     categoryIds: z.array(uuidSchema).optional().default([]),
     primaryCategoryId: uuidSchema.nullish(),
     seoTitle,
@@ -135,6 +140,10 @@ export const ProductUpdateSchema = z.object({
   description: z.string().max(50000).optional(),
   status: z.enum(PRODUCT_STATUSES).optional(),
   basePrice: moneySchema.optional(),
+  compareAtPrice: moneySchema.nullish(),
+  isFeatured: z.boolean().optional(),
+  isNew: z.boolean().nullish(),
+  brandId: uuidSchema.nullish(),
   categoryIds: z.array(uuidSchema).optional(),
   primaryCategoryId: uuidSchema.nullish(),
   seoTitle,
@@ -154,6 +163,7 @@ export const VariantCreateSchema = z.object({
   name: z.string().trim().max(255).optional().default(''),
   priceOverride: moneySchema.nullish(),
   priceDelta: moneySchema.optional().default('0'),
+  compareAtPrice: moneySchema.nullish(),
   isActive: z.boolean().optional().default(true),
   sort: z.number().int().min(0).optional().default(0),
 });
@@ -165,12 +175,53 @@ export const VariantUpdateSchema = z.object({
   name: z.string().trim().max(255).optional(),
   priceOverride: moneySchema.nullish(),
   priceDelta: moneySchema.optional(),
+  compareAtPrice: moneySchema.nullish(),
   isActive: z.boolean().optional(),
   sort: z.number().int().min(0).optional(),
 });
 export type VariantUpdateInput = z.infer<typeof VariantUpdateSchema>;
 
 export const VariantIdSchema = z.object({ id: uuidSchema });
+
+// -----------------------------------------------------------------------------
+// Бренды (docs/06 §3.3, §4.3).
+// -----------------------------------------------------------------------------
+
+export const BrandCreateSchema = z.object({
+  slug: slugSchema.optional(), // если пуст — сгенерируется из name (slugify)
+  name: z.string().trim().min(1).max(255),
+  description: z.string().max(5000).optional().default(''),
+  isActive: z.boolean().optional().default(true),
+  sort: z.number().int().min(0).optional().default(0),
+  seoTitle,
+  seoDescription,
+});
+export type BrandCreateInput = z.infer<typeof BrandCreateSchema>;
+
+export const BrandUpdateSchema = z.object({
+  id: uuidSchema,
+  slug: slugSchema.optional(),
+  name: z.string().trim().min(1).max(255).optional(),
+  description: z.string().max(5000).optional(),
+  isActive: z.boolean().optional(),
+  sort: z.number().int().min(0).optional(),
+  seoTitle,
+  seoDescription,
+});
+export type BrandUpdateInput = z.infer<typeof BrandUpdateSchema>;
+
+export const BrandIdSchema = z.object({ id: uuidSchema });
+
+/**
+ * Загрузка логотипа бренда — как медиа товара: байты Buffer, тип/размер
+ * реально проверяются validateUpload по magic-bytes (storage/validate).
+ */
+export const BrandLogoUploadSchema = z.object({
+  brandId: uuidSchema,
+  filename: z.string().max(255).optional().default('logo'),
+  bytes: z.instanceof(Buffer),
+});
+export type BrandLogoUploadInput = z.infer<typeof BrandLogoUploadSchema>;
 
 // -----------------------------------------------------------------------------
 // Характеристики (§4.5).

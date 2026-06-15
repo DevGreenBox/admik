@@ -46,6 +46,13 @@ const envSchema = z.object({
   // Брендинг магазина.
   SHOP_NAME: z.string().optional(),
   SHOP_LOGO_URL: z.string().url().optional(),
+
+  // Каталог: валюта магазина (docs/06 §3.5) — форматирование цен в слое
+  // представления/Storefront API; в данных каталога цены без символа валюты.
+  SHOP_CURRENCY: z.string().min(1).default('RUB'),
+  // Порог «новизны» товара в днях (docs/06 §3.2): если products.is_new IS NULL,
+  // товар «новый», пока created_at в пределах SHOP_NEW_PRODUCT_DAYS. coerce — из строки env.
+  SHOP_NEW_PRODUCT_DAYS: z.coerce.number().int().min(0).default(30),
 });
 
 export type Env = z.infer<typeof envSchema>;

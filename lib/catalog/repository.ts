@@ -9,9 +9,12 @@
  */
 
 import { sql } from '@/lib/db/client';
+import { getEnv } from '@/lib/config/env';
 import type {
   Attribute,
   AttributeValue,
+  Brand,
+  BrandRef,
   Category,
   CategoryTreeNode,
   InventoryItem,
@@ -24,6 +27,7 @@ import type {
   ProductVariant,
 } from './types';
 import type { CategoryEdge } from './tree';
+import { discountPercent, isOnSale, resolveIsNew } from './pricing';
 
 // =============================================================================
 // Чистые мапперы row→domain (тестируемы без БД).
@@ -69,7 +73,49 @@ export function mapProduct(row: any): Product {
     description: row.description ?? '',
     status: row.status as ProductStatus,
     basePrice: String(row.base_price),
+    compareAtPrice:
+      row.compare_at_price === null || row.compare_at_price === undefined
+        ? null
+        : String(row.compare_at_price),
+    isFeatured: Boolean(row.is_featured),
+    isNew:
+      row.is_new === null || row.is_new === undefined
+        ? null
+        : Boolean(row.is_new),
+    brandId: row.brand_id ?? null,
     attributesCache: asJson(row.attributes_cache),
+    seoTitle: row.seo_title ?? null,
+    seoDescription: row.seo_description ?? null,
+    createdAt: asDate(row.created_at),
+    updatedAt: asDate(row.updated_at),
+  };
+}
+
+/** Маппер развёрнутого бренда из LEFT JOIN (префикс b_); null, если бренда нет. */
+export function mapBrandRef(row: any): BrandRef | null {
+  if (!row || (row.b_id === null || row.b_id === undefined)) {
+    return null;
+  }
+  return {
+    id: row.b_id,
+    slug: row.b_slug,
+    name: row.b_name,
+    logoKey: row.b_logo_key ?? null,
+    logoUrl: row.b_logo_url ?? null,
+  };
+}
+
+/** Полный маппер бренда (brands). */
+export function mapBrand(row: any): Brand {
+  return {
+    id: row.id,
+    slug: row.slug,
+    name: row.name,
+    description: row.description ?? '',
+    logoKey: row.logo_key ?? null,
+    logoUrl: row.logo_url ?? null,
+    isActive: Boolean(row.is_active),
+    sort: Number(row.sort),
     seoTitle: row.seo_title ?? null,
     seoDescription: row.seo_description ?? null,
     createdAt: asDate(row.created_at),
@@ -87,6 +133,10 @@ export function mapVariant(row: any): ProductVariant {
       ? null
       : String(row.price_override),
     priceDelta: String(row.price_delta),
+    compareAtPrice:
+      row.compare_at_price === null || row.compare_at_price === undefined
+        ? null
+        : String(row.compare_at_price),
     isActive: Boolean(row.is_active),
     sort: Number(row.sort),
     attributesCache: asJson(row.attributes_cache),
@@ -233,6 +283,14 @@ export interface ProductListFilter {
   search?: string;
   status?: ProductStatus;
   categoryId?: string;
+  /** Фасет по бренду (docs/06 §3.3). */
+  brandId?: string;
+  /** Подборка «Хиты» — только is_featured. */
+  isFeatured?: boolean;
+  /** Подборка «Новинки» — только с явным флагом is_new = true (override). */
+  isNew?: boolean;
+  /** Подборка «Со скидкой» — только товары с compare_at_price > base_price. */
+  onSale?: boolean;
   page: number;
   pageSize: number;
   sort?: ProductSort;
@@ -252,9 +310,18 @@ export async function listProducts(
   const searchTerm = f.search?.trim() ? `%${f.search.trim()}%` : null;
 
   // Условия фильтрации — каждое значение параметризовано.
+  // onSale/isFeatured/isNew — булевы фасеты витрины (docs/06 §3.1–§3.2):
+  //  - onSale: вычисляемый предикат compare_at_price > base_price;
+  //  - isFeatured: ручной флаг is_featured;
+  //  - isNew: явный override is_new = true (без даты — это фасет витрины «Новинки»).
   const where = sql`
     WHERE (${searchTerm}::text IS NULL OR p.name ILIKE ${searchTerm} OR p.sku ILIKE ${searchTerm})
       AND (${f.status ?? null}::text IS NULL OR p.status = ${f.status ?? null})
+      AND (${f.brandId ?? null}::uuid IS NULL OR p.brand_id = ${f.brandId ?? null})
+      AND (${f.isFeatured ?? null}::boolean IS NULL OR p.is_featured = ${f.isFeatured ?? null})
+      AND (${f.isNew ?? null}::boolean IS NULL OR p.is_new = ${f.isNew ?? null})
+      AND (${f.onSale ?? null}::boolean IS NULL
+           OR (${f.onSale ?? null} = (p.compare_at_price IS NOT NULL AND p.compare_at_price > p.base_price)))
       AND (${f.categoryId ?? null}::uuid IS NULL OR EXISTS (
             SELECT 1 FROM product_categories pc
             WHERE pc.product_id = p.id AND pc.category_id = ${f.categoryId ?? null}
@@ -273,11 +340,14 @@ export async function listProducts(
   const rows = await sql<Record<string, unknown>[]>`
     SELECT
       p.id, p.sku, p.slug, p.name, p.status, p.base_price, p.created_at,
+      p.compare_at_price, p.is_featured, p.is_new, p.brand_id,
+      b.id AS b_id, b.slug AS b_slug, b.name AS b_name, b.logo_key AS b_logo_key,
       COALESCE((SELECT sum(i.quantity) FROM inventory i WHERE i.product_id = p.id), 0) AS total_stock,
       (SELECT m.url FROM product_media m
         WHERE m.product_id = p.id AND m.is_primary
         LIMIT 1) AS primary_media_url
     FROM products p
+    LEFT JOIN brands b ON b.id = p.brand_id
     ${where}
     ${orderBy}
     LIMIT ${pageSize} OFFSET ${offset}
@@ -287,17 +357,37 @@ export async function listProducts(
     SELECT count(*)::text AS count FROM products p ${where}
   `;
 
-  const mapped: ProductListRow[] = rows.map((r: any) => ({
-    id: r.id,
-    sku: r.sku,
-    slug: r.slug,
-    name: r.name,
-    status: r.status as ProductStatus,
-    basePrice: String(r.base_price),
-    totalStock: Number(r.total_stock ?? 0),
-    primaryMediaUrl: r.primary_media_url ?? null,
-    createdAt: r.created_at instanceof Date ? r.created_at : new Date(r.created_at),
-  }));
+  const newDays = getEnv().SHOP_NEW_PRODUCT_DAYS;
+  const now = new Date();
+
+  const mapped: ProductListRow[] = rows.map((r: any) => {
+    const createdAt =
+      r.created_at instanceof Date ? r.created_at : new Date(r.created_at);
+    const basePrice = String(r.base_price);
+    const compareAtPrice =
+      r.compare_at_price === null || r.compare_at_price === undefined
+        ? null
+        : String(r.compare_at_price);
+    const isNew =
+      r.is_new === null || r.is_new === undefined ? null : Boolean(r.is_new);
+    return {
+      id: r.id,
+      sku: r.sku,
+      slug: r.slug,
+      name: r.name,
+      status: r.status as ProductStatus,
+      basePrice,
+      compareAtPrice,
+      discountPct: discountPercent(basePrice, compareAtPrice),
+      onSale: isOnSale(basePrice, compareAtPrice),
+      isFeatured: Boolean(r.is_featured),
+      effectiveIsNew: resolveIsNew(isNew, createdAt, newDays, now),
+      brand: mapBrandRef(r),
+      totalStock: Number(r.total_stock ?? 0),
+      primaryMediaUrl: r.primary_media_url ?? null,
+      createdAt,
+    };
+  });
 
   return { rows: mapped, total: Number(totalRows[0]?.count ?? 0) };
 }
@@ -307,14 +397,19 @@ export async function getProductById(
   id: string,
 ): Promise<ProductDetail | null> {
   const prodRows = await sql<Record<string, unknown>[]>`
-    SELECT id, sku, slug, name, description, status, base_price,
-           attributes_cache, seo_title, seo_description, created_at, updated_at
-    FROM products WHERE id = ${id} LIMIT 1
+    SELECT p.id, p.sku, p.slug, p.name, p.description, p.status, p.base_price,
+           p.compare_at_price, p.is_featured, p.is_new, p.brand_id,
+           p.attributes_cache, p.seo_title, p.seo_description, p.created_at, p.updated_at,
+           b.id AS b_id, b.slug AS b_slug, b.name AS b_name, b.logo_key AS b_logo_key
+    FROM products p
+    LEFT JOIN brands b ON b.id = p.brand_id
+    WHERE p.id = ${id} LIMIT 1
   `;
   if (!prodRows[0]) {
     return null;
   }
   const product = mapProduct(prodRows[0]);
+  const brand = mapBrandRef(prodRows[0]);
 
   const [catRows, variantRows, attrRows, mediaRows, invRows] = await Promise.all([
     sql<{ category_id: string; is_primary: boolean }[]>`
@@ -322,7 +417,7 @@ export async function getProductById(
     `,
     sql<Record<string, unknown>[]>`
       SELECT id, product_id, sku, name, price_override, price_delta,
-             is_active, sort, attributes_cache, created_at, updated_at
+             compare_at_price, is_active, sort, attributes_cache, created_at, updated_at
       FROM product_variants WHERE product_id = ${id} ORDER BY sort, name
     `,
     sql<Record<string, unknown>[]>`
@@ -350,6 +445,7 @@ export async function getProductById(
     attributes: attrRows.map(mapProductAttribute),
     media: mediaRows.map(mapMedia),
     inventory: invRows.map(mapInventory),
+    brand,
   };
 }
 
@@ -387,4 +483,46 @@ export async function listInventory(
     FROM inventory WHERE product_id = ${productId}
   `;
   return rows.map(mapInventory);
+}
+
+// =============================================================================
+// Бренды (docs/06 §3.3, §4.3).
+// =============================================================================
+
+// Колонки бренда (инлайн в каждом запросе — не вычисляем sql-фрагмент на уровне
+// модуля, иначе s`` дёрнет ленивый клиент при импорте без DATABASE_URL).
+
+/** Список брендов; по умолчанию — все, опционально только активные. */
+export async function listBrands(
+  opts: { activeOnly?: boolean } = {},
+): Promise<Brand[]> {
+  const activeOnly = opts.activeOnly ?? false;
+  const rows = await sql<Record<string, unknown>[]>`
+    SELECT id, slug, name, description, logo_key, is_active, sort,
+           seo_title, seo_description, created_at, updated_at
+    FROM brands
+    WHERE (${activeOnly} = false OR is_active = true)
+    ORDER BY sort, name
+  `;
+  return rows.map(mapBrand);
+}
+
+/** Бренд по id или null. */
+export async function getBrandById(id: string): Promise<Brand | null> {
+  const rows = await sql<Record<string, unknown>[]>`
+    SELECT id, slug, name, description, logo_key, is_active, sort,
+           seo_title, seo_description, created_at, updated_at
+    FROM brands WHERE id = ${id} LIMIT 1
+  `;
+  return rows[0] ? mapBrand(rows[0]) : null;
+}
+
+/** Бренд по slug или null (для страницы бренда /brand/{slug}). */
+export async function getBrandBySlug(slug: string): Promise<Brand | null> {
+  const rows = await sql<Record<string, unknown>[]>`
+    SELECT id, slug, name, description, logo_key, is_active, sort,
+           seo_title, seo_description, created_at, updated_at
+    FROM brands WHERE slug = ${slug} LIMIT 1
+  `;
+  return rows[0] ? mapBrand(rows[0]) : null;
 }

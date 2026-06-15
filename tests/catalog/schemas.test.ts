@@ -12,6 +12,10 @@ import {
   ProductAttributeItemSchema,
   StockSetSchema,
   StockAdjustSchema,
+  VariantUpdateSchema,
+  BrandCreateSchema,
+  BrandUpdateSchema,
+  BrandIdSchema,
 } from '@/lib/catalog/schemas';
 
 const UUID = '11111111-1111-4111-8111-111111111111';
@@ -106,6 +110,82 @@ describe('ProductUpdateSchema', () => {
   it('требует id', () => {
     expect(ProductUpdateSchema.safeParse({ name: 'X' }).success).toBe(false);
     expect(ProductUpdateSchema.safeParse({ id: UUID, name: 'X' }).success).toBe(true);
+  });
+});
+
+describe('ProductCreate/Update — новые поля (docs/06 §3.1–§3.3)', () => {
+  it('isFeatured по умолчанию false', () => {
+    const res = ProductCreateSchema.safeParse({ sku: 'S', slug: 's', name: 'X' });
+    expect(res.success && res.data.isFeatured).toBe(false);
+  });
+
+  it('compareAtPrice — деньги ≥ 0, допускает null', () => {
+    expect(
+      ProductCreateSchema.safeParse({ sku: 'S', slug: 's', name: 'X', compareAtPrice: '129.90' }).success,
+    ).toBe(true);
+    expect(
+      ProductCreateSchema.safeParse({ sku: 'S', slug: 's', name: 'X', compareAtPrice: null }).success,
+    ).toBe(true);
+    expect(
+      ProductCreateSchema.safeParse({ sku: 'S', slug: 's', name: 'X', compareAtPrice: '-5' }).success,
+    ).toBe(false);
+  });
+
+  it('isNew троичное: true/false/null допустимы, нечисловое — нет', () => {
+    for (const v of [true, false, null]) {
+      expect(
+        ProductCreateSchema.safeParse({ sku: 'S', slug: 's', name: 'X', isNew: v }).success,
+      ).toBe(true);
+    }
+    expect(
+      ProductCreateSchema.safeParse({ sku: 'S', slug: 's', name: 'X', isNew: 'yes' }).success,
+    ).toBe(false);
+  });
+
+  it('brandId — uuid или null', () => {
+    expect(
+      ProductUpdateSchema.safeParse({ id: UUID, brandId: UUID2 }).success,
+    ).toBe(true);
+    expect(
+      ProductUpdateSchema.safeParse({ id: UUID, brandId: null }).success,
+    ).toBe(true);
+    expect(
+      ProductUpdateSchema.safeParse({ id: UUID, brandId: 'not-a-uuid' }).success,
+    ).toBe(false);
+  });
+});
+
+describe('VariantUpdateSchema — compareAtPrice', () => {
+  it('допускает деньги/null, отклоняет отрицательное', () => {
+    expect(VariantUpdateSchema.safeParse({ id: UUID, compareAtPrice: '50' }).success).toBe(true);
+    expect(VariantUpdateSchema.safeParse({ id: UUID, compareAtPrice: null }).success).toBe(true);
+    expect(VariantUpdateSchema.safeParse({ id: UUID, compareAtPrice: '-1' }).success).toBe(false);
+  });
+});
+
+describe('BrandCreateSchema / BrandUpdateSchema / BrandIdSchema', () => {
+  it('создание: name обязателен, дефолты isActive/sort', () => {
+    const res = BrandCreateSchema.safeParse({ name: 'Bosch' });
+    expect(res.success).toBe(true);
+    if (res.success) {
+      expect(res.data.isActive).toBe(true);
+      expect(res.data.sort).toBe(0);
+      expect(res.data.description).toBe('');
+    }
+  });
+  it('создание без name отклонено', () => {
+    expect(BrandCreateSchema.safeParse({ slug: 'bosch' }).success).toBe(false);
+  });
+  it('невалидный slug отклонён', () => {
+    expect(BrandCreateSchema.safeParse({ name: 'B', slug: 'Bad Slug' }).success).toBe(false);
+  });
+  it('обновление требует id', () => {
+    expect(BrandUpdateSchema.safeParse({ name: 'X' }).success).toBe(false);
+    expect(BrandUpdateSchema.safeParse({ id: UUID, name: 'X' }).success).toBe(true);
+  });
+  it('BrandIdSchema требует uuid', () => {
+    expect(BrandIdSchema.safeParse({ id: UUID }).success).toBe(true);
+    expect(BrandIdSchema.safeParse({ id: 'x' }).success).toBe(false);
   });
 });
 

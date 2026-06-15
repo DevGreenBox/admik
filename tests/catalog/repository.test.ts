@@ -7,6 +7,8 @@ import {
   mapAttribute,
   mapMedia,
   mapInventory,
+  mapBrand,
+  mapBrandRef,
   buildCategoryTree,
 } from '@/lib/catalog/repository';
 import { buildAttributesCache } from '@/lib/catalog/cache';
@@ -54,6 +56,32 @@ describe('mapProduct', () => {
     expect(p.status).toBe('active');
     expect(p.attributesCache).toEqual({ color: 'red' });
   });
+
+  it('новые поля: compareAtPrice/isFeatured/isNew(троичное)/brandId', () => {
+    const p = mapProduct({
+      id: 'p1', sku: 'S', slug: 's', name: 'N', description: '', status: 'active',
+      base_price: '100.00', compare_at_price: '149.00', is_featured: true,
+      is_new: null, brand_id: 'br-1', attributes_cache: {},
+      created_at: new Date(), updated_at: new Date(),
+    });
+    expect(p.compareAtPrice).toBe('149.00');
+    expect(p.isFeatured).toBe(true);
+    expect(p.isNew).toBeNull(); // NULL → троичное «вычислять»
+    expect(p.brandId).toBe('br-1');
+  });
+
+  it('пустые новые поля нормализуются (нет акции/бренда, is_new override)', () => {
+    const p = mapProduct({
+      id: 'p2', sku: 'S', slug: 's', name: 'N', status: 'draft',
+      base_price: '0', compare_at_price: null, is_featured: false,
+      is_new: false, brand_id: null, attributes_cache: {},
+      created_at: new Date(), updated_at: new Date(),
+    });
+    expect(p.compareAtPrice).toBeNull();
+    expect(p.isFeatured).toBe(false);
+    expect(p.isNew).toBe(false);
+    expect(p.brandId).toBeNull();
+  });
 });
 
 describe('mapVariant', () => {
@@ -73,6 +101,46 @@ describe('mapVariant', () => {
     });
     expect(v.priceOverride).toBeNull();
     expect(v.priceDelta).toBe('10.00');
+  });
+
+  it('compareAtPrice строкой или null', () => {
+    const v = mapVariant({
+      id: 'v2', product_id: 'p1', sku: 'V', name: '', price_override: null,
+      price_delta: '0', compare_at_price: '59.99', is_active: true, sort: 0,
+      attributes_cache: {}, created_at: new Date(), updated_at: new Date(),
+    });
+    expect(v.compareAtPrice).toBe('59.99');
+    const v2 = mapVariant({
+      id: 'v3', product_id: 'p1', sku: 'V', name: '', price_override: null,
+      price_delta: '0', compare_at_price: null, is_active: true, sort: 0,
+      attributes_cache: {}, created_at: new Date(), updated_at: new Date(),
+    });
+    expect(v2.compareAtPrice).toBeNull();
+  });
+});
+
+describe('mapBrand / mapBrandRef', () => {
+  it('mapBrand маппит поля и нормализует null', () => {
+    const b = mapBrand({
+      id: 'b1', slug: 'bosch', name: 'Bosch', description: 'd', logo_key: 'k',
+      logo_url: null, is_active: true, sort: '2', seo_title: null,
+      seo_description: null, created_at: new Date(), updated_at: new Date(),
+    });
+    expect(b.slug).toBe('bosch');
+    expect(b.logoKey).toBe('k');
+    expect(b.logoUrl).toBeNull();
+    expect(b.isActive).toBe(true);
+    expect(b.sort).toBe(2);
+  });
+
+  it('mapBrandRef из префикса b_; null, если бренда нет', () => {
+    expect(
+      mapBrandRef({ b_id: null, b_slug: null, b_name: null, b_logo_key: null }),
+    ).toBeNull();
+    const ref = mapBrandRef({
+      b_id: 'b1', b_slug: 'kyb', b_name: 'KYB', b_logo_key: 'lk',
+    });
+    expect(ref).toEqual({ id: 'b1', slug: 'kyb', name: 'KYB', logoKey: 'lk', logoUrl: null });
   });
 });
 

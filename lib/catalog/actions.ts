@@ -27,6 +27,10 @@ import {
   MediaReorderSchema,
   StockSetSchema,
   StockAdjustSchema,
+  BrandCreateSchema,
+  BrandUpdateSchema,
+  BrandIdSchema,
+  BrandLogoUploadSchema,
 } from './schemas';
 import { listCategoryEdges, countCategoryChildren } from './repository';
 import { canMoveCategory } from './tree';
@@ -85,6 +89,10 @@ function productPath(id: string): string {
 }
 const CATEGORIES_PATH = '/admin/catalog/categories';
 const ATTRIBUTES_PATH = '/admin/catalog/attributes';
+const BRANDS_PATH = '/admin/catalog/brands';
+function brandPath(id: string): string {
+  return `/admin/catalog/brands/${id}`;
+}
 
 /**
  * Вставляет строку с ретраем slug при коллизии уникального индекса.
@@ -287,10 +295,13 @@ export const createProduct = defineAction({
     const row = await insertWithUniqueSlug(base, async (slug) => {
       const rows = await sql<{ id: string }[]>`
         INSERT INTO products (sku, slug, name, description, status, base_price,
+                              compare_at_price, is_featured, is_new, brand_id,
                               seo_title, seo_description)
         VALUES (
           ${data.sku}, ${slug}, ${data.name}, ${data.description ?? ''},
           ${data.status ?? 'draft'}, ${data.basePrice ?? '0'},
+          ${data.compareAtPrice ?? null}, ${data.isFeatured ?? false},
+          ${data.isNew ?? null}, ${data.brandId ?? null},
           ${data.seoTitle ?? null}, ${data.seoDescription ?? null}
         )
         RETURNING id
@@ -337,6 +348,13 @@ export const updateProduct = defineAction({
         description     = COALESCE(${data.description ?? null}, description),
         status          = COALESCE(${data.status ?? null}, status),
         base_price      = COALESCE(${data.basePrice ?? null}, base_price),
+        compare_at_price = CASE WHEN ${data.compareAtPrice !== undefined}
+                                THEN ${data.compareAtPrice ?? null} ELSE compare_at_price END,
+        is_featured     = COALESCE(${data.isFeatured ?? null}, is_featured),
+        is_new          = CASE WHEN ${data.isNew !== undefined}
+                               THEN ${data.isNew ?? null} ELSE is_new END,
+        brand_id        = CASE WHEN ${data.brandId !== undefined}
+                               THEN ${data.brandId ?? null} ELSE brand_id END,
         seo_title       = COALESCE(${data.seoTitle ?? null}, seo_title),
         seo_description = COALESCE(${data.seoDescription ?? null}, seo_description),
         updated_at      = now()
@@ -401,11 +419,11 @@ export const createVariant = defineAction({
     assertCatalogEnabled();
     const rows = await sql<{ id: string }[]>`
       INSERT INTO product_variants
-        (product_id, sku, name, price_override, price_delta, is_active, sort)
+        (product_id, sku, name, price_override, price_delta, compare_at_price, is_active, sort)
       VALUES (
         ${data.productId}, ${data.sku}, ${data.name ?? ''},
         ${data.priceOverride ?? null}, ${data.priceDelta ?? '0'},
-        ${data.isActive ?? true}, ${data.sort ?? 0}
+        ${data.compareAtPrice ?? null}, ${data.isActive ?? true}, ${data.sort ?? 0}
       )
       RETURNING id
     `;
@@ -447,6 +465,8 @@ export const updateVariant = defineAction({
         price_override = CASE WHEN ${data.priceOverride !== undefined}
                               THEN ${data.priceOverride ?? null} ELSE price_override END,
         price_delta    = COALESCE(${data.priceDelta ?? null}, price_delta),
+        compare_at_price = CASE WHEN ${data.compareAtPrice !== undefined}
+                                THEN ${data.compareAtPrice ?? null} ELSE compare_at_price END,
         is_active      = COALESCE(${data.isActive ?? null}, is_active),
         sort           = COALESCE(${data.sort ?? null}, sort),
         updated_at     = now()
@@ -815,6 +835,178 @@ export const adjustInventory = defineAction({
           delta: data.delta,
           quantity: rows[0].quantity,
         },
+      },
+    };
+  },
+});
+
+// =============================================================================
+// БРЕНДЫ (docs/06 §3.3, §4.3).
+//
+// Бренд — опциональная фасетная сущность (Brembo/Bosch/…); для магазинов без
+// брендов таблица пуста. CRUD — тот же пайплайн defineAction (catalog.write,
+// аудит catalog.brand.*). Лого бренда — через тот же storage/validate, что и
+// медиа товара. Удаление бренда не удаляет товары (ON DELETE SET NULL у brand_id).
+// =============================================================================
+
+export const createBrand = defineAction({
+  permission: 'catalog.write',
+  input: BrandCreateSchema,
+  handler: async (data, _ctx) => {
+    assertCatalogEnabled();
+    const base = data.slug || slugify(data.name);
+
+    const row = await insertWithUniqueSlug(base, async (slug) => {
+      const rows = await sql<{ id: string }[]>`
+        INSERT INTO brands
+          (slug, name, description, is_active, sort, seo_title, seo_description)
+        VALUES (
+          ${slug}, ${data.name}, ${data.description ?? ''},
+          ${data.isActive ?? true}, ${data.sort ?? 0},
+          ${data.seoTitle ?? null}, ${data.seoDescription ?? null}
+        )
+        RETURNING id
+      `;
+      return rows[0]!;
+    });
+
+    return {
+      result: { id: row.id },
+      revalidate: [BRANDS_PATH, CATALOG_LIST_PATH],
+      audit: {
+        action: 'catalog.brand.create',
+        entityType: 'brand',
+        entityId: row.id,
+        after: { slug: base, name: data.name },
+      },
+    };
+  },
+});
+
+export const updateBrand = defineAction({
+  permission: 'catalog.write',
+  input: BrandUpdateSchema,
+  handler: async (data, _ctx) => {
+    assertCatalogEnabled();
+    const before = await sql<Record<string, unknown>[]>`
+      SELECT * FROM brands WHERE id = ${data.id} LIMIT 1
+    `;
+    if (!before[0]) {
+      throw new CatalogError('not_found', 'Бренд не найден.');
+    }
+    const after = await sql<Record<string, unknown>[]>`
+      UPDATE brands SET
+        slug            = COALESCE(${data.slug ?? null}, slug),
+        name            = COALESCE(${data.name ?? null}, name),
+        description     = COALESCE(${data.description ?? null}, description),
+        is_active       = COALESCE(${data.isActive ?? null}, is_active),
+        sort            = COALESCE(${data.sort ?? null}, sort),
+        seo_title       = COALESCE(${data.seoTitle ?? null}, seo_title),
+        seo_description = COALESCE(${data.seoDescription ?? null}, seo_description),
+        updated_at      = now()
+      WHERE id = ${data.id}
+      RETURNING *
+    `;
+    return {
+      result: { id: data.id },
+      revalidate: [BRANDS_PATH, brandPath(data.id)],
+      audit: {
+        action: 'catalog.brand.update',
+        entityType: 'brand',
+        entityId: data.id,
+        before: before[0],
+        after: after[0],
+      },
+    };
+  },
+});
+
+export const deleteBrand = defineAction({
+  permission: 'catalog.write',
+  input: BrandIdSchema,
+  handler: async (data, _ctx) => {
+    assertCatalogEnabled();
+    // ON DELETE SET NULL: товары не удаляются, у них обнуляется brand_id (docs/06 §3.3).
+    const rows = await sql<{ id: string; logo_key: string | null }[]>`
+      DELETE FROM brands WHERE id = ${data.id}
+      RETURNING id, logo_key
+    `;
+    if (!rows[0]) {
+      throw new CatalogError('not_found', 'Бренд не найден.');
+    }
+    // Чистим лого в хранилище (best-effort), если было.
+    if (rows[0].logo_key) {
+      await getStorage().delete(rows[0].logo_key).catch(() => {});
+    }
+    return {
+      result: { id: data.id },
+      revalidate: [BRANDS_PATH, CATALOG_LIST_PATH],
+      audit: {
+        action: 'catalog.brand.delete',
+        entityType: 'brand',
+        entityId: data.id,
+      },
+    };
+  },
+});
+
+export const uploadBrandLogo = defineAction({
+  permission: 'catalog.write',
+  input: BrandLogoUploadSchema,
+  handler: async (data, _ctx) => {
+    assertCatalogEnabled();
+
+    // Бренд должен существовать (иначе осиротевший объект в хранилище).
+    const brand = await sql<{ id: string; logo_key: string | null }[]>`
+      SELECT id, logo_key FROM brands WHERE id = ${data.brandId} LIMIT 1
+    `;
+    if (!brand[0]) {
+      throw new CatalogError('not_found', 'Бренд не найден.');
+    }
+
+    // Валидация magic-bytes + лимиты (как медиа товара).
+    const validation = await validateUpload(data.bytes, data.filename);
+    if (!validation.ok || !validation.mime) {
+      throw new CatalogError('invalid_media', validation.error ?? 'Недопустимый файл.');
+    }
+
+    // Превью/нормализация в webp.
+    const previews = await generatePreviews(data.bytes);
+    const main = previews.main;
+
+    const storage = getStorage();
+    const key = `brands/${data.brandId}/${crypto.randomUUID()}.webp`;
+    let put;
+    try {
+      put = await storage.put(key, main.buffer, 'image/webp');
+    } catch {
+      throw new CatalogError('storage_failed', 'Не удалось сохранить файл в хранилище.');
+    }
+
+    try {
+      await sql`
+        UPDATE brands SET logo_key = ${put.key}, updated_at = now()
+        WHERE id = ${data.brandId}
+      `;
+    } catch (err) {
+      await storage.delete(put.key).catch(() => {});
+      throw err;
+    }
+
+    // Старое лого удаляем после успешной замены (best-effort).
+    const prevKey = brand[0].logo_key;
+    if (prevKey && prevKey !== put.key) {
+      await storage.delete(prevKey).catch(() => {});
+    }
+
+    return {
+      result: { id: data.brandId, url: put.url, key: put.key },
+      revalidate: [BRANDS_PATH, brandPath(data.brandId)],
+      audit: {
+        action: 'catalog.brand.logo.upload',
+        entityType: 'brand',
+        entityId: data.brandId,
+        after: { key: put.key },
       },
     };
   },
