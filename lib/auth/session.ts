@@ -3,6 +3,14 @@ import { randomBytes } from 'node:crypto';
 import { sql } from '@/lib/db/client';
 import { buildPermissionSet, type AuthUser } from '@/lib/auth/rbac';
 import type { PermissionCode } from '@/lib/auth/permissions';
+// Имя cookie и TTL вынесены в dependency-free модуль (lib/auth/constants.ts),
+// чтобы Edge-middleware мог импортировать их, НЕ затягивая этот серверный
+// модуль (node:crypto, postgres) в edge-бандл. Реэкспорт ниже сохраняет
+// публичный API session.ts (cookies.ts / actions.ts / тесты импортируют отсюда).
+import {
+  SESSION_COOKIE_NAME,
+  SESSION_TTL_MS,
+} from '@/lib/auth/constants';
 
 /**
  * Слой сессий (Lucia-подход, сессии в БД) — docs/04 §2.2, §4.6, §5.3.
@@ -21,14 +29,10 @@ import type { PermissionCode } from '@/lib/auth/permissions';
  */
 
 // -----------------------------------------------------------------------------
-// Константы (§4.6).
+// Константы (§4.6). Реэкспорт из dependency-free модуля — публичный API сохранён.
 // -----------------------------------------------------------------------------
 
-/** Имя cookie сессии (§4.6). */
-export const SESSION_COOKIE_NAME = 'admik_session' as const;
-
-/** Время жизни сессии: 30 дней (скользящее окно, §4.6). */
-export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+export { SESSION_COOKIE_NAME, SESSION_TTL_MS };
 
 /**
  * Порог скользящего продления: если до истечения осталось меньше половины TTL,
