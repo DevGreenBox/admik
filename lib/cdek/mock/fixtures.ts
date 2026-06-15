@@ -1,0 +1,105 @@
+/**
+ * Фикстуры mock-режима СДЭК (docs/08 §11, §5.3, §6).
+ *
+ * Детерминированные данные, которыми пользуются demo-магазин и тесты без боевых
+ * ключей (ADR-002, docs/02). Никакой сети — только статика и чистые формулы.
+ */
+
+import type { CdekOffice } from '../types';
+
+/** Коды городов для фикстур (carre/спека: 44 = Москва, 137 = Санкт-Петербург). */
+export const MOCK_CITY_MOSCOW = 44;
+export const MOCK_CITY_SPB = 137;
+
+/**
+ * Небольшой фикстур-набор ПВЗ по нескольким городам (Москва/СПб). Координаты —
+ * правдоподобные. type: PVZ | POSTAMAT (docs/08 §11: 3–5 ПВЗ для 44/137).
+ */
+export const MOCK_OFFICES: readonly CdekOffice[] = [
+  {
+    code: 'MSK1',
+    name: 'ПВЗ Москва — Тверская',
+    address: 'Москва, ул. Тверская, д. 1',
+    type: 'PVZ',
+    cityCode: MOCK_CITY_MOSCOW,
+    location: { latitude: 55.7558, longitude: 37.6173 },
+    workTime: 'Пн-Пт 10:00-20:00, Сб-Вс 11:00-18:00',
+  },
+  {
+    code: 'MSK2',
+    name: 'ПВЗ Москва — Арбат',
+    address: 'Москва, ул. Арбат, д. 24',
+    type: 'PVZ',
+    cityCode: MOCK_CITY_MOSCOW,
+    location: { latitude: 55.7494, longitude: 37.5936 },
+    workTime: 'Пн-Вс 09:00-21:00',
+  },
+  {
+    code: 'MSK-POST1',
+    name: 'Постамат Москва — ТЦ Авиапарк',
+    address: 'Москва, Ходынский бульвар, д. 4',
+    type: 'POSTAMAT',
+    cityCode: MOCK_CITY_MOSCOW,
+    location: { latitude: 55.7896, longitude: 37.5306 },
+    workTime: 'Круглосуточно',
+  },
+  {
+    code: 'SPB1',
+    name: 'ПВЗ Санкт-Петербург — Невский',
+    address: 'Санкт-Петербург, Невский пр-т, д. 28',
+    type: 'PVZ',
+    cityCode: MOCK_CITY_SPB,
+    location: { latitude: 59.9357, longitude: 30.3258 },
+    workTime: 'Пн-Пт 10:00-20:00, Сб 11:00-17:00',
+  },
+  {
+    code: 'SPB-POST1',
+    name: 'Постамат Санкт-Петербург — ТЦ Галерея',
+    address: 'Санкт-Петербург, Лиговский пр-т, д. 30А',
+    type: 'POSTAMAT',
+    cityCode: MOCK_CITY_SPB,
+    location: { latitude: 59.9276, longitude: 30.3608 },
+    workTime: 'Круглосуточно',
+  },
+] as const;
+
+/** Коды тарифов mock-режима (склад-ПВЗ 136, склад-дверь 137, постамат 368). */
+export const MOCK_TARIFF_PVZ = 136;
+export const MOCK_TARIFF_DOOR = 137;
+export const MOCK_TARIFF_POSTAMAT = 368;
+
+/** Имена тарифов для фикстурного списка тарифов. */
+export const MOCK_TARIFF_NAMES: Record<number, string> = {
+  [MOCK_TARIFF_PVZ]: 'Посылка склад-склад',
+  [MOCK_TARIFF_DOOR]: 'Посылка склад-дверь',
+  [MOCK_TARIFF_POSTAMAT]: 'Посылка склад-постамат',
+};
+
+// ---------------------------------------------------------------------------
+// Формула расчёта тарифа (docs/08 §5.3). Детерминированная, без сети.
+// ---------------------------------------------------------------------------
+
+/** Базовая ставка, ₽ (docs/08 §5.3). */
+export const MOCK_TARIFF_BASE_RUB = 300;
+/** Ставка за килограмм, ₽/кг. */
+export const MOCK_TARIFF_PER_KG_RUB = 100;
+/** Надбавка за курьер (door) против ПВЗ, ₽. */
+export const MOCK_TARIFF_COURIER_SURCHARGE_RUB = 150;
+/** Сроки доставки (детерминированные). */
+export const MOCK_PERIOD_MIN = 2;
+export const MOCK_PERIOD_MAX = 5;
+
+/**
+ * Mock-стоимость доставки по формуле §5.3:
+ *   base + perKg * ceil(weightG/1000) + (door ? courierSurcharge : 0).
+ *
+ * Возвращает строку NUMERIC(14,2) (как деньги в orders). Детерминированно.
+ */
+export function mockDeliverySum(weightG: number, isDoor: boolean): string {
+  const weightKg = Math.max(1, Math.ceil(weightG / 1000));
+  const sum =
+    MOCK_TARIFF_BASE_RUB +
+    MOCK_TARIFF_PER_KG_RUB * weightKg +
+    (isDoor ? MOCK_TARIFF_COURIER_SURCHARGE_RUB : 0);
+  return sum.toFixed(2);
+}
