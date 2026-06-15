@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
 
 import { getCurrentUser } from '@/lib/auth/session';
-import { getEnv } from '@/lib/config/env';
+import { getEffectiveSettings } from '@/lib/config/settings';
 
 import { LoginForm } from './LoginForm';
 
@@ -22,17 +22,18 @@ export default async function LoginPage() {
     redirect('/admin');
   }
 
-  const env = getEnv();
-  const shopName = env.SHOP_NAME ?? 'Admik';
+  // Брендинг — из эффективных настроек (env ⊕ БД, fallback env), docs/11 §5.4.5.
+  const { branding } = await getEffectiveSettings();
+  const shopName = branding.shopName;
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-gray-50 p-4">
       <div className="w-full max-w-sm rounded-xl border border-gray-200 bg-white p-8 shadow-sm">
         <div className="mb-6 flex flex-col items-center gap-2">
-          {env.SHOP_LOGO_URL ? (
-            // eslint-disable-next-line @next/next/no-img-element -- логотип из произвольного внешнего URL (.env)
+          {branding.logoUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element -- логотип из произвольного внешнего URL (настройки)
             <img
-              src={env.SHOP_LOGO_URL}
+              src={branding.logoUrl}
               alt={`Логотип: ${shopName}`}
               className="h-10 w-auto"
             />

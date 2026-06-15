@@ -93,8 +93,12 @@ function rateKey(req: Request): string {
 
 /** Опции конвейера: требуемый модуль и список CORS-методов роута. */
 export interface StorefrontOptions {
-  /** Модуль, под которым работает роут (по умолчанию 'catalog'). */
-  module?: ModuleName;
+  /**
+   * Модуль, под которым работает роут (по умолчанию 'catalog'). Значение `null`
+   * означает core-always-on роут (напр. /settings): проверка модуля пропускается,
+   * роут доступен независимо от ADMIK_MODULES (auth/rate-limit сохраняются).
+   */
+  module?: ModuleName | null;
   /** CORS Access-Control-Allow-Methods (по умолчанию 'GET, OPTIONS'). */
   methods?: string;
 }
@@ -152,13 +156,15 @@ export async function runStorefront(
   handler: (ctx: StorefrontContext) => Promise<NextResponse>,
   options: StorefrontOptions = {},
 ): Promise<NextResponse> {
-  const moduleName = options.module ?? 'catalog';
+  // module === null → core-always-on (без гейта по модулю); undefined → 'catalog'.
+  const moduleName = options.module === null ? null : options.module ?? 'catalog';
   const methods = options.methods ?? STOREFRONT_METHODS;
   const auth = authorizeStorefront(req.headers);
   const cors = buildCorsHeaders(auth.ok ? auth.origin : null, methods);
 
   // 1) Требуемый модуль (catalog для каталога, orders для заказов, §4.2).
-  if (!isModuleEnabled(moduleName)) {
+  //    Для core-always-on (moduleName === null) проверка пропускается.
+  if (moduleName !== null && !isModuleEnabled(moduleName)) {
     return jsonError(
       'module_disabled',
       `Модуль «${moduleName}» отключён.`,

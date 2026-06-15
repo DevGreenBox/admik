@@ -9,7 +9,7 @@
  */
 
 import { sql } from '@/lib/db/client';
-import { getEnv } from '@/lib/config/env';
+import { getEffectiveSettings } from '@/lib/config/settings';
 import type {
   Attribute,
   AttributeValue,
@@ -357,7 +357,8 @@ export async function listProducts(
     SELECT count(*)::text AS count FROM products p ${where}
   `;
 
-  const newDays = getEnv().SHOP_NEW_PRODUCT_DAYS;
+  // «Новизна» товара — из эффективных настроек (env ⊕ БД), docs/11 §5.4.4.
+  const newDays = (await getEffectiveSettings()).catalog.newProductDays;
   const now = new Date();
 
   const mapped: ProductListRow[] = rows.map((r: any) => {

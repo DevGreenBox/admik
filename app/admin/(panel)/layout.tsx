@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 
 import { requireUser } from '@/lib/auth/session';
 import { buildAdminNav } from '@/lib/admin/nav';
-import { getEnv } from '@/lib/config/env';
+import { getEffectiveSettings } from '@/lib/config/settings';
 
 import { Sidebar } from './_components/Sidebar';
 import { Topbar } from './_components/Topbar';
@@ -33,14 +33,14 @@ export default async function AdminLayout({
   // Меню = f(включённые модули, права пользователя) — §6.3.
   const nav = buildAdminNav(user);
 
-  const env = getEnv();
-  const shopName = env.SHOP_NAME ?? 'Admik';
+  // Брендинг — из эффективных настроек (env ⊕ БД), docs/11 §5.4.5.
+  const { branding } = await getEffectiveSettings();
 
   return (
     <div className="flex min-h-screen flex-col bg-white text-gray-900">
       <Topbar
-        shopName={shopName}
-        shopLogoUrl={env.SHOP_LOGO_URL}
+        shopName={branding.shopName}
+        shopLogoUrl={branding.logoUrl ?? undefined}
         userEmail={user.email}
       />
       <div className="flex flex-1">

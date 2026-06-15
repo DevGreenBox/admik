@@ -47,6 +47,9 @@ export const NAV: NavItem[] = [
   { href: '/admin/users', label: 'Пользователи', permission: 'users.read' },
   { href: '/admin/roles', label: 'Роли', permission: 'roles.manage' },
   { href: '/admin/audit', label: 'Аудит', permission: 'audit.read' },
+  // «Настройки» — core (без module): не прячется за флагом, которым сам управляет
+  // (self-lock guard, docs/11 §5.4.5). Виден при наличии settings.manage.
+  { href: '/admin/settings', label: 'Настройки', permission: 'settings.manage' },
 ];
 
 /**

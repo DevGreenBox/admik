@@ -13,7 +13,7 @@ import {
 } from '@/lib/storefront/queries';
 import { toProductDetailDto } from '@/lib/storefront/dto';
 import { resolveIsNew } from '@/lib/catalog/pricing';
-import { getEnv } from '@/lib/config/env';
+import { getEffectiveSettings } from '@/lib/config/settings';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,10 +35,12 @@ export async function GET(
     }
 
     const categorySlugs = await getProductCategorySlugs(id);
+    // «Новизна» — из эффективных настроек (env ⊕ БД), docs/11 §5.4.4.
+    const newProductDays = (await getEffectiveSettings()).catalog.newProductDays;
     const effectiveIsNew = resolveIsNew(
       product.isNew,
       product.createdAt,
-      getEnv().SHOP_NEW_PRODUCT_DAYS,
+      newProductDays,
     );
 
     const dto = toProductDetailDto(product, { effectiveIsNew, categorySlugs });

@@ -15,6 +15,7 @@ import type { TransactionSql } from 'postgres';
 
 import { sql } from '@/lib/db/client';
 import { getEnv } from '@/lib/config/env';
+import { getEffectiveSettings } from '@/lib/config/settings';
 import { getProductById } from '@/lib/catalog/repository';
 import { effectiveCompareAt } from '@/lib/catalog/pricing';
 import type { ProductDetail, ProductVariant } from '@/lib/catalog/types';
@@ -339,7 +340,11 @@ export async function quoteCart(
 ): Promise<QuoteCartResult> {
   const env = getEnv();
   const currency = env.SHOP_CURRENCY;
-  const freeThreshold = env.SHOP_FREE_DELIVERY_THRESHOLD;
+  // Порог бесплатной доставки — из эффективных настроек (env ⊕ БД), docs/11 §5.4.4.
+  // EffectiveSettings хранит порог в КОПЕЙКАХ; calculateQuote ожидает РУБЛИ —
+  // конвертируем на границе legacy-расчёта через fromMinor (money-инвариант §7).
+  const eff = await getEffectiveSettings();
+  const freeThreshold = Number(fromMinor(eff.delivery.freeDeliveryThreshold));
 
   const issues: QuoteCartResult['issues'] = [];
   const lines: PricedLine[] = [];
@@ -526,6 +531,10 @@ export async function createOrder(
   const env = getEnv();
   const now = ctx.now ?? new Date();
   const source = ctx.source ?? 'storefront';
+  // Порог бесплатной доставки — из эффективных настроек (env ⊕ БД), docs/11 §5.4.4.
+  // Копейки → рубли (fromMinor) на границе legacy-расчёта (money-инвариант §7).
+  const eff = await getEffectiveSettings();
+  const freeThreshold = Number(fromMinor(eff.delivery.freeDeliveryThreshold));
 
   // Идемпотентность: если такой ключ уже есть — вернуть существующий заказ.
   if (input.idempotencyKey) {
@@ -581,7 +590,7 @@ export async function createOrder(
     promo: appliedPromo,
     delivery: {
       cost: deliveryCost,
-      freeThreshold: env.SHOP_FREE_DELIVERY_THRESHOLD,
+      freeThreshold,
     },
   });
 
