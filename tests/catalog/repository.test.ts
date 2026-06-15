@@ -177,7 +177,9 @@ describe('buildCategoryTree', () => {
   function cat(id: string, parentId: string | null, sort = 0): Category {
     return {
       id, parentId, slug: id, name: id, description: '', sort, isActive: true,
-      seoTitle: null, seoDescription: null, createdAt: new Date(), updatedAt: new Date(),
+      seoTitle: null, seoDescription: null,
+      ogTitle: null, ogDescription: null, ogImageKey: null, canonicalUrl: null, noindex: false,
+      createdAt: new Date(), updatedAt: new Date(),
     };
   }
 

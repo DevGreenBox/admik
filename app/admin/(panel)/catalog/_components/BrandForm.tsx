@@ -12,6 +12,7 @@ import {
 } from './form-actions';
 import { errorMessage, fieldError } from './action-result';
 import type { ActionResult } from '@/lib/server/action';
+import { SeoFieldset, type SeoFieldsetValue } from '../../_components/SeoFieldset';
 
 /**
  * Форма бренда (docs/06 §3.3, П4.4). Создание/редактирование + загрузка лого.
@@ -32,8 +33,15 @@ export function BrandForm({ brand }: { brand: Brand | null }) {
   const [slug, setSlug] = useState(brand?.slug ?? '');
   const [description, setDescription] = useState(brand?.description ?? '');
   const [isActive, setIsActive] = useState(brand?.isActive ?? true);
-  const [seoTitle, setSeoTitle] = useState(brand?.seoTitle ?? '');
-  const [seoDescription, setSeoDescription] = useState(brand?.seoDescription ?? '');
+  const [seo, setSeo] = useState<SeoFieldsetValue>({
+    seoTitle: brand?.seoTitle ?? '',
+    seoDescription: brand?.seoDescription ?? '',
+    ogTitle: brand?.ogTitle ?? '',
+    ogDescription: brand?.ogDescription ?? '',
+    ogImageKey: brand?.ogImageKey ?? '',
+    canonicalUrl: brand?.canonicalUrl ?? '',
+    noindex: brand?.noindex ?? false,
+  });
 
   async function save() {
     setPending(true);
@@ -44,11 +52,19 @@ export function BrandForm({ brand }: { brand: Brand | null }) {
       slug: slug.trim() || undefined,
       description,
       isActive,
-      seoTitle: seoTitle.trim() || undefined,
-      seoDescription: seoDescription.trim() || undefined,
+      seoTitle: seo.seoTitle.trim() || undefined,
+      seoDescription: seo.seoDescription.trim() || undefined,
+    };
+    // Расширенные SEO/OG-поля принимает только Update-схема (docs/11 §5.3.3).
+    const seoExtra = {
+      ogTitle: seo.ogTitle.trim() || undefined,
+      ogDescription: seo.ogDescription.trim() || undefined,
+      ogImageKey: seo.ogImageKey.trim() || undefined,
+      canonicalUrl: seo.canonicalUrl.trim() || undefined,
+      noindex: seo.noindex,
     };
     const result = isEdit
-      ? await updateBrandAction({ id: brand!.id, ...payload })
+      ? await updateBrandAction({ id: brand!.id, ...payload, ...seoExtra })
       : await createBrandAction(payload);
     setPending(false);
     if (result.ok) {
@@ -125,17 +141,26 @@ export function BrandForm({ brand }: { brand: Brand | null }) {
           <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />
           Активен
         </label>
-        <div className="lg:col-span-2 grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <div>
-            <label htmlFor="b-seo-title" className="block text-sm font-medium text-gray-700">SEO-заголовок</label>
-            <input id="b-seo-title" value={seoTitle} onChange={(e) => setSeoTitle(e.target.value)}
-              className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" />
-          </div>
-          <div>
-            <label htmlFor="b-seo-desc" className="block text-sm font-medium text-gray-700">SEO-описание</label>
-            <input id="b-seo-desc" value={seoDescription} onChange={(e) => setSeoDescription(e.target.value)}
-              className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" />
-          </div>
+        <div className="lg:col-span-2">
+          <SeoFieldset
+            value={seo}
+            onChange={setSeo}
+            idPrefix="b-seo"
+            canonicalPlaceholder={`Авто: /brand/${slug || 'slug-бренда'}`}
+            fieldErrors={{
+              seoTitle: fieldError(error, 'seoTitle'),
+              seoDescription: fieldError(error, 'seoDescription'),
+              ogTitle: fieldError(error, 'ogTitle'),
+              ogDescription: fieldError(error, 'ogDescription'),
+              ogImageKey: fieldError(error, 'ogImageKey'),
+              canonicalUrl: fieldError(error, 'canonicalUrl'),
+            }}
+          />
+          {!isEdit ? (
+            <p className="mt-2 text-sm text-gray-500">
+              OG/canonical/noindex станут доступны после создания бренда.
+            </p>
+          ) : null}
         </div>
       </div>
 

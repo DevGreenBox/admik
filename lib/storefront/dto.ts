@@ -18,6 +18,7 @@
  */
 
 import { discountPercent, isOnSale, effectiveCompareAt } from '@/lib/catalog/pricing';
+import { buildSeoMeta, type SeoCtx } from '@/lib/seo/meta';
 import type {
   Brand,
   BrandRef,
@@ -34,6 +35,20 @@ import type {
 // Типы публичных DTO.
 // ---------------------------------------------------------------------------
 
+/**
+ * Публичная SEO-мета сущности (docs/11 §5.3.4). Наружу — ТОЛЬКО `ogImageUrl`
+ * (НЕ ключ S3): URL собирается storage.publicUrl на границе мапперов.
+ */
+export interface SeoMetaDto {
+  title: string;
+  description: string | null;
+  canonical: string | null;
+  ogTitle: string;
+  ogDescription: string | null;
+  ogImageUrl: string | null;
+  noindex: boolean;
+}
+
 export interface BrandDto {
   slug: string;
   name: string;
@@ -44,6 +59,7 @@ export interface FullBrandDto extends BrandDto {
   description: string;
   seoTitle: string | null;
   seoDescription: string | null;
+  meta: SeoMetaDto;
 }
 
 export interface CategoryDto {
@@ -51,6 +67,8 @@ export interface CategoryDto {
   name: string;
   description: string;
   children: CategoryDto[];
+  /** SEO-мета категории (опц.: дерево-маппер её не собирает). */
+  meta?: SeoMetaDto;
 }
 
 export interface MediaDto {
@@ -105,6 +123,7 @@ export interface ProductDetailDto {
   variants: VariantDto[];
   media: MediaDto[];
   inStock: boolean;
+  meta: SeoMetaDto;
 }
 
 // ---------------------------------------------------------------------------
@@ -123,8 +142,31 @@ export function toBrandDto(brand: BrandRef | null): BrandDto | null {
   };
 }
 
+/** Опции мапперов, несущих SEO-мету (seoCtx инъецируется параметром). */
+export interface SeoMapOpts {
+  seoCtx: SeoCtx;
+}
+
+/** Строит SeoMetaDto сущности через чистый билдер (наружу — ogImageUrl, не ключ). */
+function entityMeta(
+  entity: {
+    slug: string;
+    name: string;
+    seoTitle: string | null;
+    seoDescription: string | null;
+    ogTitle: string | null;
+    ogDescription: string | null;
+    ogImageKey: string | null;
+    canonicalUrl: string | null;
+    noindex: boolean;
+  },
+  ctx: SeoCtx,
+): SeoMetaDto {
+  return buildSeoMeta(entity, ctx);
+}
+
 /** Полный бренд → публичный FullBrandDto (для /brands). Внутренние поля скрыты. */
-export function toFullBrandDto(brand: Brand): FullBrandDto {
+export function toFullBrandDto(brand: Brand, opts: SeoMapOpts): FullBrandDto {
   return {
     slug: brand.slug,
     name: brand.name,
@@ -132,17 +174,26 @@ export function toFullBrandDto(brand: Brand): FullBrandDto {
     description: brand.description,
     seoTitle: brand.seoTitle,
     seoDescription: brand.seoDescription,
+    meta: entityMeta(brand, opts.seoCtx),
   };
 }
 
-/** Узел дерева категорий (или плоская категория) → CategoryDto, рекурсивно. */
-export function toCategoryDto(node: CategoryTreeNode | Category): CategoryDto {
+/**
+ * Узел дерева категорий (или плоская категория) → CategoryDto, рекурсивно.
+ * Если передан seoCtx — добавляет `meta` (для страницы категории); без него
+ * (дерево-маппер) meta опускается.
+ */
+export function toCategoryDto(
+  node: CategoryTreeNode | Category,
+  opts?: { seoCtx?: SeoCtx },
+): CategoryDto {
   const children = 'children' in node && Array.isArray(node.children) ? node.children : [];
   return {
     slug: node.slug,
     name: node.name,
     description: node.description,
-    children: children.map(toCategoryDto),
+    children: children.map((c) => toCategoryDto(c)),
+    ...(opts?.seoCtx ? { meta: entityMeta(node, opts.seoCtx) } : {}),
   };
 }
 
@@ -250,7 +301,7 @@ export function toVariantDto(
  */
 export function toProductDetailDto(
   product: ProductDetail,
-  opts: { effectiveIsNew: boolean; categorySlugs: string[] },
+  opts: { effectiveIsNew: boolean; categorySlugs: string[]; seoCtx: SeoCtx },
 ): ProductDetailDto {
   return {
     slug: product.slug,
@@ -271,5 +322,6 @@ export function toProductDetailDto(
       .map((v) => toVariantDto(v, product)),
     media: product.media.map(toMediaDto),
     inStock: computeInStock(product.inventory),
+    meta: entityMeta(product, opts.seoCtx),
   };
 }

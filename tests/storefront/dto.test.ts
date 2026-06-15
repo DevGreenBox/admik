@@ -18,8 +18,20 @@ import type {
   ProductListRow,
   ProductVariant,
 } from '@/lib/catalog/types';
+import type { SeoCtx } from '@/lib/seo/meta';
 
 const D = new Date('2026-06-01T00:00:00Z');
+
+/** Тестовый SeoCtx (домен/шаблон инъецируются — без чтения env/БД). */
+const TEST_SEO_CTX: SeoCtx = {
+  siteUrl: 'https://shop.test',
+  titleTemplate: '%s',
+  siteName: 'Shop',
+  defaultDescription: null,
+  defaultOgImageKey: null,
+  publicUrl: (k: string) => `https://cdn.test/${k}`,
+  pathPrefix: 'product',
+};
 
 const brandRef: BrandRef = {
   id: 'b1',
@@ -58,10 +70,15 @@ describe('storefront/dto — бренды', () => {
       sort: 5,
       seoTitle: 't',
       seoDescription: 'd',
+      ogTitle: null,
+      ogDescription: null,
+      ogImageKey: null,
+      canonicalUrl: null,
+      noindex: false,
       createdAt: D,
       updatedAt: D,
     };
-    const dto = toFullBrandDto(brand);
+    const dto = toFullBrandDto(brand, { seoCtx: TEST_SEO_CTX });
     expect(dto).not.toHaveProperty('id');
     expect(dto).not.toHaveProperty('logoKey');
     expect(dto).not.toHaveProperty('isActive');
@@ -151,6 +168,7 @@ describe('storefront/dto — карточка товара', () => {
     status: 'active', basePrice: '1000.00', compareAtPrice: '1500.00',
     isFeatured: false, isNew: null, brandId: 'b1',
     attributesCache: { color: 'white' }, seoTitle: null, seoDescription: null,
+    ogTitle: null, ogDescription: null, ogImageKey: null, canonicalUrl: null, noindex: false,
     createdAt: D, updatedAt: D,
     categories: [{ categoryId: 'c1', isPrimary: true }],
     variants: [variant, inactiveVariant],
@@ -170,6 +188,7 @@ describe('storefront/dto — карточка товара', () => {
     const dto = toProductDetailDto(product, {
       effectiveIsNew: true,
       categorySlugs: ['outerwear'],
+      seoCtx: TEST_SEO_CTX,
     });
     expect(dto.slug).toBe('coat');
     expect(dto.price).toBe('1000.00');
@@ -190,7 +209,11 @@ describe('storefront/dto — карточка товара', () => {
   });
 
   it('отдаёт только активные варианты, у варианта inStock и без сырого id остатка', () => {
-    const dto = toProductDetailDto(product, { effectiveIsNew: false, categorySlugs: [] });
+    const dto = toProductDetailDto(product, {
+      effectiveIsNew: false,
+      categorySlugs: [],
+      seoCtx: TEST_SEO_CTX,
+    });
     expect(dto.variants).toHaveLength(1);
     const v = dto.variants[0]!;
     expect(v.id).toBe('v1');
@@ -214,16 +237,19 @@ describe('storefront/dto — дерево категорий', () => {
     {
       id: 'c1', parentId: null, slug: 'men', name: 'Men', description: '',
       sort: 0, isActive: true, seoTitle: null, seoDescription: null,
+      ogTitle: null, ogDescription: null, ogImageKey: null, canonicalUrl: null, noindex: false,
       createdAt: D, updatedAt: D,
       children: [
         {
           id: 'c2', parentId: 'c1', slug: 'coats', name: 'Coats', description: 'd',
           sort: 0, isActive: true, seoTitle: null, seoDescription: null,
+          ogTitle: null, ogDescription: null, ogImageKey: null, canonicalUrl: null, noindex: false,
           createdAt: D, updatedAt: D, children: [],
         },
         {
           id: 'c3', parentId: 'c1', slug: 'hidden', name: 'Hidden', description: '',
           sort: 1, isActive: false, seoTitle: null, seoDescription: null,
+          ogTitle: null, ogDescription: null, ogImageKey: null, canonicalUrl: null, noindex: false,
           createdAt: D, updatedAt: D, children: [],
         },
       ],

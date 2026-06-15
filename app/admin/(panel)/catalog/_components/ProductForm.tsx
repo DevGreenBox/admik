@@ -18,6 +18,10 @@ import { AttributesSection } from './AttributesSection';
 import { MediaSection } from './MediaSection';
 import { InventorySection } from './InventorySection';
 import type { Attribute } from '@/lib/catalog/types';
+import {
+  SeoFieldset,
+  type SeoFieldsetValue,
+} from '../../_components/SeoFieldset';
 
 /**
  * Форма товара (docs/05 §5.3, П4.2). Секции-вкладки:
@@ -88,8 +92,16 @@ export function ProductForm({
         ? 'yes'
         : 'no',
   );
-  const [seoTitle, setSeoTitle] = useState(product?.seoTitle ?? '');
-  const [seoDescription, setSeoDescription] = useState(product?.seoDescription ?? '');
+  // SEO-набор: seoTitle/seoDescription + расширенные OG/canonical/noindex (docs/11 §5.3).
+  const [seo, setSeo] = useState<SeoFieldsetValue>({
+    seoTitle: product?.seoTitle ?? '',
+    seoDescription: product?.seoDescription ?? '',
+    ogTitle: product?.ogTitle ?? '',
+    ogDescription: product?.ogDescription ?? '',
+    ogImageKey: product?.ogImageKey ?? '',
+    canonicalUrl: product?.canonicalUrl ?? '',
+    noindex: product?.noindex ?? false,
+  });
 
   const initialCategoryIds = product?.categories.map((c) => c.categoryId) ?? [];
   const [categoryIds, setCategoryIds] = useState<string[]>(initialCategoryIds);
@@ -124,13 +136,22 @@ export function ProductForm({
       brandId: brandId || null,
       categoryIds,
       primaryCategoryId: primaryCategoryId || null,
-      seoTitle: seoTitle.trim() || undefined,
-      seoDescription: seoDescription.trim() || undefined,
+      seoTitle: seo.seoTitle.trim() || undefined,
+      seoDescription: seo.seoDescription.trim() || undefined,
+    };
+
+    // Расширенные SEO/OG-поля принимает только Update-схема (docs/11 §5.3.3).
+    const seoExtra = {
+      ogTitle: seo.ogTitle.trim() || undefined,
+      ogDescription: seo.ogDescription.trim() || undefined,
+      ogImageKey: seo.ogImageKey.trim() || undefined,
+      canonicalUrl: seo.canonicalUrl.trim() || undefined,
+      noindex: seo.noindex,
     };
 
     try {
       const result = isEdit
-        ? await updateProductAction({ id: product!.id, ...payload })
+        ? await updateProductAction({ id: product!.id, ...payload, ...seoExtra })
         : await createProductAction(payload);
 
       if (result.ok) {
@@ -387,32 +408,25 @@ export function ProductForm({
 
         {section === 'seo' ? (
           <div className="grid grid-cols-1 gap-4">
-            <div>
-              <label htmlFor="p-seo-title" className="block text-sm font-medium text-gray-700">
-                SEO-заголовок
-              </label>
-              <input
-                id="p-seo-title"
-                value={seoTitle}
-                onChange={(e) => setSeoTitle(e.target.value)}
-                className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
-              />
-            </div>
-            <div>
-              <label htmlFor="p-seo-desc" className="block text-sm font-medium text-gray-700">
-                SEO-описание
-              </label>
-              <textarea
-                id="p-seo-desc"
-                value={seoDescription}
-                onChange={(e) => setSeoDescription(e.target.value)}
-                rows={3}
-                className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
-              />
-            </div>
-            <p className="text-sm text-gray-500">
-              Предпросмотр URL: <code>/{slug || 'slug-товара'}</code> (генерация sitemap — Этап 5).
-            </p>
+            <SeoFieldset
+              value={seo}
+              onChange={setSeo}
+              idPrefix="p-seo"
+              canonicalPlaceholder={`Авто: /product/${slug || 'slug-товара'}`}
+              fieldErrors={{
+                seoTitle: fieldError(error, 'seoTitle'),
+                seoDescription: fieldError(error, 'seoDescription'),
+                ogTitle: fieldError(error, 'ogTitle'),
+                ogDescription: fieldError(error, 'ogDescription'),
+                ogImageKey: fieldError(error, 'ogImageKey'),
+                canonicalUrl: fieldError(error, 'canonicalUrl'),
+              }}
+            />
+            {!isEdit ? (
+              <p className="text-sm text-gray-500">
+                OG/canonical/noindex станут доступны после сохранения товара.
+              </p>
+            ) : null}
           </div>
         ) : null}
 

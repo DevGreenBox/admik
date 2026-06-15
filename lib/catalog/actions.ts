@@ -84,6 +84,8 @@ const BRANDS_PATH = '/admin/catalog/brands';
 function brandPath(id: string): string {
   return `/admin/catalog/brands/${id}`;
 }
+/** Карта сайта — инвалидируется при изменении SEO/публикации сущностей (docs/11 §5.3). */
+const SITEMAP_PATH = '/sitemap.xml';
 
 /**
  * Вставляет строку с ретраем slug при коллизии уникального индекса.
@@ -166,13 +168,22 @@ export const updateCategory = defineAction({
         is_active       = COALESCE(${data.isActive ?? null}, is_active),
         seo_title       = COALESCE(${data.seoTitle ?? null}, seo_title),
         seo_description = COALESCE(${data.seoDescription ?? null}, seo_description),
+        og_title        = CASE WHEN ${data.ogTitle !== undefined}
+                               THEN ${data.ogTitle ?? null} ELSE og_title END,
+        og_description  = CASE WHEN ${data.ogDescription !== undefined}
+                               THEN ${data.ogDescription ?? null} ELSE og_description END,
+        og_image_key    = CASE WHEN ${data.ogImageKey !== undefined}
+                               THEN ${data.ogImageKey ?? null} ELSE og_image_key END,
+        canonical_url   = CASE WHEN ${data.canonicalUrl !== undefined}
+                               THEN ${data.canonicalUrl ?? null} ELSE canonical_url END,
+        noindex         = COALESCE(${data.noindex ?? null}, noindex),
         updated_at      = now()
       WHERE id = ${data.id}
       RETURNING *
     `;
     return {
       result: { id: data.id },
-      revalidate: [CATEGORIES_PATH],
+      revalidate: [CATEGORIES_PATH, SITEMAP_PATH],
       audit: {
         action: 'catalog.category.update',
         entityType: 'category',
@@ -348,6 +359,15 @@ export const updateProduct = defineAction({
                                THEN ${data.brandId ?? null} ELSE brand_id END,
         seo_title       = COALESCE(${data.seoTitle ?? null}, seo_title),
         seo_description = COALESCE(${data.seoDescription ?? null}, seo_description),
+        og_title        = CASE WHEN ${data.ogTitle !== undefined}
+                               THEN ${data.ogTitle ?? null} ELSE og_title END,
+        og_description  = CASE WHEN ${data.ogDescription !== undefined}
+                               THEN ${data.ogDescription ?? null} ELSE og_description END,
+        og_image_key    = CASE WHEN ${data.ogImageKey !== undefined}
+                               THEN ${data.ogImageKey ?? null} ELSE og_image_key END,
+        canonical_url   = CASE WHEN ${data.canonicalUrl !== undefined}
+                               THEN ${data.canonicalUrl ?? null} ELSE canonical_url END,
+        noindex         = COALESCE(${data.noindex ?? null}, noindex),
         updated_at      = now()
       WHERE id = ${data.id}
       RETURNING *
@@ -361,7 +381,7 @@ export const updateProduct = defineAction({
 
     return {
       result: { id: data.id },
-      revalidate: [CATALOG_LIST_PATH, productPath(data.id)],
+      revalidate: [CATALOG_LIST_PATH, productPath(data.id), SITEMAP_PATH],
       audit: {
         action: 'catalog.product.update',
         entityType: 'product',
@@ -894,13 +914,22 @@ export const updateBrand = defineAction({
         sort            = COALESCE(${data.sort ?? null}, sort),
         seo_title       = COALESCE(${data.seoTitle ?? null}, seo_title),
         seo_description = COALESCE(${data.seoDescription ?? null}, seo_description),
+        og_title        = CASE WHEN ${data.ogTitle !== undefined}
+                               THEN ${data.ogTitle ?? null} ELSE og_title END,
+        og_description  = CASE WHEN ${data.ogDescription !== undefined}
+                               THEN ${data.ogDescription ?? null} ELSE og_description END,
+        og_image_key    = CASE WHEN ${data.ogImageKey !== undefined}
+                               THEN ${data.ogImageKey ?? null} ELSE og_image_key END,
+        canonical_url   = CASE WHEN ${data.canonicalUrl !== undefined}
+                               THEN ${data.canonicalUrl ?? null} ELSE canonical_url END,
+        noindex         = COALESCE(${data.noindex ?? null}, noindex),
         updated_at      = now()
       WHERE id = ${data.id}
       RETURNING *
     `;
     return {
       result: { id: data.id },
-      revalidate: [BRANDS_PATH, brandPath(data.id)],
+      revalidate: [BRANDS_PATH, brandPath(data.id), SITEMAP_PATH],
       audit: {
         action: 'catalog.brand.update',
         entityType: 'brand',

@@ -35,6 +35,7 @@ import {
   legalEntitySchema,
   catalogSettingsSchema,
   ordersSettingsSchema,
+  seoSettingsSchema,
   SETTING_KEYS,
 } from '@/lib/settings/schemas';
 import {
@@ -99,6 +100,24 @@ export const ModuleOverridesInputSchema = z.object({
 /** reset: ключ обязан быть известным разделом настроек (иначе validation). */
 export const ResetSettingInputSchema = z.object({
   key: z.enum(SETTING_KEYS),
+});
+
+/**
+ * seo на ВХОДЕ действия (docs/11 §5.3.3): базовая seoSettingsSchema +
+ * дополнительная проверка `title_template` обязан содержать '%s' (плейсхолдер
+ * заголовка). Без '%s' заголовки сущностей подставлять некуда → validation.
+ * site_url валидируется как url-или-отсутствует уже в seoSettingsSchema.
+ */
+export const SeoSettingsInputSchema = z.object({
+  seo: seoSettingsSchema.superRefine((value, ctx) => {
+    if (value.title_template !== undefined && !value.title_template.includes('%s')) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "title_template должен содержать плейсхолдер «%s»",
+        path: ['title_template'],
+      });
+    }
+  }),
 });
 
 // =============================================================================
@@ -328,6 +347,29 @@ export function createSettingsActions(deps: SettingsActionDeps) {
     },
   });
 
+  const updateShopSeoSettings = defineAction({
+    permission: 'settings.manage',
+    input: SeoSettingsInputSchema,
+    deps: actionDeps,
+    handler: async (data, ctx: ActionCtx) => {
+      const before = await deps.getSetting('seo');
+      const row = await deps.upsertSetting('seo', data.seo, ctx.user.id);
+      deps.invalidateCache();
+      return {
+        result: { key: 'seo' as const },
+        // SEO влияет на sitemap/robots/форму настроек SEO → инвалидируем их.
+        revalidate: ['/sitemap.xml', '/robots.txt', '/admin/settings/seo'],
+        audit: {
+          action: 'settings.seo.update',
+          entityType: 'shop_settings',
+          entityId: 'seo',
+          before: before?.value,
+          after: row.value,
+        },
+      };
+    },
+  });
+
   const resetSetting = defineAction({
     permission: 'settings.manage',
     input: ResetSettingInputSchema,
@@ -356,6 +398,7 @@ export function createSettingsActions(deps: SettingsActionDeps) {
     updateLegalAndContacts,
     updateCatalogOrdersSettings,
     updateModuleOverrides,
+    updateShopSeoSettings,
     resetSetting,
   };
 }

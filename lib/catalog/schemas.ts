@@ -18,6 +18,13 @@ import {
   MEDIA_TYPES,
   PRODUCT_STATUSES,
 } from './types';
+import {
+  ogTitleSchema,
+  ogDescriptionSchema,
+  ogImageKeySchema,
+  canonicalUrlSchema,
+  noindexSchema,
+} from '@/lib/seo/schemas';
 
 // -----------------------------------------------------------------------------
 // Переиспользуемые примитивы.
@@ -68,6 +75,20 @@ export const attributeCodeSchema = z
 const seoTitle = z.string().max(255).optional();
 const seoDescription = z.string().max(1000).optional();
 
+/**
+ * Расширенные SEO/OG-поля сущностей каталога (docs/11 §5.3). Подмешиваются в
+ * Update-схемы товара/категории/бренда. canonicalUrl валидируется на безопасность
+ * (абсолютный https / path с '/'); мусор (javascript:, относительный без '/') →
+ * validation. ogImageKey — КЛЮЧ S3 (URL собирает storage, наружу не утекает).
+ */
+export const seoEntityFields = {
+  ogTitle: ogTitleSchema,
+  ogDescription: ogDescriptionSchema,
+  ogImageKey: ogImageKeySchema,
+  canonicalUrl: canonicalUrlSchema,
+  noindex: noindexSchema,
+} as const;
+
 // -----------------------------------------------------------------------------
 // Категории (§4.3).
 // -----------------------------------------------------------------------------
@@ -86,6 +107,7 @@ export type CategoryCreateInput = z.infer<typeof CategoryCreateSchema>;
 
 export const CategoryUpdateSchema = CategoryCreateSchema.partial().extend({
   id: uuidSchema,
+  ...seoEntityFields,
 });
 export type CategoryUpdateInput = z.infer<typeof CategoryUpdateSchema>;
 
@@ -148,6 +170,7 @@ export const ProductUpdateSchema = z.object({
   primaryCategoryId: uuidSchema.nullish(),
   seoTitle,
   seoDescription,
+  ...seoEntityFields,
 });
 export type ProductUpdateInput = z.infer<typeof ProductUpdateSchema>;
 
@@ -207,6 +230,7 @@ export const BrandUpdateSchema = z.object({
   sort: z.number().int().min(0).optional(),
   seoTitle,
   seoDescription,
+  ...seoEntityFields,
 });
 export type BrandUpdateInput = z.infer<typeof BrandUpdateSchema>;
 

@@ -14,6 +14,7 @@ import {
   updateLegalAndContacts as _updateLegalContacts,
   updateCatalogOrdersSettings as _updateCatalogOrders,
   updateModuleOverrides as _updateModules,
+  updateShopSeoSettings as _updateShopSeo,
   resetSetting as _resetSetting,
 } from '@/lib/settings/actions';
 import type { ActionResult } from '@/lib/server/action';
@@ -32,6 +33,9 @@ export async function updateCatalogOrdersAction(input: unknown): Promise<ActionR
 }
 export async function updateModulesAction(input: unknown): Promise<ActionResult<unknown>> {
   return _updateModules(input);
+}
+export async function updateShopSeoAction(input: unknown): Promise<ActionResult<unknown>> {
+  return _updateShopSeo(input);
 }
 export async function resetSettingAction(input: unknown): Promise<ActionResult<unknown>> {
   return _resetSetting(input);

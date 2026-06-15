@@ -48,6 +48,23 @@ function asJson(v: any): Record<string, unknown> {
   return {};
 }
 
+/** Маппер расширенных SEO/OG-полей сущности (docs/11 §5.3); общий для 3 сущностей. */
+function mapSeoFields(row: any): {
+  ogTitle: string | null;
+  ogDescription: string | null;
+  ogImageKey: string | null;
+  canonicalUrl: string | null;
+  noindex: boolean;
+} {
+  return {
+    ogTitle: row.og_title ?? null,
+    ogDescription: row.og_description ?? null,
+    ogImageKey: row.og_image_key ?? null,
+    canonicalUrl: row.canonical_url ?? null,
+    noindex: Boolean(row.noindex),
+  };
+}
+
 export function mapCategory(row: any): Category {
   return {
     id: row.id,
@@ -59,6 +76,7 @@ export function mapCategory(row: any): Category {
     isActive: Boolean(row.is_active),
     seoTitle: row.seo_title ?? null,
     seoDescription: row.seo_description ?? null,
+    ...mapSeoFields(row),
     createdAt: asDate(row.created_at),
     updatedAt: asDate(row.updated_at),
   };
@@ -86,6 +104,7 @@ export function mapProduct(row: any): Product {
     attributesCache: asJson(row.attributes_cache),
     seoTitle: row.seo_title ?? null,
     seoDescription: row.seo_description ?? null,
+    ...mapSeoFields(row),
     createdAt: asDate(row.created_at),
     updatedAt: asDate(row.updated_at),
   };
@@ -118,6 +137,7 @@ export function mapBrand(row: any): Brand {
     sort: Number(row.sort),
     seoTitle: row.seo_title ?? null,
     seoDescription: row.seo_description ?? null,
+    ...mapSeoFields(row),
     createdAt: asDate(row.created_at),
     updatedAt: asDate(row.updated_at),
   };
@@ -232,7 +252,9 @@ export async function listCategoryEdges(): Promise<CategoryEdge[]> {
 export async function listCategories(): Promise<Category[]> {
   const rows = await sql<Record<string, unknown>[]>`
     SELECT id, parent_id, slug, name, description, sort, is_active,
-           seo_title, seo_description, created_at, updated_at
+           seo_title, seo_description,
+           og_title, og_description, og_image_key, canonical_url, noindex,
+           created_at, updated_at
     FROM categories
     ORDER BY parent_id NULLS FIRST, sort, name
   `;
@@ -400,7 +422,9 @@ export async function getProductById(
   const prodRows = await sql<Record<string, unknown>[]>`
     SELECT p.id, p.sku, p.slug, p.name, p.description, p.status, p.base_price,
            p.compare_at_price, p.is_featured, p.is_new, p.brand_id,
-           p.attributes_cache, p.seo_title, p.seo_description, p.created_at, p.updated_at,
+           p.attributes_cache, p.seo_title, p.seo_description,
+           p.og_title, p.og_description, p.og_image_key, p.canonical_url, p.noindex,
+           p.created_at, p.updated_at,
            b.id AS b_id, b.slug AS b_slug, b.name AS b_name, b.logo_key AS b_logo_key
     FROM products p
     LEFT JOIN brands b ON b.id = p.brand_id
@@ -500,7 +524,9 @@ export async function listBrands(
   const activeOnly = opts.activeOnly ?? false;
   const rows = await sql<Record<string, unknown>[]>`
     SELECT id, slug, name, description, logo_key, is_active, sort,
-           seo_title, seo_description, created_at, updated_at
+           seo_title, seo_description,
+           og_title, og_description, og_image_key, canonical_url, noindex,
+           created_at, updated_at
     FROM brands
     WHERE (${activeOnly} = false OR is_active = true)
     ORDER BY sort, name
@@ -512,7 +538,9 @@ export async function listBrands(
 export async function getBrandById(id: string): Promise<Brand | null> {
   const rows = await sql<Record<string, unknown>[]>`
     SELECT id, slug, name, description, logo_key, is_active, sort,
-           seo_title, seo_description, created_at, updated_at
+           seo_title, seo_description,
+           og_title, og_description, og_image_key, canonical_url, noindex,
+           created_at, updated_at
     FROM brands WHERE id = ${id} LIMIT 1
   `;
   return rows[0] ? mapBrand(rows[0]) : null;
@@ -522,7 +550,9 @@ export async function getBrandById(id: string): Promise<Brand | null> {
 export async function getBrandBySlug(slug: string): Promise<Brand | null> {
   const rows = await sql<Record<string, unknown>[]>`
     SELECT id, slug, name, description, logo_key, is_active, sort,
-           seo_title, seo_description, created_at, updated_at
+           seo_title, seo_description,
+           og_title, og_description, og_image_key, canonical_url, noindex,
+           created_at, updated_at
     FROM brands WHERE slug = ${slug} LIMIT 1
   `;
   return rows[0] ? mapBrand(rows[0]) : null;

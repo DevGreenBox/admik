@@ -31,6 +31,9 @@ export async function updateCatalogOrdersSettings(raw: unknown) {
 export async function updateModuleOverrides(raw: unknown) {
   return prod.updateModuleOverrides(raw);
 }
+export async function updateShopSeoSettings(raw: unknown) {
+  return prod.updateShopSeoSettings(raw);
+}
 export async function resetSetting(raw: unknown) {
   return prod.resetSetting(raw);
 }

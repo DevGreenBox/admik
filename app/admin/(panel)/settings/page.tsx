@@ -62,6 +62,16 @@ export default async function SettingsPage() {
       <Section title="Модули">
         <ModulesForm overrides={overrides} envEnabled={envEnabled} />
       </Section>
+
+      <Section title="SEO">
+        <p className="text-sm text-gray-600">
+          Домен, шаблон заголовка, sitemap/robots и дефолты SEO — в отдельном
+          разделе.{' '}
+          <a href="/admin/settings/seo" className="font-medium text-gray-900 underline">
+            Открыть SEO-настройки →
+          </a>
+        </p>
+      </Section>
     </div>
   );
 }

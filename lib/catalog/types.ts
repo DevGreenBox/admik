@@ -51,6 +51,12 @@ export interface Category {
   isActive: boolean;
   seoTitle: string | null;
   seoDescription: string | null;
+  ogTitle: string | null;
+  ogDescription: string | null;
+  /** Ключ объекта OG-изображения в хранилище (URL собирает storage). */
+  ogImageKey: string | null;
+  canonicalUrl: string | null;
+  noindex: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -82,6 +88,12 @@ export interface Product {
   attributesCache: Record<string, unknown>;
   seoTitle: string | null;
   seoDescription: string | null;
+  ogTitle: string | null;
+  ogDescription: string | null;
+  /** Ключ объекта OG-изображения в хранилище (URL собирает storage). */
+  ogImageKey: string | null;
+  canonicalUrl: string | null;
+  noindex: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -109,6 +121,12 @@ export interface Brand {
   sort: number;
   seoTitle: string | null;
   seoDescription: string | null;
+  ogTitle: string | null;
+  ogDescription: string | null;
+  /** Ключ объекта OG-изображения в хранилище (URL собирает storage). */
+  ogImageKey: string | null;
+  canonicalUrl: string | null;
+  noindex: boolean;
   createdAt: Date;
   updatedAt: Date;
 }

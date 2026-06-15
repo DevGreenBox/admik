@@ -12,8 +12,10 @@ import {
   getProductCategorySlugs,
 } from '@/lib/storefront/queries';
 import { toProductDetailDto } from '@/lib/storefront/dto';
+import { buildEntitySeoCtx } from '@/lib/storefront/seo-ctx';
 import { resolveIsNew } from '@/lib/catalog/pricing';
 import { getEffectiveSettings } from '@/lib/config/settings';
+import { getStorage } from '@/lib/storage';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,14 +38,19 @@ export async function GET(
 
     const categorySlugs = await getProductCategorySlugs(id);
     // «Новизна» — из эффективных настроек (env ⊕ БД), docs/11 §5.4.4.
-    const newProductDays = (await getEffectiveSettings()).catalog.newProductDays;
+    const settings = await getEffectiveSettings();
+    const newProductDays = settings.catalog.newProductDays;
     const effectiveIsNew = resolveIsNew(
       product.isNew,
       product.createdAt,
       newProductDays,
     );
 
-    const dto = toProductDetailDto(product, { effectiveIsNew, categorySlugs });
+    // SEO-контекст: домен/шаблон из настроек, og:image-URL — через storage (docs/11 §5.3).
+    const storage = getStorage();
+    const seoCtx = buildEntitySeoCtx(settings, (k) => storage.url(k), 'product');
+
+    const dto = toProductDetailDto(product, { effectiveIsNew, categorySlugs, seoCtx });
     return jsonData(dto, {}, cors);
   });
 }
