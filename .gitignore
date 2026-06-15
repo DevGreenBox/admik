@@ -27,6 +27,9 @@ Thumbs.db
 .vscode/*
 !.vscode/extensions.json
 
+# TypeScript build info
+*.tsbuildinfo
+
 # Test / coverage
 coverage/
 playwright-report/

@@ -1,0 +1,143 @@
+# =============================================================================
+# Admik — docker compose: весь стек одного магазина
+# =============================================================================
+# Запуск:  docker compose up -d
+# Поднимает: app (Next.js) + postgres + redis + minio + caddy.
+# ВСЕ секреты и параметры берутся из .env (env_file / ${...}).
+# В этом файле НЕТ ни одного хардкод-пароля.
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # Приложение (Next.js standalone, собирается из Dockerfile)
+  # ---------------------------------------------------------------------------
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    restart: unless-stopped
+    # Стартуем только когда зависимости реально готовы (healthcheck'и ниже)
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      # Проверяем endpoint готовности приложения
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - admik
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL 15 — основная БД магазина
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      # pg_isready подтверждает, что сервер принимает подключения
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - admik
+
+  # ---------------------------------------------------------------------------
+  # Redis 7 — кеш и rate-limit
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - admik
+
+  # ---------------------------------------------------------------------------
+  # MinIO — S3-совместимое хранилище медиа
+  # ---------------------------------------------------------------------------
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    ports:
+      # API S3
+      - "9000:9000"
+      # Веб-консоль администрирования
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      # Встроенный health endpoint MinIO
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - admik
+
+  # ---------------------------------------------------------------------------
+  # Caddy — reverse-proxy + авто-SSL (точка входа 80/443)
+  # ---------------------------------------------------------------------------
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      # Домен и email прокидываются в Caddyfile через {$SHOP_DOMAIN} / {$ACME_EMAIL}
+      SHOP_DOMAIN: ${SHOP_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - admik
+
+# -----------------------------------------------------------------------------
+# Именованные тома (данные переживают пересоздание контейнеров)
+# -----------------------------------------------------------------------------
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  caddy_data:
+  caddy_config:
+
+# -----------------------------------------------------------------------------
+# Внутренняя сеть стека
+# -----------------------------------------------------------------------------
+networks:
+  admik:
+    driver: bridge
