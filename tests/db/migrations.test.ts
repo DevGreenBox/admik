@@ -73,18 +73,21 @@ describe('db/migrate — разбор и сортировка имён (юнит
 // поэтому может выполняться всегда.
 // =============================================================================
 describe('db/migrations — файлы Этапа 1 (юнит)', () => {
-  it('listMigrations возвращает 0001..0004 по порядку', async () => {
+  it('listMigrations включает 0001..0004 ядра по порядку', async () => {
     const migrations = await listMigrations();
-    expect(migrations.map((m) => m.version)).toEqual([
+    const core = migrations.filter((m) =>
+      ['0001', '0002', '0003', '0004'].includes(m.version),
+    );
+    expect(core.map((m) => m.version)).toEqual([
       '0001',
       '0002',
       '0003',
       '0004',
     ]);
-    expect(migrations[0].name).toBe('init_extensions_and_migrations');
-    expect(migrations[1].name).toBe('auth');
-    expect(migrations[2].name).toBe('rbac');
-    expect(migrations[3].name).toBe('audit');
+    expect(core[0].name).toBe('init_extensions_and_migrations');
+    expect(core[1].name).toBe('auth');
+    expect(core[2].name).toBe('rbac');
+    expect(core[3].name).toBe('audit');
   });
 
   it('каждая миграция идемпотентна и пишет в schema_migrations', async () => {
@@ -202,12 +205,12 @@ describe.skipIf(!INTEGRATION_DB_URL)('db/migrations — идемпотентно
     const second = await sql`SELECT version, name FROM schema_migrations ORDER BY version`;
 
     expect(second).toEqual(first);
-    expect(second.map((r: { version: string }) => r.version)).toEqual([
-      '0001',
-      '0002',
-      '0003',
-      '0004',
-    ]);
+    // Ядро 0001..0004 присутствует (каталог 0005+ накатывается тоже, но эта
+    // проверка фокусируется на стабильности журнала ядра).
+    const coreVersions = second
+      .map((r: { version: string }) => r.version)
+      .filter((v: string) => ['0001', '0002', '0003', '0004'].includes(v));
+    expect(coreVersions).toEqual(['0001', '0002', '0003', '0004']);
   });
 
   it('роль admik_app существует и НЕ может UPDATE/DELETE audit_log', async () => {
