@@ -18,6 +18,17 @@ const envSchema = z.object({
   // Подключение к БД (обязательно появится на этапе работы с данными).
   DATABASE_URL: z.string().url().optional(),
 
+  // Seed владельца магазина (docs/04 §4.2). Используются init-shop при первом
+  // развёртывании: создаётся учётка владельца (is_owner). Если OWNER_PASSWORD
+  // не задан — owner.mjs генерирует случайный пароль и печатает его один раз.
+  OWNER_EMAIL: z.string().email().optional(),
+  OWNER_PASSWORD: z.string().optional(),
+
+  // Пароли ролей БД (ADR-002/ADR-006, §3.4). Передаются в psql при накате
+  // миграций (admik_app — рантайм, admik_migrator — DDL). В репозитории нет.
+  APP_PASSWORD: z.string().optional(),
+  MIGRATOR_PASSWORD: z.string().optional(),
+
   // Кеш / rate-limit.
   REDIS_URL: z.string().url().optional(),
 

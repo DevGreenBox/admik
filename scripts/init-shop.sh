@@ -116,6 +116,13 @@ ok "База данных доступна (${DB_HOST}:${DB_PORT})"
 # -----------------------------------------------------------------------------
 step "Шаг 3/4. Накатываю миграции из db/migrations"
 
+# Пароли ролей БД (admik_app / admik_migrator) приходят psql-переменными
+# (:'APP_PASSWORD' / :'MIGRATOR_PASSWORD') в миграции 0001 (§3.4). Если они не
+# заданы в .env — подставляем безопасные значения по умолчанию, чтобы накат не
+# падал на необъявленной psql-переменной. Для боевого запуска задайте свои.
+APP_PASSWORD="${APP_PASSWORD:-change-me-app-password}"
+MIGRATOR_PASSWORD="${MIGRATOR_PASSWORD:-change-me-migrator-password}"
+
 if [ ! -d "${MIGRATIONS_DIR}" ]; then
   warn "Каталог ${MIGRATIONS_DIR} не найден — пропускаю миграции."
 else
@@ -134,7 +141,12 @@ else
       name="$(basename "${migration}")"
       printf "  → применяю %s\n" "${name}"
       # ON_ERROR_STOP=1 — остановиться при первой ошибке SQL.
-      if ! psql -v ON_ERROR_STOP=1 -q -f "${migration}"; then
+      # -v передаёт пароли ролей БД в миграцию 0001 (§3.4); прочие миграции их
+      # не используют — лишние переменные psql безвредны.
+      if ! psql -v ON_ERROR_STOP=1 \
+                -v APP_PASSWORD="${APP_PASSWORD}" \
+                -v MIGRATOR_PASSWORD="${MIGRATOR_PASSWORD}" \
+                -q -f "${migration}"; then
         fail "Ошибка при применении миграции ${name}."
         exit 1
       fi
@@ -144,14 +156,48 @@ else
 fi
 
 # -----------------------------------------------------------------------------
-# Шаг 4. Seed — начальные данные (заглушка)
+# Шаг 4. Seed — начальные данные (права, роли, владелец)
 # -----------------------------------------------------------------------------
+# Все шаги seed идемпотентны (ON CONFLICT DO NOTHING + проверка существования
+# владельца), поэтому повторный запуск init-shop безопасен.
 step "Шаг 4/4. Заполняю начальные данные (seed)"
 
-# TODO: здесь будет создание владельца магазина и базовых справочников.
-# Реализация появится на этапе backend (db/seed). Пока — заглушка,
-# чтобы общий процесс развёртывания был полным и идемпотентным.
-warn "Seed пока не реализован (заглушка). Шаг пропущен."
+SEED_DIR="${PROJECT_ROOT}/db/seed"
+
+if [ ! -d "${SEED_DIR}" ]; then
+  warn "Каталог ${SEED_DIR} не найден — пропускаю seed."
+else
+  # 4.1. Справочники прав и ролей — строгий порядок: сначала permissions
+  #      (на них ссылается role_permissions через FK), затем roles.
+  for seed_file in permissions.sql roles.sql; do
+    seed_path="${SEED_DIR}/${seed_file}"
+    if [ ! -f "${seed_path}" ]; then
+      warn "Файл seed ${seed_file} не найден — пропускаю."
+      continue
+    fi
+    printf "  → накатываю %s\n" "${seed_file}"
+    if ! psql -v ON_ERROR_STOP=1 -q -f "${seed_path}"; then
+      fail "Ошибка при накате seed ${seed_file}."
+      exit 1
+    fi
+  done
+  ok "Права и системные роли засеяны (идемпотентно)"
+
+  # 4.2. Владелец магазина из .env (OWNER_EMAIL/OWNER_PASSWORD).
+  #      owner.mjs идемпотентен: если владелец уже есть — ничего не делает.
+  #      Если OWNER_PASSWORD пуст — сгенерирует пароль и напечатает ОДИН РАЗ.
+  #      Подключение к БД берётся из экспортированных выше PG* (владелец БД).
+  if [ -f "${SEED_DIR}/owner.mjs" ]; then
+    printf "  → создаю владельца магазина (db/seed/owner.mjs)\n"
+    if ! node "${SEED_DIR}/owner.mjs"; then
+      fail "Ошибка при создании владельца магазина."
+      exit 1
+    fi
+    ok "Seed владельца выполнен"
+  else
+    warn "Файл owner.mjs не найден — владелец не создан."
+  fi
+fi
 
 # -----------------------------------------------------------------------------
 # Готово
