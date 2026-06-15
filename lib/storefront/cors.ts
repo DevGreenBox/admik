@@ -11,8 +11,15 @@
 /** Методы, которые отдаёт публичный read-каталог. */
 export const STOREFRONT_METHODS = 'GET, OPTIONS';
 
-/** Заголовки запроса, которые витрина вправе слать. */
-export const STOREFRONT_ALLOWED_HEADERS = 'Content-Type, X-Storefront-Key, X-Api-Key';
+/** Методы заказных эндпоинтов витрины (quote/создание — POST). */
+export const STOREFRONT_WRITE_METHODS = 'GET, POST, OPTIONS';
+
+/**
+ * Заголовки запроса, которые витрина вправе слать. Idempotency-Key —
+ * анти-дубль при создании заказа (POST /orders, docs/07 §4.2).
+ */
+export const STOREFRONT_ALLOWED_HEADERS =
+  'Content-Type, X-Storefront-Key, X-Api-Key, Idempotency-Key';
 
 /** Сколько секунд браузер может кешировать preflight-ответ. */
 export const STOREFRONT_PREFLIGHT_MAX_AGE = 600;
@@ -27,11 +34,12 @@ export const STOREFRONT_PREFLIGHT_MAX_AGE = 600;
  */
 export function buildCorsHeaders(
   origin?: string | null,
+  methods: string = STOREFRONT_METHODS,
 ): Record<string, string> {
   const allowOrigin = origin && origin.trim() ? origin : '*';
   const headers: Record<string, string> = {
     'Access-Control-Allow-Origin': allowOrigin,
-    'Access-Control-Allow-Methods': STOREFRONT_METHODS,
+    'Access-Control-Allow-Methods': methods,
     'Access-Control-Allow-Headers': STOREFRONT_ALLOWED_HEADERS,
   };
   // При конкретном origin сообщаем кешам, что ответ зависит от Origin.
@@ -44,9 +52,10 @@ export function buildCorsHeaders(
 /** Заголовки именно для preflight-ответа (добавляет Max-Age к CORS). */
 export function buildPreflightHeaders(
   origin?: string | null,
+  methods: string = STOREFRONT_METHODS,
 ): Record<string, string> {
   return {
-    ...buildCorsHeaders(origin),
+    ...buildCorsHeaders(origin, methods),
     'Access-Control-Max-Age': String(STOREFRONT_PREFLIGHT_MAX_AGE),
   };
 }

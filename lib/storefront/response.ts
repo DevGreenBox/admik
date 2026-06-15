@@ -9,12 +9,18 @@
 
 import { NextResponse } from 'next/server';
 import { isModuleEnabled } from '@/lib/config/modules';
+import type { ModuleName } from '@/lib/config/modules';
 import {
   checkLoginRate,
   registerLoginFailure,
 } from '@/lib/auth/rate-limit';
 import { authorizeStorefront, extractApiKey } from './auth';
-import { buildCorsHeaders, buildPreflightHeaders, isPreflight } from './cors';
+import {
+  STOREFRONT_METHODS,
+  buildCorsHeaders,
+  buildPreflightHeaders,
+  isPreflight,
+} from './cors';
 
 /** Код ошибки Storefront API. */
 export type StorefrontErrorCode =
@@ -23,7 +29,9 @@ export type StorefrontErrorCode =
   | 'not_found'
   | 'rate_limited'
   | 'bad_request'
-  | 'module_disabled';
+  | 'module_disabled'
+  | 'conflict'
+  | 'unprocessable';
 
 const STATUS_BY_CODE: Record<StorefrontErrorCode, number> = {
   unauthorized: 401,
@@ -32,6 +40,10 @@ const STATUS_BY_CODE: Record<StorefrontErrorCode, number> = {
   rate_limited: 429,
   bad_request: 400,
   module_disabled: 404,
+  // 409 — конфликт остатков (нет товара под резерв, §6); 422 — невалидные
+  // данные домена (позиция/промокод), синтаксис тела при этом валиден.
+  conflict: 409,
+  unprocessable: 422,
 };
 
 /** JSON-ответ успеха { data, ...meta } с CORS-заголовками. */
@@ -79,20 +91,52 @@ function rateKey(req: Request): string {
   return `storefront:ip:${ip || 'anon'}`;
 }
 
-/** Обработка preflight OPTIONS — отдельная, без auth/rate-limit. */
-export function handlePreflight(req: Request): NextResponse {
+/** Опции конвейера: требуемый модуль и список CORS-методов роута. */
+export interface StorefrontOptions {
+  /** Модуль, под которым работает роут (по умолчанию 'catalog'). */
+  module?: ModuleName;
+  /** CORS Access-Control-Allow-Methods (по умолчанию 'GET, OPTIONS'). */
+  methods?: string;
+}
+
+/**
+ * Обработка preflight OPTIONS — отдельная, без auth/rate-limit.
+ * `methods` — какие методы рекламировать в CORS (POST для заказных роутов).
+ */
+export function handlePreflight(
+  req: Request,
+  methods: string = STOREFRONT_METHODS,
+): NextResponse {
   const auth = authorizeStorefront(req.headers);
   if (isPreflight(req.method, req.headers)) {
     return new NextResponse(null, {
       status: 204,
-      headers: buildPreflightHeaders(auth.ok ? auth.origin : null),
+      headers: buildPreflightHeaders(auth.ok ? auth.origin : null, methods),
     });
   }
   // Обычный OPTIONS без preflight-заголовков.
   return new NextResponse(null, {
     status: 204,
-    headers: buildCorsHeaders(auth.ok ? auth.origin : null),
+    headers: buildCorsHeaders(auth.ok ? auth.origin : null, methods),
   });
+}
+
+/**
+ * Безопасно парсит JSON-тело запроса. Возвращает { ok:false } при невалидном
+ * JSON — роут отдаёт 400 bad_request (не падает на пустом/битом теле).
+ */
+export async function parseJsonBody(
+  req: Request,
+): Promise<{ ok: true; value: unknown } | { ok: false }> {
+  try {
+    const text = await req.text();
+    if (!text.trim()) {
+      return { ok: true, value: {} };
+    }
+    return { ok: true, value: JSON.parse(text) };
+  } catch {
+    return { ok: false };
+  }
 }
 
 /**
@@ -106,13 +150,20 @@ export function handlePreflight(req: Request): NextResponse {
 export async function runStorefront(
   req: Request,
   handler: (ctx: StorefrontContext) => Promise<NextResponse>,
+  options: StorefrontOptions = {},
 ): Promise<NextResponse> {
+  const moduleName = options.module ?? 'catalog';
+  const methods = options.methods ?? STOREFRONT_METHODS;
   const auth = authorizeStorefront(req.headers);
-  const cors = buildCorsHeaders(auth.ok ? auth.origin : null);
+  const cors = buildCorsHeaders(auth.ok ? auth.origin : null, methods);
 
-  // 1) Модуль каталога.
-  if (!isModuleEnabled('catalog')) {
-    return jsonError('module_disabled', 'Модуль каталога отключён.', cors);
+  // 1) Требуемый модуль (catalog для каталога, orders для заказов, §4.2).
+  if (!isModuleEnabled(moduleName)) {
+    return jsonError(
+      'module_disabled',
+      `Модуль «${moduleName}» отключён.`,
+      cors,
+    );
   }
 
   // 2) Аутентификация витрины.

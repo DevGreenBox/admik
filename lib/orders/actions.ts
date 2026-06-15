@@ -1,0 +1,634 @@
+'use server';
+
+import type { TransactionSql } from 'postgres';
+
+import { defineAction, type ActionCtx } from '@/lib/server/action';
+import { sql } from '@/lib/db/client';
+import { isModuleEnabled } from '@/lib/config/modules';
+
+import { z } from 'zod';
+
+import {
+  ChangeOrderStatusSchema,
+  SetPaymentStatusSchema,
+  SetDeliveryStatusSchema,
+  ManualOrderSchema,
+  PromoCreateSchema,
+  PromoUpdateSchema,
+  PromoIdSchema,
+  uuidSchema,
+} from './schemas';
+import {
+  getOrderById,
+  releaseReservation,
+  commitReservation,
+  createOrder,
+  type OrderWithItems,
+} from './repository';
+import { canTransition } from './status';
+import { OrderError } from './errors';
+import type { Order, OrderItem, PromoCode } from './types';
+
+/**
+ * Server Actions админки модуля orders (docs/07 §4.1).
+ *
+ * Все — через единый пайплайн defineAction (§4.7 ядра): guard (orders.read для
+ * чтений / orders.write для мутаций) → Zod → handler (БД через sql, в транзакции
+ * где нужна атомарность) → revalidate('/admin/orders'*) → audit ('order.*'/'promo.*').
+ *
+ * Доменные ошибки — через OrderError (errors.ts); недопустимые переходы статусов
+ * валидируются canTransition (status.ts) на сервере. При смене статуса заказа
+ * пишется order_status_history и (для перехода с резервом остатков) выполняется
+ * release/commit на inventory (§6):
+ *   • → cancelled → releaseReservation (возврат резерва);
+ *   • → shipped   → commitReservation (списание остатка);
+ *   • → refunded  → release (если ещё зарезервировано) / возврат на склад опц.
+ *
+ * Флаг модуля: каждый handler в начале проверяет isModuleEnabled('orders').
+ */
+
+// -----------------------------------------------------------------------------
+// Общие хелперы.
+// -----------------------------------------------------------------------------
+
+/** Бросает, если модуль заказов выключен. */
+function assertOrdersEnabled(): void {
+  if (!isModuleEnabled('orders')) {
+    throw new OrderError('module_disabled', 'Модуль «Заказы» выключен.');
+  }
+}
+
+/** Пути инвалидации заказов/промокодов. */
+const ORDERS_LIST_PATH = '/admin/orders';
+function orderPath(id: string): string {
+  return `/admin/orders/${id}`;
+}
+const PROMO_LIST_PATH = '/admin/promo';
+
+/**
+ * Схемы отмены/возврата (inline — модуль 'use server' может экспортировать ТОЛЬКО
+ * async-функции, поэтому константы-схемы не экспортируем). reason — необязательный
+ * комментарий, попадает в order_status_history и audit.
+ */
+const CancelOrderSchema = z.object({
+  id: uuidSchema,
+  reason: z.string().trim().max(2000).optional(),
+});
+const RefundOrderSchema = z.object({
+  id: uuidSchema,
+  reason: z.string().trim().max(2000).optional(),
+});
+
+/** Код нарушения уникальности PostgreSQL (дубликат кода промокода). */
+const PG_UNIQUE_VIOLATION = '23505';
+function isUniqueViolation(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    'code' in err &&
+    (err as { code?: string }).code === PG_UNIQUE_VIOLATION
+  );
+}
+
+// -----------------------------------------------------------------------------
+// Ядро смены статуса заказа (транзакция: проверка перехода + резерв + история).
+// -----------------------------------------------------------------------------
+
+/** Действие над резервом остатков при переходе статуса заказа (§6). */
+type StockEffect = 'none' | 'release' | 'commit';
+
+/** Какое действие над резервом выполнять при входе в статус `to`. */
+function stockEffectFor(to: Order['status']): StockEffect {
+  if (to === 'cancelled' || to === 'refunded') return 'release';
+  if (to === 'shipped') return 'commit';
+  return 'none';
+}
+
+/**
+ * Применяет переход статуса заказа атомарно (§2.8 A, §6):
+ *   1) загружает заказ + позиции (FOR-чтение перед изменением);
+ *   2) валидирует переход canTransition('order', from, to) — иначе OrderError;
+ *   3) при cancelled/refunded → releaseReservation по каждой позиции;
+ *      при shipped → commitReservation (списание);
+ *   4) UPDATE orders.status (+ синхронизация payment_status для refunded);
+ *   5) INSERT order_status_history (from→to, actor, comment).
+ *
+ * Возвращает before/after для аудита и обновлённый заказ.
+ */
+async function applyOrderStatusTransition(args: {
+  id: string;
+  to: Order['status'];
+  comment: string;
+  actorUserId: string | null;
+  /** Доп. синхронизация payment_status (refund → 'refunded'). */
+  syncPaymentRefunded?: boolean;
+}): Promise<{ before: Order; after: OrderWithItems }> {
+  const current = await getOrderById(args.id);
+  if (!current) {
+    throw new OrderError('not_found', 'Заказ не найден.');
+  }
+  const from = current.order.status;
+  if (!canTransition('order', from, args.to)) {
+    throw new OrderError(
+      'invalid_transition',
+      `Недопустимый переход статуса заказа: "${from}" → "${args.to}".`,
+    );
+  }
+
+  const effect = stockEffectFor(args.to);
+
+  await sql.begin(async (tx: TransactionSql) => {
+    // Резерв/списание по каждой позиции (best-effort: при refund резерв уже мог
+    // быть списан отгрузкой — release вернёт false и не упадёт).
+    if (effect !== 'none') {
+      for (const item of current.items) {
+        if (!item.productId) continue; // снимок без ссылки — нечего двигать
+        const unit = {
+          productId: item.productId,
+          variantId: item.variantId,
+          qty: item.quantity,
+        };
+        if (effect === 'release') {
+          await releaseReservation(tx, unit);
+        } else {
+          const ok = await commitReservation(tx, unit);
+          if (!ok) {
+            throw new OrderError(
+              'commit_failed',
+              `Не удалось списать остаток позиции ${item.skuSnapshot}.`,
+            );
+          }
+        }
+      }
+    }
+
+    if (args.syncPaymentRefunded) {
+      await tx`
+        UPDATE orders
+           SET status = ${args.to}, payment_status = 'refunded', updated_at = now()
+         WHERE id = ${args.id}
+      `;
+    } else {
+      await tx`
+        UPDATE orders
+           SET status = ${args.to}, updated_at = now()
+         WHERE id = ${args.id}
+      `;
+    }
+
+    await tx`
+      INSERT INTO order_status_history
+        (order_id, kind, from_status, to_status, actor_user_id, comment)
+      VALUES
+        (${args.id}, 'order', ${from}, ${args.to}, ${args.actorUserId}, ${args.comment})
+    `;
+  });
+
+  const after = await getOrderById(args.id);
+  if (!after) {
+    throw new OrderError('not_found', 'Заказ не найден после обновления.');
+  }
+  return { before: current.order, after };
+}
+
+/** Сериализуемый снимок заказа для возврата из action. */
+function orderDetailResult(detail: OrderWithItems): {
+  order: Order;
+  items: OrderItem[];
+} {
+  return { order: detail.order, items: detail.items };
+}
+
+// =============================================================================
+// ЧТЕНИЕ (orders.read).
+// =============================================================================
+
+export const getOrder = defineAction({
+  permission: 'orders.read',
+  input: PromoIdSchema, // { id: uuid } — та же форма «по id»
+  handler: async (data, _ctx: ActionCtx) => {
+    assertOrdersEnabled();
+    const detail = await getOrderById(data.id);
+    if (!detail) {
+      throw new OrderError('not_found', 'Заказ не найден.');
+    }
+    return { result: orderDetailResult(detail) };
+  },
+});
+
+// =============================================================================
+// СМЕНА СТАТУСА ЗАКАЗА (orders.write) — §2.8 A, §6.
+// =============================================================================
+
+export const changeOrderStatus = defineAction({
+  permission: 'orders.write',
+  input: ChangeOrderStatusSchema,
+  handler: async (data, ctx) => {
+    assertOrdersEnabled();
+    const { before, after } = await applyOrderStatusTransition({
+      id: data.id,
+      to: data.to,
+      comment: data.comment ?? '',
+      actorUserId: ctx.user.id,
+      syncPaymentRefunded: data.to === 'refunded',
+    });
+    return {
+      result: orderDetailResult(after),
+      revalidate: [ORDERS_LIST_PATH, orderPath(data.id)],
+      audit: {
+        action: 'order.status.change',
+        entityType: 'order',
+        entityId: data.id,
+        before: { status: before.status },
+        after: { status: after.order.status },
+      },
+    };
+  },
+});
+
+export const cancelOrder = defineAction({
+  permission: 'orders.write',
+  input: CancelOrderSchema,
+  handler: async (data, ctx) => {
+    assertOrdersEnabled();
+    const { before, after } = await applyOrderStatusTransition({
+      id: data.id,
+      to: 'cancelled',
+      comment: data.reason ?? '',
+      actorUserId: ctx.user.id,
+    });
+    return {
+      result: orderDetailResult(after),
+      revalidate: [ORDERS_LIST_PATH, orderPath(data.id)],
+      audit: {
+        action: 'order.cancel',
+        entityType: 'order',
+        entityId: data.id,
+        before: { status: before.status },
+        after: { status: after.order.status },
+      },
+    };
+  },
+});
+
+export const refundOrder = defineAction({
+  permission: 'orders.write',
+  input: RefundOrderSchema,
+  handler: async (data, ctx) => {
+    assertOrdersEnabled();
+    const { before, after } = await applyOrderStatusTransition({
+      id: data.id,
+      to: 'refunded',
+      comment: data.reason ?? '',
+      actorUserId: ctx.user.id,
+      syncPaymentRefunded: true,
+    });
+    return {
+      result: orderDetailResult(after),
+      revalidate: [ORDERS_LIST_PATH, orderPath(data.id)],
+      audit: {
+        action: 'order.refund',
+        entityType: 'order',
+        entityId: data.id,
+        before: { status: before.status, paymentStatus: before.paymentStatus },
+        after: {
+          status: after.order.status,
+          paymentStatus: after.order.paymentStatus,
+        },
+      },
+    };
+  },
+});
+
+// =============================================================================
+// СМЕНА СТАТУСА ОПЛАТЫ (orders.write) — §2.8 B, mock/ручной.
+// =============================================================================
+
+export const setPaymentStatus = defineAction({
+  permission: 'orders.write',
+  input: SetPaymentStatusSchema,
+  handler: async (data, ctx) => {
+    assertOrdersEnabled();
+    const current = await getOrderById(data.id);
+    if (!current) {
+      throw new OrderError('not_found', 'Заказ не найден.');
+    }
+    const from = current.order.paymentStatus;
+    if (!canTransition('payment', from, data.to)) {
+      throw new OrderError(
+        'invalid_transition',
+        `Недопустимый переход статуса оплаты: "${from}" → "${data.to}".`,
+      );
+    }
+
+    await sql.begin(async (tx: TransactionSql) => {
+      // paid проставляет paid_at (§2.8 B); прочие переходы не трогают paid_at.
+      if (data.to === 'paid') {
+        await tx`
+          UPDATE orders
+             SET payment_status = ${data.to}, paid_at = now(), updated_at = now()
+           WHERE id = ${data.id}
+        `;
+      } else {
+        await tx`
+          UPDATE orders
+             SET payment_status = ${data.to}, updated_at = now()
+           WHERE id = ${data.id}
+        `;
+      }
+      await tx`
+        INSERT INTO order_status_history
+          (order_id, kind, from_status, to_status, actor_user_id, comment)
+        VALUES
+          (${data.id}, 'payment', ${from}, ${data.to}, ${ctx.user.id}, ${data.comment ?? ''})
+      `;
+    });
+
+    const after = await getOrderById(data.id);
+    return {
+      result: orderDetailResult(after!),
+      revalidate: [ORDERS_LIST_PATH, orderPath(data.id)],
+      audit: {
+        action: 'order.payment.change',
+        entityType: 'order',
+        entityId: data.id,
+        before: { paymentStatus: from },
+        after: { paymentStatus: data.to },
+      },
+    };
+  },
+});
+
+// =============================================================================
+// СМЕНА СТАТУСА ДОСТАВКИ (orders.write) — §2.8 C; Этап 4 синхронизирует со СДЭК.
+// =============================================================================
+
+export const setDeliveryStatus = defineAction({
+  permission: 'orders.write',
+  input: SetDeliveryStatusSchema,
+  handler: async (data, ctx) => {
+    assertOrdersEnabled();
+    const current = await getOrderById(data.id);
+    if (!current) {
+      throw new OrderError('not_found', 'Заказ не найден.');
+    }
+    const from = current.order.deliveryStatus;
+    if (!canTransition('delivery', from, data.to)) {
+      throw new OrderError(
+        'invalid_transition',
+        `Недопустимый переход статуса доставки: "${from}" → "${data.to}".`,
+      );
+    }
+
+    await sql.begin(async (tx: TransactionSql) => {
+      await tx`
+        UPDATE orders
+           SET delivery_status = ${data.to}, updated_at = now()
+         WHERE id = ${data.id}
+      `;
+      await tx`
+        INSERT INTO order_status_history
+          (order_id, kind, from_status, to_status, actor_user_id, comment)
+        VALUES
+          (${data.id}, 'delivery', ${from}, ${data.to}, ${ctx.user.id}, ${data.comment ?? ''})
+      `;
+    });
+
+    const after = await getOrderById(data.id);
+    return {
+      result: orderDetailResult(after!),
+      revalidate: [ORDERS_LIST_PATH, orderPath(data.id)],
+      audit: {
+        action: 'order.delivery.change',
+        entityType: 'order',
+        entityId: data.id,
+        before: { deliveryStatus: from },
+        after: { deliveryStatus: data.to },
+      },
+    };
+  },
+});
+
+// =============================================================================
+// РУЧНОЕ СОЗДАНИЕ ЗАКАЗА (orders.write) — source='admin', §4.1.
+// =============================================================================
+
+export const createManualOrder = defineAction({
+  permission: 'orders.write',
+  input: ManualOrderSchema,
+  handler: async (data, ctx) => {
+    assertOrdersEnabled();
+    // Та же серверная ре-валидация цен/остатков/резерв, что у витрины (ADR-010),
+    // но с источником 'admin' и actorUserId для истории.
+    const created = await createOrder(data, {
+      source: 'admin',
+      ip: ctx.ip || null,
+      actorUserId: ctx.user.id,
+    });
+    if (!created.ok) {
+      throw new OrderError(created.code, created.message);
+    }
+    return {
+      result: { id: created.order.id, number: created.order.number, order: created.order },
+      revalidate: [ORDERS_LIST_PATH, orderPath(created.order.id)],
+      audit: {
+        action: 'order.create.manual',
+        entityType: 'order',
+        entityId: created.order.id,
+        after: {
+          number: created.order.number,
+          grandTotal: created.order.grandTotal,
+          source: created.order.source,
+        },
+      },
+    };
+  },
+});
+
+// =============================================================================
+// ПРОМОКОДЫ — CRUD (orders.write), аудит 'promo.*', §4.1.
+// =============================================================================
+
+/** promo_codes row → PromoCode (минимальный маппер для RETURNING). */
+function mapPromoRow(row: Record<string, unknown>): PromoCode {
+  return {
+    id: String(row.id),
+    code: String(row.code),
+    kind: row.kind as PromoCode['kind'],
+    value: String(row.value),
+    minOrderTotal: String(row.min_order_total),
+    maxDiscount: row.max_discount === null || row.max_discount === undefined ? null : String(row.max_discount),
+    usageLimit: row.usage_limit === null || row.usage_limit === undefined ? null : Number(row.usage_limit),
+    perCustomerLimit:
+      row.per_customer_limit === null || row.per_customer_limit === undefined
+        ? null
+        : Number(row.per_customer_limit),
+    usedCount: Number(row.used_count),
+    startsAt: row.starts_at ? new Date(row.starts_at as string) : null,
+    endsAt: row.ends_at ? new Date(row.ends_at as string) : null,
+    isActive: Boolean(row.is_active),
+    bogoBuyQty: row.bogo_buy_qty === null || row.bogo_buy_qty === undefined ? null : Number(row.bogo_buy_qty),
+    bogoPayQty: row.bogo_pay_qty === null || row.bogo_pay_qty === undefined ? null : Number(row.bogo_pay_qty),
+    comment: String(row.comment ?? ''),
+    createdAt: new Date(row.created_at as string),
+    updatedAt: new Date(row.updated_at as string),
+  };
+}
+
+export const createPromoCode = defineAction({
+  permission: 'orders.write',
+  input: PromoCreateSchema,
+  handler: async (data, _ctx) => {
+    assertOrdersEnabled();
+    let rows: Record<string, unknown>[];
+    try {
+      rows = await sql<Record<string, unknown>[]>`
+        INSERT INTO promo_codes (
+          code, kind, value, min_order_total, max_discount, usage_limit,
+          per_customer_limit, starts_at, ends_at, is_active,
+          bogo_buy_qty, bogo_pay_qty, comment
+        ) VALUES (
+          ${data.code}, ${data.kind}, ${data.value}, ${data.minOrderTotal},
+          ${data.maxDiscount ?? null}, ${data.usageLimit ?? null},
+          ${data.perCustomerLimit ?? null}, ${data.startsAt ?? null},
+          ${data.endsAt ?? null}, ${data.isActive}, ${data.bogoBuyQty ?? null},
+          ${data.bogoPayQty ?? null}, ${data.comment}
+        )
+        RETURNING *
+      `;
+    } catch (err) {
+      if (isUniqueViolation(err)) {
+        throw new OrderError('duplicate_code', 'Промокод с таким кодом уже существует.');
+      }
+      throw err;
+    }
+    const promo = mapPromoRow(rows[0]!);
+    return {
+      result: promo,
+      revalidate: [PROMO_LIST_PATH],
+      audit: {
+        action: 'promo.create',
+        entityType: 'promo_code',
+        entityId: promo.id,
+        after: { code: promo.code, kind: promo.kind, value: promo.value },
+      },
+    };
+  },
+});
+
+export const updatePromoCode = defineAction({
+  permission: 'orders.write',
+  input: PromoUpdateSchema,
+  handler: async (data, _ctx) => {
+    assertOrdersEnabled();
+    const before = await sql<Record<string, unknown>[]>`
+      SELECT * FROM promo_codes WHERE id = ${data.id} LIMIT 1
+    `;
+    if (!before[0]) {
+      throw new OrderError('not_found', 'Промокод не найден.');
+    }
+    let after: Record<string, unknown>[];
+    try {
+      after = await sql<Record<string, unknown>[]>`
+        UPDATE promo_codes SET
+          code            = COALESCE(${data.code ?? null}, code),
+          kind            = COALESCE(${data.kind ?? null}, kind),
+          value           = COALESCE(${data.value ?? null}, value),
+          min_order_total = COALESCE(${data.minOrderTotal ?? null}, min_order_total),
+          max_discount    = CASE WHEN ${data.maxDiscount !== undefined}
+                                 THEN ${data.maxDiscount ?? null} ELSE max_discount END,
+          usage_limit     = CASE WHEN ${data.usageLimit !== undefined}
+                                 THEN ${data.usageLimit ?? null} ELSE usage_limit END,
+          per_customer_limit = CASE WHEN ${data.perCustomerLimit !== undefined}
+                                 THEN ${data.perCustomerLimit ?? null} ELSE per_customer_limit END,
+          starts_at       = CASE WHEN ${data.startsAt !== undefined}
+                                 THEN ${data.startsAt ?? null} ELSE starts_at END,
+          ends_at         = CASE WHEN ${data.endsAt !== undefined}
+                                 THEN ${data.endsAt ?? null} ELSE ends_at END,
+          is_active       = COALESCE(${data.isActive ?? null}, is_active),
+          bogo_buy_qty    = CASE WHEN ${data.bogoBuyQty !== undefined}
+                                 THEN ${data.bogoBuyQty ?? null} ELSE bogo_buy_qty END,
+          bogo_pay_qty    = CASE WHEN ${data.bogoPayQty !== undefined}
+                                 THEN ${data.bogoPayQty ?? null} ELSE bogo_pay_qty END,
+          comment         = COALESCE(${data.comment ?? null}, comment),
+          updated_at      = now()
+        WHERE id = ${data.id}
+        RETURNING *
+      `;
+    } catch (err) {
+      if (isUniqueViolation(err)) {
+        throw new OrderError('duplicate_code', 'Промокод с таким кодом уже существует.');
+      }
+      throw err;
+    }
+    const promo = mapPromoRow(after[0]!);
+    return {
+      result: promo,
+      revalidate: [PROMO_LIST_PATH],
+      audit: {
+        action: 'promo.update',
+        entityType: 'promo_code',
+        entityId: data.id,
+        before: before[0],
+        after: after[0],
+      },
+    };
+  },
+});
+
+/**
+ * Деактивация промокода (мягкое «удаление»): is_active=false. История заказов не
+ * рушится (snapshot promo_code + ON DELETE SET NULL); код остаётся для отчётов.
+ */
+export const deactivatePromoCode = defineAction({
+  permission: 'orders.write',
+  input: PromoIdSchema,
+  handler: async (data, _ctx) => {
+    assertOrdersEnabled();
+    const rows = await sql<{ id: string }[]>`
+      UPDATE promo_codes SET is_active = false, updated_at = now()
+      WHERE id = ${data.id}
+      RETURNING id
+    `;
+    if (!rows[0]) {
+      throw new OrderError('not_found', 'Промокод не найден.');
+    }
+    return {
+      result: { id: data.id },
+      revalidate: [PROMO_LIST_PATH],
+      audit: {
+        action: 'promo.deactivate',
+        entityType: 'promo_code',
+        entityId: data.id,
+        after: { isActive: false },
+      },
+    };
+  },
+});
+
+/**
+ * Полное удаление промокода (DELETE). История заказов не рушится: orders.promo_code
+ * (снимок) сохраняется, promo_code_id → NULL (ON DELETE SET NULL, §2.1).
+ */
+export const deletePromoCode = defineAction({
+  permission: 'orders.write',
+  input: PromoIdSchema,
+  handler: async (data, _ctx) => {
+    assertOrdersEnabled();
+    const rows = await sql<{ id: string }[]>`
+      DELETE FROM promo_codes WHERE id = ${data.id} RETURNING id
+    `;
+    if (!rows[0]) {
+      throw new OrderError('not_found', 'Промокод не найден.');
+    }
+    return {
+      result: { id: data.id },
+      revalidate: [PROMO_LIST_PATH],
+      audit: {
+        action: 'promo.delete',
+        entityType: 'promo_code',
+        entityId: data.id,
+      },
+    };
+  },
+});
