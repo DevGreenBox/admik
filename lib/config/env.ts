@@ -62,6 +62,57 @@ const envSchema = z.object({
   // Префикс человекочитаемого номера заказа (docs/07 §2.7): `ПРЕФИКС-ГОД-NNNNNN`.
   // По умолчанию пусто (номер вида `2026-000123`); для магазина задаётся в env.
   SHOP_ORDER_PREFIX: z.string().default(''),
+
+  // ---------------------------------------------------------------------------
+  // СДЭК (Этап 4, docs/08 §13.2). ВСЕ переменные опциональны: при пустых
+  // CDEK_ACCOUNT/CDEK_SECRET модуль работает в MOCK-режиме (см. lib/cdek/config.ts
+  // isCdekMock). Это позволяет demo-магазину и CI работать без боевых ключей.
+  // ---------------------------------------------------------------------------
+  // Базовый URL API. Prod: https://api.cdek.ru, test-контур: https://api.edu.cdek.ru.
+  CDEK_BASE_URL: z.string().url().default('https://api.cdek.ru'),
+  // client_id / client_secret. ПУСТО → mock-режим.
+  CDEK_ACCOUNT: z.string().optional(),
+  CDEK_SECRET: z.string().optional(),
+  // Тестовый контур СДЭК. coerce: 'true'/'1'/'false'/'0' из строки env → boolean.
+  CDEK_TEST_MODE: z
+    .enum(['true', 'false', '1', '0'])
+    .default('false')
+    .transform((v) => v === 'true' || v === '1'),
+  // Код города отправления (дефолт 44 = Москва). Взаимоисключим с CDEK_SHIPMENT_POINT.
+  CDEK_FROM_LOCATION_CODE: z.coerce.number().int().min(0).default(44),
+  // Код склада отправителя (если задан — используется вместо from_location).
+  CDEK_SHIPMENT_POINT: z.string().optional(),
+  // Тариф по умолчанию (дефолт 136).
+  CDEK_DEFAULT_TARIFF: z.coerce.number().int().min(0).default(136),
+  // Белый список тарифов (csv); пусто = разрешены все. Парсится в config.ts.
+  CDEK_ALLOWED_TARIFFS: z.string().optional(),
+  // Отправитель (для buildPayload, пакет D).
+  CDEK_SENDER_NAME: z.string().optional(),
+  CDEK_SENDER_CONTACT_NAME: z.string().optional(),
+  CDEK_SENDER_PHONE: z.string().optional(),
+  CDEK_SENDER_EMAIL: z.string().optional(),
+  CDEK_SENDER_INN: z.string().optional(),
+  // Дефолтные габариты упаковки (аналог cdek-dimensions.php */* fallback).
+  CDEK_DEFAULT_WEIGHT_G: z.coerce.number().int().min(0).default(500),
+  CDEK_DEFAULT_LENGTH_CM: z.coerce.number().int().min(0).default(30),
+  CDEK_DEFAULT_WIDTH_CM: z.coerce.number().int().min(0).default(20),
+  CDEK_DEFAULT_HEIGHT_CM: z.coerce.number().int().min(0).default(10),
+  // Секрет ?key= для webhook (пакет F).
+  CDEK_WEBHOOK_SECRET: z.string().optional(),
+  // IP/CIDR whitelist webhook (csv); пусто допустимо лишь в test-режиме.
+  CDEK_WEBHOOK_IPS: z.string().optional(),
+  // Доверять прокси-заголовку IP (за Caddy).
+  CDEK_WEBHOOK_TRUST_PROXY: z
+    .enum(['true', 'false', '1', '0'])
+    .default('false')
+    .transform((v) => v === 'true' || v === '1'),
+  // Секрет cron-роутов (пакет G).
+  CDEK_CRON_SECRET: z.string().optional(),
+  // Kill-switch авто-создания отправлений (дефолт true).
+  CDEK_CREATE_ENABLED: z
+    .enum(['true', 'false', '1', '0'])
+    .default('true')
+    .transform((v) => v === 'true' || v === '1'),
 });
 
 export type Env = z.infer<typeof envSchema>;

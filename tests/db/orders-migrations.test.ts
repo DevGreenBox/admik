@@ -55,8 +55,9 @@ describe('db/migrations — заказы 0012..0016 (юнит)', () => {
     for (const v of ORDER_VERSIONS) {
       expect(versions).toContain(v);
     }
-    // Последняя миграция — именно 0016 (диапазон заказов завершает цепочку).
-    expect(versions[versions.length - 1]).toBe('0016');
+    // 0016 завершает диапазон ЗАКАЗОВ; цепочку миграций после Этапа 4
+    // продолжает СДЭК (0017+), поэтому проверяем присутствие 0016, а не «хвост».
+    expect(versions).toContain('0016');
     expect(parseMigrationName('0016_order_number_counter.sql')).toEqual({
       version: '0016',
       name: 'order_number_counter',
