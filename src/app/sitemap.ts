@@ -2,9 +2,11 @@ import { MetadataRoute } from "next";
 import { listProducts } from "@/lib/admik";
 import { getSiteUrl } from "@/lib/site-url";
 
-const BASE = getSiteUrl();
+// Рантайм-чтение NEXT_PUBLIC_SITE_URL: иначе Next запекает build-time URL (localhost).
+export const dynamic = "force-dynamic";
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
+  const BASE = getSiteUrl();
   let productUrls: MetadataRoute.Sitemap = [];
   try {
     const items = await listProducts({ limit: 200 });

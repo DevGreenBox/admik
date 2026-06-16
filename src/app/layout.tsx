@@ -2,36 +2,41 @@ import type { Metadata } from "next";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import Providers from "@/components/Providers";
-import { getSiteUrl } from "@/lib/site-url";
+import { getSiteUrl, isNoindex } from "@/lib/site-url";
 import "./globals.css";
 
-const SITE_URL = getSiteUrl();
-export const metadata: Metadata = {
-  metadataBase: new URL(SITE_URL),
-  title: {
-    default: "THE CASE — Premium Medical Uniform",
-    template: "%s | THE CASE",
-  },
-  description:
-    "Премиальная медицинская форма нового поколения. Fashion + Medicine. Минимализм, уверенность, чистые силуэты.",
-  keywords: ["медицинская форма", "THE CASE", "medical uniform", "premium scrubs", "медицинская одежда"],
-  authors: [{ name: "THE CASE" }],
-  openGraph: {
-    title: "THE CASE — Premium Medical Uniform",
-    description: "Fashion meets medicine. Премиальная медицинская униформа.",
-    type: "website",
-    locale: "ru_RU",
-    siteName: "THE CASE",
-    images: [{ url: "/images/home/banner-main.webp", width: 3620, height: 1810, alt: "THE CASE" }],
-  },
-  twitter: {
-    card: "summary_large_image",
-    title: "THE CASE — Premium Medical Uniform",
-    description: "Fashion meets medicine.",
-    images: ["/images/home/banner-main.webp"],
-  },
-  robots: { index: true, follow: true },
-};
+// generateMetadata (а не статический объект) — чтобы metadataBase и robots
+// читали env в РАНТАЙМЕ: иначе Next запекает build-time URL (localhost) и
+// открытую индексацию в standalone-сборку. STOREFRONT_NOINDEX управляет
+// noindex/nofollow для всех страниц витрины (тестовый стенд — закрыт).
+export function generateMetadata(): Metadata {
+  return {
+    metadataBase: new URL(getSiteUrl()),
+    title: {
+      default: "THE CASE — Premium Medical Uniform",
+      template: "%s | THE CASE",
+    },
+    description:
+      "Премиальная медицинская форма нового поколения. Fashion + Medicine. Минимализм, уверенность, чистые силуэты.",
+    keywords: ["медицинская форма", "THE CASE", "medical uniform", "premium scrubs", "медицинская одежда"],
+    authors: [{ name: "THE CASE" }],
+    openGraph: {
+      title: "THE CASE — Premium Medical Uniform",
+      description: "Fashion meets medicine. Премиальная медицинская униформа.",
+      type: "website",
+      locale: "ru_RU",
+      siteName: "THE CASE",
+      images: [{ url: "/images/home/banner-main.webp", width: 3620, height: 1810, alt: "THE CASE" }],
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: "THE CASE — Premium Medical Uniform",
+      description: "Fashion meets medicine.",
+      images: ["/images/home/banner-main.webp"],
+    },
+    robots: isNoindex() ? { index: false, follow: false } : { index: true, follow: true },
+  };
+}
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
