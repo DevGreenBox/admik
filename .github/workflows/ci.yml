@@ -105,3 +105,71 @@ jobs:
 
       - name: check-migrations.sh (все db/migrations/*.sql)
         run: bash scripts/check-migrations.sh db/migrations/*.sql
+
+  # ---------------------------------------------------------------------------
+  # Docker-смок «copy-paste-деплоя» (Этап 6, бэклог-пункт e; docs/00).
+  # Собирает рантайм-образ из Dockerfile, поднимает стек, прогоняет
+  # init-shop ВНУТРИ контейнера app (make init) и smoke по эндпоинтам
+  # (make smoke). Ловит регрессии Dockerfile/standalone-трассировки и
+  # сценария инициализации, которые остальные job'ы (pnpm build) не видят.
+  # Без боевых ключей: СДЭК/Storefront/S3 — в mock/local-режиме (ADR-003/011).
+  # ---------------------------------------------------------------------------
+  docker-smoke:
+    name: Docker · build · init · smoke
+    runs-on: ubuntu-latest
+    # Прод-compose + CI-оверлей подключаются ко ВСЕМ шагам, включая make
+    # init/smoke, которые внутри вызывают docker compose. Так Makefile-цели
+    # видят оба файла (порт app опубликован, depends_on ослаблен).
+    env:
+      COMPOSE_FILE: docker-compose.yml:docker-compose.ci.yml
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Подготовить .env (копия .env.example + эфемерные CI-значения)
+        # Берём именно .env.example — так смок проверяет ЗАДОКУМЕНТИРОВАННЫЙ
+        # шаблон (docs/09: cp .env.example .env). Значения с пробелами в нём
+        # (SHOP_NAME, BACKUP_CRON) теперь корректно читаются load_env_file.
+        # Поверх дописываем одноразовые значения для автоматического прогона
+        # (стенд удаляется в конце job): задаём OWNER_PASSWORD (иначе owner.mjs
+        # генерирует случайный) и параметры смока на опубликованный порт.
+        run: |
+          cp .env.example .env
+          {
+            echo ""
+            echo "# --- CI overrides (docker-smoke) ---"
+            echo "OWNER_PASSWORD=ci-owner-password"
+            echo "SMOKE_BASE_URL=http://localhost:3000"
+            echo "SMOKE_RETRIES=40"
+            echo "SMOKE_RETRY_DELAY=3"
+          } >> .env
+
+      - name: Сборка образа и запуск стека (postgres + redis + minio + app)
+        run: docker compose up -d --build postgres redis minio app
+
+      - name: Дождаться liveness приложения (/api/health)
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:3000/api/health 2>/dev/null | grep -q '"status":"ok"'; then
+              echo "app live (попытка $i)"; exit 0
+            fi
+            echo "... жду app ($i/60)"; sleep 3
+          done
+          echo "app не поднялся за отведённое время"; exit 1
+
+      - name: Инициализация магазина внутри контейнера app (make init)
+        run: make init
+
+      - name: Smoke-проверка эндпоинтов (make smoke)
+        run: make smoke
+
+      - name: Диагностика при провале — статус и логи стека
+        if: failure()
+        run: |
+          docker compose ps || true
+          docker compose logs --no-color --tail=300 || true
+
+      - name: Остановить и очистить стенд
+        if: always()
+        run: docker compose down -v || true

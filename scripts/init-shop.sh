@@ -38,6 +38,31 @@ ok()    { printf "${GREEN}  ✔${NC} %s\n" "$1"; }
 warn()  { printf "${YELLOW}  ⚠${NC} %s\n" "$1"; }
 fail()  { printf "${RED}  ✗${NC} %s\n" "$1" >&2; }
 
+# Безопасная загрузка KEY=VALUE из .env в окружение БЕЗ shell-eval: значение
+# берётся дословно (всё после первого '='), без word-splitting и глоббинга — как
+# env_file в docker compose. Поддерживает префикс `export `, комментарии (#),
+# пустые строки и снятие одной пары окружающих кавычек. Это устойчиво к значениям
+# вида `BACKUP_CRON=0 3 * * *` и `SHOP_NAME=Мой магазин`, которые ломали `. .env`
+# (word-splitting → «3: command not found», глоббинг «*»).
+load_env_file() {
+  local file="$1" line key value
+  while IFS= read -r line || [ -n "${line}" ]; do
+    line="${line#"${line%%[![:space:]]*}"}"        # срезаем ведущие пробелы
+    [ -z "${line}" ] && continue                    # пустая строка
+    case "${line}" in \#*) continue ;; esac         # комментарий
+    case "${line}" in export\ *) line="${line#export }" ;; esac
+    case "${line}" in *=*) : ;; *) continue ;; esac # не KEY=VALUE — пропускаем
+    key="${line%%=*}"
+    value="${line#*=}"
+    case "${key}" in ''|[!A-Za-z_]*|*[!A-Za-z0-9_]*) continue ;; esac
+    case "${value}" in
+      \"*\") value="${value#\"}"; value="${value%\"}" ;;
+      \'*\') value="${value#\'}"; value="${value%\'}" ;;
+    esac
+    export "${key}=${value}"
+  done < "${file}"
+}
+
 # Определяем корень проекта (на уровень выше каталога scripts),
 # чтобы скрипт работал из любой директории.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -49,25 +74,25 @@ MIGRATIONS_DIR="${PROJECT_ROOT}/db/migrations"
 printf "${BOLD}=== Admik · инициализация магазина ===${NC}\n\n"
 
 # -----------------------------------------------------------------------------
-# Шаг 1. Проверка файла конфигурации .env
+# Шаг 1. Конфигурация: файл .env (на хосте) ИЛИ переменные окружения (в контейнере)
 # -----------------------------------------------------------------------------
-step "Шаг 1/5. Проверяю конфигурацию (.env)"
+step "Шаг 1/5. Проверяю конфигурацию (.env / переменные окружения)"
 
-if [ ! -f "${PROJECT_ROOT}/.env" ]; then
-  fail "Файл .env не найден."
-  warn "Скопируйте шаблон и заполните значения:"
-  warn "    cp .env.example .env"
-  exit 1
+# Конфигурация приходит ДВУМЯ способами:
+#   • на хосте — файлом .env рядом с проектом (его заполняет владелец магазина);
+#   • ВНУТРИ контейнера app — переменными окружения (docker compose env_file),
+#     при этом .env как ФАЙЛ в образ не кладётся (секреты не пекутся в образ).
+# Именно так init-shop запускается штатно: `docker compose exec app …`
+# (make init / scripts/deploy.sh). Поэтому файл .env ОПЦИОНАЛЕН: если есть —
+# безопасно загружаем его (без shell-eval), иначе используем уже заданное окружение.
+if [ -f "${PROJECT_ROOT}/.env" ]; then
+  load_env_file "${PROJECT_ROOT}/.env"
+  ok ".env найден и загружен"
+else
+  warn ".env-файл не найден — использую переменные окружения (штатно при запуске внутри контейнера app)"
 fi
 
-# Подгружаем переменные из .env в окружение скрипта.
-# set -a включает авто-экспорт всех присваиваемых переменных.
-set -a
-# shellcheck disable=SC1091
-. "${PROJECT_ROOT}/.env"
-set +a
-
-# Проверяем, что заданы критичные переменные подключения к БД.
+# Проверяем, что заданы критичные переменные подключения к БД (из файла ИЛИ окружения).
 MISSING=""
 [ -z "${DATABASE_URL:-}" ]      && MISSING="${MISSING} DATABASE_URL"
 [ -z "${POSTGRES_USER:-}" ]     && MISSING="${MISSING} POSTGRES_USER"
@@ -75,11 +100,12 @@ MISSING=""
 [ -z "${POSTGRES_DB:-}" ]       && MISSING="${MISSING} POSTGRES_DB"
 
 if [ -n "${MISSING}" ]; then
-  fail "В .env не заполнены обязательные переменные:${MISSING}"
-  warn "Откройте .env и задайте значения, затем запустите скрипт снова."
+  fail "Не заданы обязательные переменные:${MISSING}"
+  warn "На хосте: cp .env.example .env и заполните значения."
+  warn "В контейнере: убедитесь, что они переданы (docker compose env_file: .env)."
   exit 1
 fi
-ok ".env найден, обязательные переменные заданы"
+ok "Обязательные переменные заданы"
 
 # -----------------------------------------------------------------------------
 # Шаг 2. Ожидание готовности PostgreSQL

@@ -48,18 +48,39 @@ pass()  { printf "${GREEN}  ✔${NC} %s\n" "$1"; }
 warn()  { printf "${YELLOW}  ⚠${NC} %s\n" "$1"; }
 fail()  { printf "${RED}  ✗${NC} %s\n" "$1" >&2; }
 
+# Безопасная загрузка KEY=VALUE из .env в окружение БЕЗ shell-eval: значение
+# берётся дословно (всё после первого '='), без word-splitting и глоббинга — как
+# env_file в docker compose. Устойчиво к значениям с пробелами/звёздочками
+# (`BACKUP_CRON=0 3 * * *`, `SHOP_NAME=Мой магазин`), которые ломали `. .env`.
+load_env_file() {
+  local file="$1" line key value
+  while IFS= read -r line || [ -n "${line}" ]; do
+    line="${line#"${line%%[![:space:]]*}"}"
+    [ -z "${line}" ] && continue
+    case "${line}" in \#*) continue ;; esac
+    case "${line}" in export\ *) line="${line#export }" ;; esac
+    case "${line}" in *=*) : ;; *) continue ;; esac
+    key="${line%%=*}"
+    value="${line#*=}"
+    case "${key}" in ''|[!A-Za-z_]*|*[!A-Za-z0-9_]*) continue ;; esac
+    case "${value}" in
+      \"*\") value="${value#\"}"; value="${value%\"}" ;;
+      \'*\') value="${value#\'}"; value="${value%\'}" ;;
+    esac
+    export "${key}=${value}"
+  done < "${file}"
+}
+
 # Определяем корень проекта (на уровень выше каталога scripts),
 # чтобы скрипт работал из любой директории и нашёл .env.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # Подхватываем .env, если он есть рядом (для SMOKE_BASE_URL и т.п.).
-# Не обязателен: дефолты ниже работают и без .env.
+# Не обязателен: дефолты ниже работают и без .env. Загружаем БЕЗ shell-eval
+# (load_env_file), чтобы значения с пробелами/звёздочками в .env не ломали smoke.
 if [ -f "${PROJECT_ROOT}/.env" ]; then
-  set -a
-  # shellcheck disable=SC1091
-  . "${PROJECT_ROOT}/.env"
-  set +a
+  load_env_file "${PROJECT_ROOT}/.env"
 fi
 
 # -----------------------------------------------------------------------------
