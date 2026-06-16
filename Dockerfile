@@ -79,6 +79,10 @@ COPY --from=build --chown=nextjs:nodejs /app/public ./public
 COPY --from=build --chown=nextjs:nodejs /app/.next/standalone ./
 # Статика Next.js (.next/static обслуживается standalone-сервером)
 COPY --from=build --chown=nextjs:nodejs /app/.next/static ./.next/static
+# Драйвер БД для db/seed/owner.mjs (init-shop). Next standalone НЕ трассирует
+# 'postgres' в node_modules надёжно (даже как serverExternalPackages) — копируем
+# реальные файлы пакета из pnpm-стора (postgres.js zero-deps). Версия — из лок-файла.
+COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/postgres@*/node_modules/postgres ./node_modules/postgres
 # Скрипты развёртывания и SQL-миграции/seed — НЕ входят в standalone-трассировку
 # Next.js, поэтому копируются явно (нужны init-shop.sh внутри контейнера app).
 COPY --from=build --chown=nextjs:nodejs /app/scripts ./scripts
