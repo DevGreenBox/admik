@@ -104,6 +104,10 @@ services:
       # доступ по Origin-allowlist / mock. Дефолт пустой, чтобы .env без ключа
       # не валил подстановку.
       STOREFRONT_API_KEY: ${STOREFRONT_API_KEY:-}
+      # Закрыть витрину от поисковой индексации (noindex/nofollow + robots
+      # Disallow: /). 1/true — для тестового/staging стенда; пусто — боевой
+      # магазин (индексация открыта). Читается в рантайме (robots/sitemap/мета).
+      STOREFRONT_NOINDEX: ${STOREFRONT_NOINDEX:-}
     healthcheck:
       # Витрина «жива», если корневая страница отвечает (Next.js standalone :3000).
       test: ["CMD", "node", "-e", "fetch('http://localhost:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
