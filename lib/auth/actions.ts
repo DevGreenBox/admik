@@ -45,7 +45,7 @@ import { writeAudit } from '@/lib/audit/log';
 // Единое сообщение об ошибке логина (§4.4) — не раскрывает, что именно неверно.
 // -----------------------------------------------------------------------------
 
-const LOGIN_ERROR = 'Неверный email или пароль' as const;
+const LOGIN_ERROR = 'Неверный логин или пароль' as const;
 
 /** Результат логина для формы (логин не редиректит до успеха). */
 export type LoginResult =
@@ -62,7 +62,10 @@ export type ChangePasswordResult =
 // -----------------------------------------------------------------------------
 
 const loginSchema = z.object({
-  email: z.string().trim().email(),
+  // Логин ИЛИ email: владелец может входить произвольным значением (напр. `admin`),
+  // не только email. Значение хранится в колонке users.email (citext, поиск
+  // регистронезависим). Формат не ограничиваем — только trim + непустая строка.
+  email: z.string().trim().min(1).max(200),
   // Пароль на входе валидируем минимально (не раскрываем политику на логине).
   password: z.string().min(1),
 });
@@ -134,8 +137,8 @@ interface UserAuthRow {
  *
  * Поток (§4.4 timing-защита, §4.5 rate-limit):
  *   1) Zod-валидация входа → при ошибке единое сообщение (не раскрываем детали);
- *   2) rate-limit по ip и email (checkLoginRate); при блокировке — единое сообщение;
- *   3) поиск пользователя по email; если нет — verifyDummy (уравнивание времени);
+ *   2) rate-limit по ip и логину (checkLoginRate); при блокировке — единое сообщение;
+ *   3) поиск пользователя по логину (колонка email); если нет — verifyDummy (уравнивание времени);
  *   4) verifyPassword; при неудаче registerLoginFailure + audit 'auth.login_failed';
  *   5) при успехе resetLoginFailures, createSession, setSessionCookie,
  *      audit 'auth.login', обновление last_login_at, redirect '/admin'.
@@ -153,7 +156,7 @@ export async function login(
   const { email, password } = parsed.data;
   const { ip, userAgent } = await getRequestMeta();
 
-  // (2) Rate-limit по ip и email (§4.5). Любая блокировка → единое сообщение.
+  // (2) Rate-limit по ip и логину (§4.5). Любая блокировка → единое сообщение.
   const ipKey = `login:fail:ip:${ip ?? 'unknown'}`;
   const emailKey = `login:fail:email:${email.toLowerCase()}`;
   const [ipRate, emailRate] = await Promise.all([

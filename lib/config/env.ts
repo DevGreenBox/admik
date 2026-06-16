@@ -31,7 +31,9 @@ const envSchema = z.object({
   // Seed владельца магазина (docs/04 §4.2). Используются init-shop при первом
   // развёртывании: создаётся учётка владельца (is_owner). Если OWNER_PASSWORD
   // не задан — owner.mjs генерирует случайный пароль и печатает его один раз.
-  OWNER_EMAIL: z.string().email().optional(),
+  // OWNER_EMAIL — это ЛОГИН владельца: произвольная строка (напр. `admin`) ИЛИ
+  // email. Формат не ограничиваем (вход в админку принимает логин-или-email).
+  OWNER_EMAIL: z.string().trim().min(1).optional(),
   OWNER_PASSWORD: z.string().optional(),
 
   // Пароли ролей БД (ADR-002/ADR-006, §3.4). Передаются в psql при накате
