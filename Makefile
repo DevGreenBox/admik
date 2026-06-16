@@ -10,8 +10,8 @@
 #   make deploy  — единый сценарий: up → init → smoke (scripts/deploy.sh)
 #   make logs    — смотреть логи стека (Ctrl-C для выхода)
 #   make down    — остановить стек
-#   make backup  — резервная копия (реализуется в волне W2)
-#   make update  — обновление без простоя (реализуется в волне W4)
+#   make backup  — резервная копия БД и медиа (scripts/backup.sh)
+#   make update  — обновление без простоя с откатом (scripts/update.sh)
 # =============================================================================
 
 # Все цели — не файлы, поэтому объявляем .PHONY (иначе одноимённый файл
@@ -29,8 +29,8 @@ help:
 	@echo "  make deploy  — up + init + smoke (единый сценарий)"
 	@echo "  make logs    — смотреть логи стека"
 	@echo "  make down    — остановить стек"
-	@echo "  make backup  — резервная копия (волна W2)"
-	@echo "  make update  — обновление без простоя (волна W4)"
+	@echo "  make backup  — резервная копия БД и медиа"
+	@echo "  make update  — обновление без простоя с откатом"
 
 up:
 	docker compose up -d
@@ -53,9 +53,9 @@ logs:
 down:
 	docker compose down
 
-# --- Заглушки будущих волн (не ломают `make -n`) ---------------------------
+# --- Резервное копирование и обновление (волны W2/W4) ----------------------
 backup:
-	@echo "backup: реализуется в волне W2 (scripts/backup.sh) — пока не доступно."
+	./scripts/backup.sh
 
 update:
-	@echo "update: реализуется в волне W4 (scripts/update.sh) — пока не доступно."
+	./scripts/update.sh
