@@ -144,8 +144,8 @@ S3_ENDPOINT_VAL="${S3_ENDPOINT:-}"
 S3_ACCESS_KEY_VAL="${S3_ACCESS_KEY:-}"
 S3_SECRET_KEY_VAL="${S3_SECRET_KEY:-}"
 
-# mc — MinIO Client; временный alias 'backupsrc' прописываем в локальный конфиг
-# и удаляем по выходу. Имя alias не магазино-специфично.
+# mc — MinIO Client; временный alias (имя см. в MC_ALIAS ниже) прописываем в
+# локальный конфиг и удаляем по выходу. Имя alias не магазино-специфично.
 MC_ALIAS="adminbackup"
 cleanup_mc() {
   if command -v mc >/dev/null 2>&1; then

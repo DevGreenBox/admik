@@ -34,6 +34,23 @@ export function isSensitiveKey(key: string): boolean {
 }
 
 /**
+ * Маскирование учётных данных в userinfo URL внутри произвольной строки
+ * (бэклог Этапа 6, пункт b). Закрывает риск: секрет, попавший в ЗНАЧЕНИЕ под
+ * НЕсекретным ключом (например connection string `postgres://user:pass@host`
+ * под ключом `url`/`note`), не вырезается маскированием по имени ключа.
+ *
+ * Маскируется ТОЛЬКО пароль в userinfo (`scheme://[user]:PASSWORD@host` → `:***@`),
+ * имя пользователя и остальной URL сохраняются. Консервативно: трогаем лишь
+ * строки с `scheme://…:…@` — обычные URL с портом (`host:5432`), email и
+ * SSH-строки (`git@host`) не затрагиваются (нет ложных срабатываний).
+ */
+const URL_USERINFO_RE = /([a-zA-Z][a-zA-Z0-9+.-]*:\/\/[^/\s:@]*:)[^/\s@]+(@)/g;
+
+export function scrubSecretsInString(value: string): string {
+  return value.replace(URL_USERINFO_RE, '$1***$2');
+}
+
+/**
  * Рекурсивно санитизирует произвольное значение (объект/массив/скаляр).
  * Не мутирует вход; вырезает ключи, помеченные isSensitiveKey.
  */
@@ -50,6 +67,10 @@ export function sanitizeValue(value: unknown): unknown {
       out[key] = sanitizeValue(val);
     }
     return out;
+  }
+  // Строка-значение: маскируем учётные данные, вшитые в userinfo URL (пункт b).
+  if (typeof value === 'string') {
+    return scrubSecretsInString(value);
   }
   return value;
 }
