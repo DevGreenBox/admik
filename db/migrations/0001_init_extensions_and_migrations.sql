@@ -34,15 +34,19 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 --   * admik_app      — рантайм приложения, только минимальный DML.
 -- Пароли — из psql-переменных (init-shop.sh передаёт -v APP_PASSWORD=... и т.п.).
 -- -----------------------------------------------------------------------------
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'admik_migrator') THEN
-    CREATE ROLE admik_migrator LOGIN PASSWORD :'MIGRATOR_PASSWORD';
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'admik_app') THEN
-    CREATE ROLE admik_app LOGIN PASSWORD :'APP_PASSWORD';
-  END IF;
-END $$;
+-- ВАЖНО: psql НЕ подставляет :переменные внутри dollar-quoted ($$...$$) блоков,
+-- поэтому роли с паролями создаём через `SELECT ... \gexec`: подстановка :'..'
+-- работает в обычном SELECT, %L безопасно квотирует пароль, WHERE NOT EXISTS даёт
+-- идемпотентность (роль уже есть → 0 строк → \gexec ничего не выполняет).
+-- (Ранее тут был DO $$..$$ с :'MIGRATOR_PASSWORD' — он не подставлялся и ломал
+-- накат на свежей БД ошибкой «syntax error at or near :».)
+SELECT format('CREATE ROLE admik_migrator LOGIN PASSWORD %L', :'MIGRATOR_PASSWORD')
+WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'admik_migrator')
+\gexec
+
+SELECT format('CREATE ROLE admik_app LOGIN PASSWORD %L', :'APP_PASSWORD')
+WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'admik_app')
+\gexec
 
 -- -----------------------------------------------------------------------------
 -- Базовые GRANT на схему (§3.4).
