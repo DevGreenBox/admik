@@ -93,6 +93,26 @@ describe('cdek/config — getCdekConfig (чтение env)', () => {
     );
   });
 
+  it('тестовый контур СДЭК (sandbox edu): edu-URL + тестовые ключи + testMode → НЕ mock', () => {
+    const source = {
+      NODE_ENV: 'test',
+      CDEK_BASE_URL: 'https://api.edu.cdek.ru',
+      CDEK_ACCOUNT: 'test-client-id',
+      CDEK_SECRET: 'test-client-secret',
+      CDEK_TEST_MODE: 'true',
+    };
+    // Ключи заданы → реальный клиент (не mock), OAuth/запросы идут на edu-контур.
+    expect(isCdekMock(source)).toBe(false);
+    const cfg = getCdekConfig(source);
+    expect(cfg.baseUrl).toBe('https://api.edu.cdek.ru');
+    expect(cfg.account).toBe('test-client-id');
+    expect(cfg.secret).toBe('test-client-secret');
+    expect(cfg.testMode).toBe(true);
+    // В test-режиме пустой webhook IP-whitelist допустим (bypass с warn) —
+    // здесь подтверждаем, что флаг прокинут в конфиг (используется webhook-роутом).
+    expect(cfg.webhookAllowedIps).toEqual([]);
+  });
+
   it('белый список тарифов из csv', () => {
     const cfg = getCdekConfig({ NODE_ENV: 'test', CDEK_ALLOWED_TARIFFS: '136, 137 ,233' });
     expect(cfg.allowedTariffs).toEqual([136, 137, 233]);
