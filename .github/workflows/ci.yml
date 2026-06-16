@@ -61,3 +61,30 @@ jobs:
         run: pnpm build
         env:
           NEXT_TELEMETRY_DISABLED: "1"
+
+  # ---------------------------------------------------------------------------
+  # Линт shell-скриптов (Этап 6): shellcheck + bash -n по каждому скрипту.
+  # Независим от основного job, гоняется параллельно.
+  # ---------------------------------------------------------------------------
+  scripts-lint:
+    name: Scripts · shellcheck · bash -n
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: shellcheck
+        run: shellcheck scripts/*.sh
+
+      - name: bash -n (синтаксис каждого скрипта)
+        run: |
+          for f in scripts/*.sh; do
+            echo "bash -n $f"
+            bash -n "$f"
+          done
