@@ -88,3 +88,20 @@ jobs:
             echo "bash -n $f"
             bash -n "$f"
           done
+
+  # ---------------------------------------------------------------------------
+  # Линтер аддитивности миграций (Этап 6, 6.4; §6.4, ADR-015).
+  # Гейт обратной совместимости: блокирует деструктивные DDL (DROP COLUMN/TABLE/
+  # CONSTRAINT, RENAME, ALTER TYPE, SET NOT NULL без DEFAULT) в db/migrations.
+  # Для простоты прогоняем по ВСЕМ миграциям (не по diff). Независимый job.
+  # ---------------------------------------------------------------------------
+  check-migrations:
+    name: Migrations · additive-only lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: check-migrations.sh (все db/migrations/*.sql)
+        run: bash scripts/check-migrations.sh db/migrations/*.sql
