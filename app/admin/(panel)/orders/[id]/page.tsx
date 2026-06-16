@@ -213,7 +213,14 @@ export default async function OrderDetailPage({
                     return (
                       <tr key={item.id}>
                         <td className="px-4 py-2">
-                          <div className="font-medium text-gray-900">{item.nameSnapshot}</div>
+                          <div className="font-medium text-gray-900">
+                            {item.nameSnapshot}
+                            {item.isGift ? (
+                              <span className="ml-2 rounded bg-green-100 px-1.5 py-0.5 text-xs font-medium text-green-700">
+                                Подарок
+                              </span>
+                            ) : null}
+                          </div>
                           {attrs.length > 0 ? (
                             <div className="text-xs text-gray-400">
                               {attrs.map(([k, v]) => `${k}: ${String(v)}`).join(', ')}
