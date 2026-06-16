@@ -24,8 +24,10 @@ import { fromMinor, normalizeMoney, toMinor } from './money';
 import {
   calculateQuote,
   effectiveUnitPriceMinor,
+  emptyScopeTargets,
   type AppliedPromo,
   type PricedLine,
+  type PromoScopeTargets,
   type QuoteResult,
 } from './pricing';
 import { validatePromo, type PromoValidationResult } from './promo';
@@ -161,7 +163,8 @@ export async function getPromoByCode(code: string): Promise<PromoCode | null> {
   const rows = await sql<Record<string, unknown>[]>`
     SELECT id, code, kind, value, min_order_total, max_discount, usage_limit,
            per_customer_limit, used_count, starts_at, ends_at, is_active,
-           bogo_buy_qty, bogo_pay_qty, comment, created_at, updated_at
+           bogo_buy_qty, bogo_pay_qty, apply_scope, priority, stackable, min_qty,
+           gift_product_id, gift_variant_id, gift_qty, comment, created_at, updated_at
     FROM promo_codes WHERE code = ${code} LIMIT 1
   `;
   return rows[0] ? mapPromoCode(rows[0]) : null;
@@ -193,6 +196,112 @@ export async function getPromoWithCounts(
     ? await countCustomerRedemptions(promo.id, customerEmail)
     : 0;
   return { promo, customerRedemptions };
+}
+
+/**
+ * Промокод + счётчики + резолвнутые scope-таргеты (docs/11 §5.2.3, ADR-014 §4).
+ *
+ * Догружает promo_targets и собирает множества category/brand/product/variant
+ * id, к которым применяется акция (anti-tamper: принадлежность линии scope
+ * определит СЕРВЕР через lineInScope — линия несёт собственные categoryIds/
+ * brandId/productId/variantId из каталога, мы лишь сверяем с этими таргет-
+ * множествами). Категории/бренды НЕ разворачиваются в товарные множества: линия
+ * уже знает свои категории/бренд из product_categories / products.brand_id, что
+ * эквивалентно и дешевле. Для applyScope='cart' таргеты пусты (вся корзина).
+ */
+export async function getPromoWithTargets(
+  code: string,
+  customerEmail?: string,
+): Promise<
+  | {
+      promo: PromoCode;
+      customerRedemptions: number;
+      scopeTargets: PromoScopeTargets;
+    }
+  | null
+> {
+  const found = await getPromoWithCounts(code, customerEmail);
+  if (!found) return null;
+
+  const scopeTargets = emptyScopeTargets();
+  if (found.promo.applyScope !== 'cart') {
+    const rows = await sql<Record<string, unknown>[]>`
+      SELECT target_type, category_id, brand_id, product_id, variant_id
+      FROM promo_targets
+      WHERE promo_code_id = ${found.promo.id}
+    `;
+    for (const r of rows) {
+      if (r.category_id != null) scopeTargets.categoryIds.add(String(r.category_id));
+      if (r.brand_id != null) scopeTargets.brandIds.add(String(r.brand_id));
+      if (r.product_id != null) scopeTargets.productIds.add(String(r.product_id));
+      if (r.variant_id != null) scopeTargets.variantIds.add(String(r.variant_id));
+    }
+  }
+
+  return { promo: found.promo, customerRedemptions: found.customerRedemptions, scopeTargets };
+}
+
+/** Активная акция + резолвнутые slug категорий/брендов таргетов (публичный список). */
+export interface ActivePromotion {
+  promo: PromoCode;
+  targetCategorySlugs: string[];
+  targetBrandSlugs: string[];
+}
+
+/**
+ * Список активных акций для публичного списка-бейджей (docs/11 §5.2.4). Активность
+ * по флагу is_active и окну starts_at/ends_at относительно now. Догружает slug-и
+ * категорий/брендов таргетов (для глубоких ссылок витрины). Приватные поля
+ * (лимиты/used_count/comment/id) скрывает уже DTO-слой (toPublicPromotionDto).
+ */
+export async function listActivePromotions(now: Date = new Date()): Promise<ActivePromotion[]> {
+  const rows = await sql<Record<string, unknown>[]>`
+    SELECT id, code, kind, value, min_order_total, max_discount, usage_limit,
+           per_customer_limit, used_count, starts_at, ends_at, is_active,
+           bogo_buy_qty, bogo_pay_qty, apply_scope, priority, stackable, min_qty,
+           gift_product_id, gift_variant_id, gift_qty, comment, created_at, updated_at
+    FROM promo_codes
+    WHERE is_active = true
+      AND (starts_at IS NULL OR starts_at <= ${now})
+      AND (ends_at IS NULL OR ends_at >= ${now})
+    ORDER BY priority ASC, created_at DESC
+  `;
+  const promos = rows.map(mapPromoCode);
+  if (promos.length === 0) return [];
+
+  const ids = promos.map((p) => p.id);
+  // Slug-и таргет-категорий/брендов одним проходом (JOIN), без N+1.
+  const catRows = await sql<{ promo_code_id: string; slug: string }[]>`
+    SELECT pt.promo_code_id, c.slug
+    FROM promo_targets pt
+    JOIN categories c ON c.id = pt.category_id
+    WHERE pt.promo_code_id IN ${sql(ids)} AND pt.target_type = 'category'
+  `;
+  const brandRows = await sql<{ promo_code_id: string; slug: string }[]>`
+    SELECT pt.promo_code_id, b.slug
+    FROM promo_targets pt
+    JOIN brands b ON b.id = pt.brand_id
+    WHERE pt.promo_code_id IN ${sql(ids)} AND pt.target_type = 'brand'
+  `;
+
+  const catByPromo = new Map<string, string[]>();
+  for (const r of catRows) {
+    const arr = catByPromo.get(r.promo_code_id) ?? [];
+    arr.push(String(r.slug));
+    catByPromo.set(r.promo_code_id, arr);
+  }
+  const brandByPromo = new Map<string, string[]>();
+  for (const r of brandRows) {
+    const arr = brandByPromo.get(r.promo_code_id) ?? [];
+    arr.push(String(r.slug));
+    brandByPromo.set(r.promo_code_id, arr);
+  }
+
+  return promos.map((promo) => ({
+    promo,
+    targetCategorySlugs: catByPromo.get(promo.id) ?? [],
+    targetBrandSlugs: brandByPromo.get(promo.id) ?? [],
+  }));
 }
 
 // =============================================================================
@@ -287,6 +396,10 @@ export async function resolveCartLine(input: {
       unitPrice: fromMinor(unitMinor),
       compareAt,
       qty: input.qty,
+      // scope-разметка из каталога (anti-tamper, ADR-010): сервер проставляет
+      // категории/бренд позиции для определения принадлежности scope акции.
+      categoryIds: product.categories.map((c) => c.categoryId),
+      brandId: product.brandId,
       attributesSnapshot: variant?.attributesCache ?? product.attributesCache ?? {},
       available,
       inStock: available >= input.qty,
@@ -368,12 +481,14 @@ export async function quoteCart(
     lines.push(res.line);
   }
 
-  // Промокод (валидируем по itemsTotal, копейки).
+  // Промокод (валидируем по itemsTotal + кол-ву единиц, копейки).
   const itemsMinor = lines.reduce((acc, l) => acc + toMinor(l.unitPrice) * l.qty, 0);
+  const itemsQty = lines.reduce((acc, l) => acc + l.qty, 0);
   let promoResult: PromoValidationResult | null = null;
   let appliedPromo: AppliedPromo | null = null;
+  let scopeTargets: PromoScopeTargets = emptyScopeTargets();
   if (input.promoCode) {
-    const found = await getPromoWithCounts(input.promoCode, input.customerEmail);
+    const found = await getPromoWithTargets(input.promoCode, input.customerEmail);
     if (!found) {
       promoResult = {
         valid: false,
@@ -383,11 +498,15 @@ export async function quoteCart(
     } else {
       promoResult = validatePromo(found.promo, {
         itemsTotal: fromMinor(itemsMinor),
+        itemsQty,
         now: input.now,
         usedCount: found.promo.usedCount,
         customerRedemptions: found.customerRedemptions,
       });
-      if (promoResult.valid) appliedPromo = promoResult.promo;
+      if (promoResult.valid) {
+        appliedPromo = promoResult.promo;
+        scopeTargets = found.scopeTargets;
+      }
     }
   }
 
@@ -405,6 +524,7 @@ export async function quoteCart(
       cost: deliveryCost,
       freeThreshold,
     },
+    scopeTargets,
   });
 
   const fulfillable =
@@ -565,15 +685,18 @@ export async function createOrder(
 
   // Расчёт итога (промокод валидируем заново внутри по актуальным счётчикам).
   const itemsMinor = resolved.reduce((a, l) => a + toMinor(l.unitPrice) * l.qty, 0);
+  const itemsQty = resolved.reduce((a, l) => a + l.qty, 0);
   let appliedPromo: AppliedPromo | null = null;
   let promoRow: PromoCode | null = null;
+  let scopeTargets: PromoScopeTargets = emptyScopeTargets();
   if (input.promoCode) {
-    const found = await getPromoWithCounts(input.promoCode, input.customer.email);
+    const found = await getPromoWithTargets(input.promoCode, input.customer.email);
     if (!found) {
       return { ok: false, code: 'invalid_promo', message: 'Промокод не найден.' };
     }
     const v = validatePromo(found.promo, {
       itemsTotal: fromMinor(itemsMinor),
+      itemsQty,
       now,
       usedCount: found.promo.usedCount,
       customerRedemptions: found.customerRedemptions,
@@ -583,6 +706,7 @@ export async function createOrder(
     }
     appliedPromo = v.promo;
     promoRow = found.promo;
+    scopeTargets = found.scopeTargets;
   }
 
   const deliveryCost = await resolveDeliveryCost({
@@ -599,6 +723,7 @@ export async function createOrder(
       cost: deliveryCost,
       freeThreshold,
     },
+    scopeTargets,
   });
 
   try {

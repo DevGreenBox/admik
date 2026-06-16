@@ -17,9 +17,10 @@ import {
   toOrderPublicDto,
   toOrderCreatedDto,
   toQuoteDto,
+  toPublicPromotionDto,
 } from '@/lib/storefront/order-dto';
 import { CartQuoteSchema, CreateOrderSchema } from '@/lib/orders/schemas';
-import type { Order, OrderItem } from '@/lib/orders/types';
+import type { Order, OrderItem, PromoCode } from '@/lib/orders/types';
 import type { QuoteResult } from '@/lib/orders/pricing';
 
 // -----------------------------------------------------------------------------
@@ -241,6 +242,82 @@ describe('order-dto — toQuoteDto', () => {
     expect(dto.promo.reason).toBe('expired');
     expect(dto.fulfillable).toBe(false);
     expect(dto.issues).toEqual([{ index: 0, code: 'out_of_stock' }]);
+  });
+});
+
+// -----------------------------------------------------------------------------
+// 3b) toPublicPromotionDto — публичный DTO акции (без утечки приватных полей).
+// -----------------------------------------------------------------------------
+
+function makePromoCode(over: Partial<PromoCode> = {}): PromoCode {
+  return {
+    id: PROMO_ID,
+    code: 'BOGO32',
+    kind: 'bogo',
+    value: '0',
+    minOrderTotal: '0.00',
+    maxDiscount: null,
+    usageLimit: 100,
+    perCustomerLimit: 2,
+    usedCount: 37,
+    startsAt: new Date('2026-06-01T00:00:00.000Z'),
+    endsAt: new Date('2026-07-01T00:00:00.000Z'),
+    isActive: true,
+    bogoBuyQty: 3,
+    bogoPayQty: 2,
+    applyScope: 'category',
+    priority: 10,
+    stackable: false,
+    minQty: null,
+    giftProductId: null,
+    giftVariantId: null,
+    giftQty: null,
+    comment: 'internal-secret-comment',
+    createdAt: new Date('2026-06-01T00:00:00.000Z'),
+    updatedAt: new Date('2026-06-01T00:00:00.000Z'),
+    ...over,
+  };
+}
+
+describe('order-dto — toPublicPromotionDto (без утечки приватных полей)', () => {
+  it('отдаёт маркетинговые поля + slug-и таргетов, скрывает приватные', () => {
+    const dto = toPublicPromotionDto({
+      promo: makePromoCode(),
+      targetCategorySlugs: ['cases', 'covers'],
+      targetBrandSlugs: ['gang'],
+    });
+    expect(dto).toEqual({
+      publicLabel: 'BOGO32',
+      kind: 'bogo',
+      applyScope: 'category',
+      bogoBuyQty: 3,
+      bogoPayQty: 2,
+      targetCategorySlugs: ['cases', 'covers'],
+      targetBrandSlugs: ['gang'],
+      activeFrom: '2026-06-01T00:00:00.000Z',
+      activeTo: '2026-07-01T00:00:00.000Z',
+    });
+
+    const json = JSON.stringify(dto);
+    expect(json).not.toContain('internal-secret-comment'); // comment
+    expect(json).not.toContain(PROMO_ID); // id
+    expect(json).not.toContain('37'); // usedCount
+    expect(dto).not.toHaveProperty('usageLimit');
+    expect(dto).not.toHaveProperty('perCustomerLimit');
+    expect(dto).not.toHaveProperty('usedCount');
+    expect(dto).not.toHaveProperty('id');
+    expect(dto).not.toHaveProperty('comment');
+  });
+
+  it('бессрочная акция → activeFrom/activeTo = null, пустые таргеты по умолчанию', () => {
+    const dto = toPublicPromotionDto({
+      promo: makePromoCode({ startsAt: null, endsAt: null, applyScope: 'cart', kind: 'percent', value: '10', bogoBuyQty: null, bogoPayQty: null }),
+    });
+    expect(dto.activeFrom).toBeNull();
+    expect(dto.activeTo).toBeNull();
+    expect(dto.targetCategorySlugs).toEqual([]);
+    expect(dto.targetBrandSlugs).toEqual([]);
+    expect(dto.bogoBuyQty).toBeNull();
   });
 });
 

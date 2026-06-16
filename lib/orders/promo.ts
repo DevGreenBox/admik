@@ -129,6 +129,8 @@ export function validatePromo(
       maxDiscount: promo.maxDiscount,
       bogoBuyQty: promo.bogoBuyQty,
       bogoPayQty: promo.bogoPayQty,
+      applyScope: promo.applyScope,
+      minQty: promo.minQty,
     },
   };
 }

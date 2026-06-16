@@ -19,7 +19,7 @@
  */
 
 import { fromMinor, percentOfMinor, toMinor, type MoneyString } from './money';
-import type { PromoKind } from './types';
+import type { PromoApplyScope, PromoKind } from './types';
 
 // -----------------------------------------------------------------------------
 // Вход.
@@ -40,6 +40,17 @@ export interface PricedLine {
   compareAt: MoneyString | null;
   /** Количество, целое ≥ 1. */
   qty: number;
+  /**
+   * Идентификаторы каталога позиции (anti-tamper: сервер проставляет из каталога,
+   * НЕ из тела запроса). Опциональны — старые вызовы percent/fixed/free_delivery
+   * не обязаны их передавать. Используются только для разметки scope (N×M/scope).
+   */
+  productId?: string | null;
+  variantId?: string | null;
+  /** Категории товара (из product_categories) — для scope='category'. */
+  categoryIds?: string[];
+  /** Бренд товара (products.brand_id) — для scope='brand'. */
+  brandId?: string | null;
 }
 
 /**
@@ -58,6 +69,107 @@ export interface AppliedPromo {
   bogoBuyQty: number | null;
   /** Задел под bogo: «плати за M». */
   bogoPayQty: number | null;
+  /** На что распространяется механика (cart/category/brand/set), §5.2. */
+  applyScope?: PromoApplyScope;
+  /** Qty-порог по линиям scope (дополняет minOrderTotal); null → без порога. */
+  minQty?: number | null;
+}
+
+/**
+ * Резолвнутое множество таргетов акции (anti-tamper: считает СЕРВЕР из каталога,
+ * не из тела запроса) — к каким товарам/вариантам применяется scope/N×M.
+ * Пустые множества при scope='cart' (вся корзина). Заполняет repository из
+ * promo_targets через product_categories / products.brand_id (ADR-014 §4).
+ */
+export interface PromoScopeTargets {
+  categoryIds: Set<string>;
+  brandIds: Set<string>;
+  productIds: Set<string>;
+  variantIds: Set<string>;
+}
+
+/**
+ * Принадлежит ли линия scope акции (по резолвнутым таргетам). cart → всегда true.
+ * Линия попадает в scope, если её variantId/productId напрямую в таргетах ИЛИ её
+ * бренд/одна из категорий пересекаются с таргет-множествами (anti-tamper: поля
+ * линии заполнены сервером из каталога).
+ */
+export function lineInScope(
+  line: PricedLine,
+  scope: PromoApplyScope,
+  targets: PromoScopeTargets,
+): boolean {
+  if (scope === 'cart') return true;
+
+  if (line.variantId && targets.variantIds.has(line.variantId)) return true;
+  if (line.productId && targets.productIds.has(line.productId)) return true;
+  if (line.brandId && targets.brandIds.has(line.brandId)) return true;
+  if (line.categoryIds && line.categoryIds.some((c) => targets.categoryIds.has(c))) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Скидка применённого промокода в копейках с учётом scope/N×M (docs/11 §5.2).
+ * Компонует чистые bogoDiscountMinor/scopeDiscountMinor поверх ПОДМНОЖЕСТВА линий,
+ * отфильтрованного по lineInScope (сервер размечает scope, anti-tamper). Для
+ * applyScope='cart' + percent/fixed/free_delivery поведение совпадает со старым
+ * promoDiscountMinor (аддитивность). Возвращает копейки, clamp ≤ itemsMinor.
+ */
+export function promoScopeDiscountMinor(
+  promo: AppliedPromo | null | undefined,
+  lines: PricedLine[],
+  targets: PromoScopeTargets,
+  itemsMinor: number,
+): number {
+  if (!promo) return 0;
+  const scope = promo.applyScope ?? 'cart';
+
+  // Подмножество линий в scope (для bogo/percent/fixed по таргету).
+  const scoped =
+    scope === 'cart' ? lines : lines.filter((l) => lineInScope(l, scope, targets));
+
+  // minQty (по единицам scope) — если задан и не достигнут, скидки нет.
+  if (promo.minQty != null) {
+    const scopedQty = scoped.reduce(
+      (acc, l) => acc + (Number.isInteger(l.qty) && l.qty >= 1 ? l.qty : 0),
+      0,
+    );
+    if (scopedQty < promo.minQty) return 0;
+  }
+
+  let discount: number;
+  switch (promo.kind) {
+    case 'bogo': {
+      if (promo.bogoBuyQty == null || promo.bogoPayQty == null) return 0;
+      discount = bogoDiscountMinor(scoped, promo.bogoBuyQty, promo.bogoPayQty);
+      break;
+    }
+    case 'percent':
+    case 'fixed': {
+      if (scope === 'cart') {
+        // Вся корзина — старая семантика (по itemsMinor целиком).
+        discount = promoDiscountMinor(promo, itemsMinor);
+      } else {
+        discount = scopeDiscountMinor(scoped, {
+          kind: promo.kind,
+          value: promo.value,
+          maxDiscount: promo.maxDiscount,
+          // minQty уже проверен выше по scope — не дублируем.
+        });
+      }
+      break;
+    }
+    case 'free_delivery':
+    default: {
+      // Эффект на доставку (§3.3) — товарной скидки нет.
+      discount = 0;
+      break;
+    }
+  }
+
+  return Math.min(Math.max(0, discount), Math.max(0, itemsMinor));
 }
 
 /** Параметры расчёта доставки (anti-tamper: cost — серверный, не из запроса). */
@@ -73,6 +185,22 @@ export interface QuoteInput {
   lines: PricedLine[];
   promo?: AppliedPromo | null;
   delivery: DeliveryInput;
+  /**
+   * Резолвнутые таргеты scope/N×M (anti-tamper: считает сервер из каталога).
+   * Опционально — при отсутствии (или applyScope='cart') скидка считается по
+   * всей корзине как раньше (percent/fixed/free_delivery — без изменений).
+   */
+  scopeTargets?: PromoScopeTargets;
+}
+
+/** Пустое множество таргетов (scope='cart' / промокода нет). */
+export function emptyScopeTargets(): PromoScopeTargets {
+  return {
+    categoryIds: new Set<string>(),
+    brandIds: new Set<string>(),
+    productIds: new Set<string>(),
+    variantIds: new Set<string>(),
+  };
 }
 
 // -----------------------------------------------------------------------------
@@ -393,6 +521,7 @@ export function resolveDelivery(
  */
 export function calculateQuote(input: QuoteInput): QuoteResult {
   const { lines, promo, delivery } = input;
+  const scopeTargets = input.scopeTargets ?? emptyScopeTargets();
 
   // 1) Позиции и сумма товаров.
   const quoteLines: QuoteLine[] = lines.map((l) => {
@@ -408,8 +537,10 @@ export function calculateQuote(input: QuoteInput): QuoteResult {
   });
   const itemsMinor = quoteLines.reduce((acc, l) => acc + toMinor(l.lineTotal), 0);
 
-  // 2) Скидка промокода (поверх товаров).
-  const discountMinor = promoDiscountMinor(promo, itemsMinor);
+  // 2) Скидка промокода (поверх товаров): scope/N×M-aware. Для applyScope='cart'
+  //    + percent/fixed/free_delivery поведение совпадает с promoDiscountMinor
+  //    (аддитивность); bogo и scope≠cart считаются по подмножеству линий target.
+  const discountMinor = promoScopeDiscountMinor(promo, lines, scopeTargets, itemsMinor);
 
   // 3) Доставка (порог сравнивается с суммой после скидки).
   const netItemsMinor = itemsMinor - discountMinor;

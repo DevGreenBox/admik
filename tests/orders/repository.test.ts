@@ -22,6 +22,7 @@ describe.skipIf(!INTEGRATION_DB_URL)('orders/repository (интеграция, �
     productIds: [] as string[],
     promoIds: [] as string[],
     orderIds: [] as string[],
+    categoryIds: [] as string[],
   };
 
   /** Создаёт активный товар с inventory(main) и возвращает productId. */
@@ -52,15 +53,56 @@ describe.skipIf(!INTEGRATION_DB_URL)('orders/repository (интеграция, �
     minOrderTotal?: string;
     usageLimit?: number | null;
     perCustomerLimit?: number | null;
+    bogoBuyQty?: number | null;
+    bogoPayQty?: number | null;
+    applyScope?: 'cart' | 'category' | 'brand' | 'set';
+    minQty?: number | null;
   }): Promise<string> {
     const [r] = await sql<{ id: string }[]>`
-      INSERT INTO promo_codes (code, kind, value, min_order_total, usage_limit, per_customer_limit, is_active)
-      VALUES (${over.code}, ${over.kind}, ${over.value ?? '0'}, ${over.minOrderTotal ?? '0'},
-              ${over.usageLimit ?? null}, ${over.perCustomerLimit ?? null}, true)
+      INSERT INTO promo_codes (
+        code, kind, value, min_order_total, usage_limit, per_customer_limit,
+        bogo_buy_qty, bogo_pay_qty, apply_scope, min_qty, is_active
+      )
+      VALUES (
+        ${over.code}, ${over.kind}, ${over.value ?? '0'}, ${over.minOrderTotal ?? '0'},
+        ${over.usageLimit ?? null}, ${over.perCustomerLimit ?? null},
+        ${over.bogoBuyQty ?? null}, ${over.bogoPayQty ?? null},
+        ${over.applyScope ?? 'cart'}, ${over.minQty ?? null}, true
+      )
       RETURNING id
     `;
     created.promoIds.push(r!.id);
     return r!.id;
+  }
+
+  /** Привязывает товар к категории (для scope='category' таргетинга). */
+  async function linkProductCategory(productId: string, categoryId: string): Promise<void> {
+    await sql`
+      INSERT INTO product_categories (product_id, category_id, is_primary)
+      VALUES (${productId}, ${categoryId}, true)
+      ON CONFLICT DO NOTHING
+    `;
+  }
+
+  /** Создаёт категорию и возвращает её id. */
+  async function makeCategory(): Promise<string> {
+    const suffix = Math.random().toString(36).slice(2, 10);
+    const [c] = await sql<{ id: string }[]>`
+      INSERT INTO categories (slug, name)
+      VALUES (${'cat-' + suffix}, ${'Cat ' + suffix})
+      RETURNING id
+    `;
+    created.categoryIds.push(c!.id);
+    return c!.id;
+  }
+
+  /** Добавляет таргет акции (category). */
+  async function addCategoryTarget(promoId: string, categoryId: string): Promise<void> {
+    await sql`
+      INSERT INTO promo_targets (promo_code_id, target_type, category_id)
+      VALUES (${promoId}, 'category', ${categoryId})
+      ON CONFLICT DO NOTHING
+    `;
   }
 
   function customer(email = 'buyer@example.com') {
@@ -85,7 +127,11 @@ describe.skipIf(!INTEGRATION_DB_URL)('orders/repository (интеграция, �
     }
     for (const id of created.productIds) {
       await sql`DELETE FROM inventory WHERE product_id = ${id}`;
+      await sql`DELETE FROM product_categories WHERE product_id = ${id}`;
       await sql`DELETE FROM products WHERE id = ${id}`;
+    }
+    for (const id of created.categoryIds) {
+      await sql`DELETE FROM categories WHERE id = ${id}`;
     }
     if (closeSql) await closeSql();
   });
@@ -116,6 +162,111 @@ describe.skipIf(!INTEGRATION_DB_URL)('orders/repository (интеграция, �
     expect(res.promo?.valid).toBe(true);
     expect(res.quote.discount).toBe('100.00');
     expect(res.quote.grandTotal).toBe('900.00');
+  });
+
+  it('quoteCart применяет bogo «3 по 2» (1 единица из 3 бесплатна)', async () => {
+    const productId = await makeProduct({ basePrice: '100.00', quantity: 10 });
+    await makePromo({
+      code: 'BOGO32',
+      kind: 'bogo',
+      bogoBuyQty: 3,
+      bogoPayQty: 2,
+      applyScope: 'cart',
+    });
+    const res = await repo.quoteCart({
+      items: [{ productId, qty: 3 }],
+      promoCode: 'BOGO32',
+    });
+    expect(res.promo?.valid).toBe(true);
+    // 3 × 100, floor(3/3)=1 группа, бесплатна 1 самая дешёвая → discount 100.
+    expect(res.quote.promo.discount).toBe('100.00');
+    expect(res.quote.discount).toBe('100.00');
+    expect(res.quote.grandTotal).toBe('200.00');
+  });
+
+  it('quoteCart: scope=category применяет percent только к товарам категории', async () => {
+    const categoryId = await makeCategory();
+    const inCat = await makeProduct({ basePrice: '1000.00', quantity: 10 });
+    const outCat = await makeProduct({ basePrice: '1000.00', quantity: 10 });
+    await linkProductCategory(inCat, categoryId);
+    const promoId = await makePromo({
+      code: 'CAT10',
+      kind: 'percent',
+      value: '10',
+      applyScope: 'category',
+    });
+    await addCategoryTarget(promoId, categoryId);
+
+    const res = await repo.quoteCart({
+      items: [
+        { productId: inCat, qty: 1 },
+        { productId: outCat, qty: 1 },
+      ],
+      promoCode: 'CAT10',
+    });
+    expect(res.promo?.valid).toBe(true);
+    // 10% только от товара в категории (1000) = 100; товар вне scope не дисконтируется.
+    expect(res.quote.discount).toBe('100.00');
+    expect(res.quote.itemsTotal).toBe('2000.00');
+    expect(res.quote.grandTotal).toBe('1900.00');
+  });
+
+  it('createOrder пишет реальный discount_applied (рубли через fromMinor) для bogo + инкремент used_count', async () => {
+    const productId = await makeProduct({ basePrice: '100.00', quantity: 10 });
+    const promoId = await makePromo({
+      code: 'BOGOORDER',
+      kind: 'bogo',
+      bogoBuyQty: 3,
+      bogoPayQty: 2,
+      applyScope: 'cart',
+    });
+    const r = await repo.createOrder({
+      items: [{ productId, qty: 3 }],
+      customer: customer(),
+      delivery: { type: 'courier' },
+      paymentMethod: 'cod',
+      promoCode: 'BOGOORDER',
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    created.orderIds.push(r.order.id);
+
+    // discount_total в рублях (numeric), не копейки.
+    expect(r.order.discountTotal).toBe('100.00');
+    expect(r.order.grandTotal).toBe('200.00');
+
+    // promo_redemptions.discount_applied — рубли через fromMinor.
+    const [red] = await sql<{ discount_applied: string }[]>`
+      SELECT discount_applied FROM promo_redemptions WHERE order_id = ${r.order.id}
+    `;
+    expect(red!.discount_applied).toBe('100.00');
+
+    // used_count инкрементирован атомарно.
+    const [pc] = await sql<{ used_count: number }[]>`
+      SELECT used_count FROM promo_codes WHERE id = ${promoId}
+    `;
+    expect(Number(pc!.used_count)).toBe(1);
+  });
+
+  it('anti-tamper: scope определяется сервером из каталога (товар вне категории не дисконтируется)', async () => {
+    const categoryId = await makeCategory();
+    const outCat = await makeProduct({ basePrice: '500.00', quantity: 10 });
+    const promoId = await makePromo({
+      code: 'CATANTI',
+      kind: 'percent',
+      value: '50',
+      applyScope: 'category',
+    });
+    await addCategoryTarget(promoId, categoryId);
+
+    // Товар НЕ привязан к категории-таргету → скидки быть не должно.
+    const res = await repo.quoteCart({
+      items: [{ productId: outCat, qty: 1 }],
+      promoCode: 'CATANTI',
+    });
+    expect(res.promo?.valid).toBe(true);
+    expect(res.quote.discount).toBe('0.00');
+    expect(res.quote.promo.applied).toBe(false);
   });
 
   it('createOrder: резерв, номер, снимок позиций, история', async () => {

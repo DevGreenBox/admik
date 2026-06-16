@@ -177,6 +177,22 @@ export function formatDateTime(value: Date | string | null | undefined): string 
  * (например «20 %», «500 ₽», «беспл. доставка», «3 по 2»). Цены форматируются
  * вызывающим через formatPrice; здесь — компактный текст по типу.
  */
+/** Человекочитаемое имя scope акции (вся корзина/категория/бренд/набор). */
+export function promoScopeLabel(scope: string): string {
+  switch (scope) {
+    case 'cart':
+      return 'Вся корзина';
+    case 'category':
+      return 'Категория';
+    case 'brand':
+      return 'Бренд';
+    case 'set':
+      return 'Набор';
+    default:
+      return scope;
+  }
+}
+
 export function promoValueSummary(promo: {
   kind: string;
   value: string;

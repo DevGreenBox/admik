@@ -5,6 +5,7 @@ import { getEnv } from '@/lib/config/env';
 import { formatPrice } from '@/lib/admin/format';
 import {
   promoKindLabel,
+  promoScopeLabel,
   promoValueSummary,
   formatDateTime,
 } from '@/lib/admin/order-format';
@@ -31,9 +32,10 @@ async function loadPromos(): Promise<PromoCode[]> {
   const rows = await sql<Record<string, unknown>[]>`
     SELECT id, code, kind, value, min_order_total, max_discount, usage_limit,
            per_customer_limit, used_count, starts_at, ends_at, is_active,
-           bogo_buy_qty, bogo_pay_qty, comment, created_at, updated_at
+           bogo_buy_qty, bogo_pay_qty, apply_scope, priority, stackable, min_qty,
+           gift_product_id, gift_variant_id, gift_qty, comment, created_at, updated_at
     FROM promo_codes
-    ORDER BY is_active DESC, created_at DESC
+    ORDER BY is_active DESC, priority ASC, created_at DESC
   `;
   return rows.map(mapPromoCode);
 }
@@ -97,6 +99,8 @@ export default async function PromoPage() {
               <th scope="col" className="px-4 py-2 font-medium">Код</th>
               <th scope="col" className="px-4 py-2 font-medium">Тип</th>
               <th scope="col" className="px-4 py-2 font-medium">Значение</th>
+              <th scope="col" className="px-4 py-2 font-medium">Scope</th>
+              <th scope="col" className="px-4 py-2 font-medium">Приоритет</th>
               <th scope="col" className="px-4 py-2 font-medium">Мин. сумма</th>
               <th scope="col" className="px-4 py-2 font-medium">Лимит (всего/на чел.)</th>
               <th scope="col" className="px-4 py-2 font-medium">Использован</th>
@@ -108,7 +112,7 @@ export default async function PromoPage() {
           <tbody className="divide-y divide-gray-100">
             {promos.length === 0 ? (
               <tr>
-                <td colSpan={9} className="px-4 py-6 text-center text-gray-400">
+                <td colSpan={11} className="px-4 py-6 text-center text-gray-400">
                   Промокодов пока нет. Создайте первый.
                 </td>
               </tr>
@@ -129,6 +133,19 @@ export default async function PromoPage() {
                       ? formatPrice(p.value, currency)
                       : promoValueSummary(p)}
                   </td>
+                  <td className="px-4 py-2 text-gray-600">
+                    {promoScopeLabel(p.applyScope)}
+                    {p.stackable ? (
+                      <span className="ml-1 inline-block rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800">
+                        суммируемая
+                      </span>
+                    ) : (
+                      <span className="ml-1 inline-block rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
+                        эксклюзивная
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2 text-gray-600">{p.priority}</td>
                   <td className="px-4 py-2 text-gray-600">
                     {Number(p.minOrderTotal) > 0 ? formatPrice(p.minOrderTotal, currency) : '—'}
                   </td>

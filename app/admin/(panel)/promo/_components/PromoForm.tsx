@@ -3,9 +3,13 @@
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
-import { PROMO_KINDS } from '@/lib/orders/types';
-import type { PromoCode } from '@/lib/orders/types';
-import { promoKindLabel } from '@/lib/admin/order-format';
+import {
+  PROMO_KINDS,
+  PROMO_APPLY_SCOPES,
+  PROMO_TARGET_TYPES,
+} from '@/lib/orders/types';
+import type { PromoCode, PromoTarget, PromoTargetType } from '@/lib/orders/types';
+import { promoKindLabel, promoScopeLabel } from '@/lib/admin/order-format';
 import type { ActionResult } from '@/lib/server/action';
 
 import {
@@ -17,12 +21,17 @@ import { errorMessage, fieldError } from '../../orders/_components/action-result
 type Fail = Extract<ActionResult<unknown>, { ok: false }>;
 
 /**
- * Форма промокода (docs/07 §5, §3): создание/редактирование. Поля: код, тип
- * (percent/fixed/free_delivery/bogo), значение, условия (мин.сумма, потолок,
- * лимиты всего/на покупателя), срок (с/по), активность, bogo N/M, комментарий.
- * Мутации — createPromoCode/updatePromoCode (orders.write на сервере; здесь только
- * сбор значений и отображение ошибок, бизнес-валидация в Zod-схемах/actions).
+ * Форма промокода (docs/07 §5, docs/11 §5.2.5): создание/редактирование. Поля:
+ * код, тип (percent/fixed/free_delivery/bogo), значение, условия (мин.сумма,
+ * потолок, лимиты), срок, активность, bogo N/M. N×M-механики (Пакет 5.P-2):
+ * applyScope (radio), таргеты (мультиселект по типу+id при scope≠cart), priority,
+ * stackable, minQty. Блок «Подарок» (gift_*) — за UI-фичефлагом (по умолчанию
+ * скрыт до реализации gift-kind). Бизнес-валидация — в Zod-схемах/actions на
+ * сервере (RBAC orders.write); здесь только сбор значений и отображение ошибок.
  */
+
+/** Фичефлаг UI блока «Подарок» (gift_*) — скрыт по умолчанию (исполнение отложено). */
+const SHOW_GIFT_BLOCK = false;
 
 /** Дата для <input type="date"> (YYYY-MM-DD) из Date | null. */
 function toDateInput(d: Date | null): string {
@@ -31,7 +40,7 @@ function toDateInput(d: Date | null): string {
   return iso.slice(0, 10);
 }
 
-/** Число из строки поля или null/undefined для пустого. */
+/** Число из строки поля или undefined для пустого. */
 function numOrUndef(v: string): number | undefined {
   const t = v.trim();
   if (t === '') return undefined;
@@ -39,7 +48,49 @@ function numOrUndef(v: string): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
-export function PromoForm({ promo }: { promo: PromoCode | null }) {
+/** Строка редактируемого таргета в форме (тип + id-значение). */
+interface TargetRow {
+  targetType: PromoTargetType;
+  /** UUID выбранной сущности соответствующего типа. */
+  id: string;
+}
+
+/** PromoTarget (домен) → строка формы. */
+function targetToRow(t: PromoTarget): TargetRow {
+  const id =
+    t.categoryId ?? t.brandId ?? t.productId ?? t.variantId ?? '';
+  return { targetType: t.targetType, id };
+}
+
+/** Строка формы → payload-таргет (ровно одно *_id по типу). */
+function rowToTargetPayload(r: TargetRow): Record<string, unknown> {
+  const base: Record<string, unknown> = { targetType: r.targetType };
+  const key =
+    r.targetType === 'category'
+      ? 'categoryId'
+      : r.targetType === 'brand'
+        ? 'brandId'
+        : r.targetType === 'product'
+          ? 'productId'
+          : 'variantId';
+  base[key] = r.id.trim();
+  return base;
+}
+
+const TARGET_TYPE_LABEL: Record<PromoTargetType, string> = {
+  category: 'Категория',
+  brand: 'Бренд',
+  product: 'Товар',
+  variant: 'Вариант',
+};
+
+export function PromoForm({
+  promo,
+  targets = [],
+}: {
+  promo: PromoCode | null;
+  targets?: PromoTarget[];
+}) {
   const router = useRouter();
   const isEdit = promo !== null;
 
@@ -69,10 +120,39 @@ export function PromoForm({ promo }: { promo: PromoCode | null }) {
   );
   const [comment, setComment] = useState(promo?.comment ?? '');
 
+  // ---- N×M промо-механики (Пакет 5.P-2) ----
+  const [applyScope, setApplyScope] = useState(promo?.applyScope ?? 'cart');
+  const [priority, setPriority] = useState(
+    promo?.priority != null ? String(promo.priority) : '100',
+  );
+  const [stackable, setStackable] = useState(promo?.stackable ?? false);
+  const [minQty, setMinQty] = useState(promo?.minQty != null ? String(promo.minQty) : '');
+  const [targetRows, setTargetRows] = useState<TargetRow[]>(
+    targets.map(targetToRow),
+  );
+  const [giftProductId, setGiftProductId] = useState(promo?.giftProductId ?? '');
+  const [giftVariantId, setGiftVariantId] = useState(promo?.giftVariantId ?? '');
+  const [giftQty, setGiftQty] = useState(promo?.giftQty != null ? String(promo.giftQty) : '');
+
+  function addTargetRow() {
+    setTargetRows((rows) => [...rows, { targetType: 'category', id: '' }]);
+  }
+  function updateTargetRow(i: number, patch: Partial<TargetRow>) {
+    setTargetRows((rows) => rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+  }
+  function removeTargetRow(i: number) {
+    setTargetRows((rows) => rows.filter((_, idx) => idx !== i));
+  }
+
   async function save() {
     setPending(true);
     setError(null);
     setSuccess(null);
+
+    const targetsPayload =
+      applyScope === 'cart'
+        ? []
+        : targetRows.filter((r) => r.id.trim() !== '').map(rowToTargetPayload);
 
     const payload = {
       code: code.trim(),
@@ -87,6 +167,14 @@ export function PromoForm({ promo }: { promo: PromoCode | null }) {
       isActive,
       bogoBuyQty: numOrUndef(bogoBuyQty) ?? null,
       bogoPayQty: numOrUndef(bogoPayQty) ?? null,
+      applyScope,
+      priority: numOrUndef(priority) ?? 100,
+      stackable,
+      minQty: numOrUndef(minQty) ?? null,
+      targets: targetsPayload,
+      giftProductId: SHOW_GIFT_BLOCK ? giftProductId.trim() || null : null,
+      giftVariantId: SHOW_GIFT_BLOCK ? giftVariantId.trim() || null : null,
+      giftQty: SHOW_GIFT_BLOCK ? numOrUndef(giftQty) ?? null : null,
       comment,
     };
 
@@ -113,6 +201,7 @@ export function PromoForm({ promo }: { promo: PromoCode | null }) {
 
   const showBogo = kind === 'bogo';
   const showPercentHint = kind === 'percent';
+  const showTargets = applyScope !== 'cart';
 
   return (
     <div>
@@ -206,6 +295,7 @@ export function PromoForm({ promo }: { promo: PromoCode | null }) {
               <input id="p-bogo-buy" value={bogoBuyQty} onChange={(e) => setBogoBuyQty(e.target.value)}
                 inputMode="numeric"
                 className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" />
+              {fe('bogoBuyQty') ? <p className="mt-1 text-xs text-red-600">{fe('bogoBuyQty')}</p> : null}
             </div>
             <div>
               <label htmlFor="p-bogo-pay" className="block text-sm font-medium text-gray-700">Плати за M</label>
@@ -214,7 +304,127 @@ export function PromoForm({ promo }: { promo: PromoCode | null }) {
                 className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" />
               {fe('bogoPayQty') ? <p className="mt-1 text-xs text-red-600">{fe('bogoPayQty')}</p> : null}
             </div>
+            <p className="text-xs text-gray-500 sm:col-span-2">
+              Например «3 по 2»: купи N=3, плати за M=2 → 1 самая дешёвая бесплатно.
+            </p>
           </div>
+        ) : null}
+
+        {/* ---- N×M: scope / приоритет / комбинируемость / minQty ---- */}
+        <fieldset className="rounded border border-gray-200 p-3 sm:col-span-2">
+          <legend className="px-1 text-sm font-medium text-gray-700">Область применения</legend>
+          <div role="radiogroup" aria-label="Область применения" className="flex flex-wrap gap-4">
+            {PROMO_APPLY_SCOPES.map((s) => (
+              <label key={s} className="flex items-center gap-2 text-sm text-gray-700">
+                <input
+                  type="radio"
+                  name="applyScope"
+                  value={s}
+                  checked={applyScope === s}
+                  onChange={() => setApplyScope(s)}
+                />
+                {promoScopeLabel(s)}
+              </label>
+            ))}
+          </div>
+          {fe('applyScope') ? <p className="mt-1 text-xs text-red-600">{fe('applyScope')}</p> : null}
+
+          {showTargets ? (
+            <div className="mt-3">
+              <p className="text-sm font-medium text-gray-700">Таргеты акции</p>
+              <p className="mb-2 text-xs text-gray-500">
+                Укажите тип и идентификатор (UUID) сущности, к которой применяется акция.
+              </p>
+              {targetRows.length === 0 ? (
+                <p className="text-xs text-gray-400">Таргетов нет — добавьте хотя бы один.</p>
+              ) : null}
+              <ul className="space-y-2">
+                {targetRows.map((row, i) => (
+                  <li key={i} className="flex flex-wrap items-center gap-2">
+                    <label className="sr-only" htmlFor={`tgt-type-${i}`}>Тип таргета {i + 1}</label>
+                    <select
+                      id={`tgt-type-${i}`}
+                      value={row.targetType}
+                      onChange={(e) => updateTargetRow(i, { targetType: e.target.value as PromoTargetType })}
+                      className="rounded border border-gray-300 px-2 py-1.5 text-sm"
+                    >
+                      {PROMO_TARGET_TYPES.map((tt) => (
+                        <option key={tt} value={tt}>{TARGET_TYPE_LABEL[tt]}</option>
+                      ))}
+                    </select>
+                    <label className="sr-only" htmlFor={`tgt-id-${i}`}>ID таргета {i + 1}</label>
+                    <input
+                      id={`tgt-id-${i}`}
+                      value={row.id}
+                      onChange={(e) => updateTargetRow(i, { id: e.target.value })}
+                      placeholder="UUID"
+                      className="min-w-[18rem] flex-1 rounded border border-gray-300 px-2 py-1.5 text-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeTargetRow(i)}
+                      className="text-sm text-red-600 hover:underline"
+                      aria-label={`Удалить таргет ${i + 1}`}
+                    >
+                      Удалить
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              <button
+                type="button"
+                onClick={addTargetRow}
+                className="mt-2 rounded border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-100"
+              >
+                + Добавить таргет
+              </button>
+              {fe('targets') ? <p className="mt-1 text-xs text-red-600">{fe('targets')}</p> : null}
+            </div>
+          ) : null}
+        </fieldset>
+
+        <div>
+          <label htmlFor="p-priority" className="block text-sm font-medium text-gray-700">
+            Приоритет (меньше = раньше)
+          </label>
+          <input id="p-priority" value={priority} onChange={(e) => setPriority(e.target.value)}
+            inputMode="numeric"
+            className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" />
+          {fe('priority') ? <p className="mt-1 text-xs text-red-600">{fe('priority')}</p> : null}
+        </div>
+
+        <div>
+          <label htmlFor="p-minqty" className="block text-sm font-medium text-gray-700">
+            Мин. количество единиц
+          </label>
+          <input id="p-minqty" value={minQty} onChange={(e) => setMinQty(e.target.value)}
+            inputMode="numeric" placeholder="без порога"
+            className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" />
+          {fe('minQty') ? <p className="mt-1 text-xs text-red-600">{fe('minQty')}</p> : null}
+        </div>
+
+        {SHOW_GIFT_BLOCK ? (
+          <fieldset className="rounded border border-gray-200 p-3 sm:col-span-2">
+            <legend className="px-1 text-sm font-medium text-gray-700">Подарок (задел)</legend>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <div>
+                <label htmlFor="p-gift-prod" className="block text-sm text-gray-700">Товар-подарок (UUID)</label>
+                <input id="p-gift-prod" value={giftProductId} onChange={(e) => setGiftProductId(e.target.value)}
+                  className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label htmlFor="p-gift-var" className="block text-sm text-gray-700">Вариант-подарок (UUID)</label>
+                <input id="p-gift-var" value={giftVariantId} onChange={(e) => setGiftVariantId(e.target.value)}
+                  className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label htmlFor="p-gift-qty" className="block text-sm text-gray-700">Кол-во</label>
+                <input id="p-gift-qty" value={giftQty} onChange={(e) => setGiftQty(e.target.value)}
+                  inputMode="numeric"
+                  className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" />
+              </div>
+            </div>
+          </fieldset>
         ) : null}
 
         <div className="sm:col-span-2">
@@ -226,6 +436,11 @@ export function PromoForm({ promo }: { promo: PromoCode | null }) {
         <label className="flex items-center gap-2 text-sm text-gray-700">
           <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />
           Активен
+        </label>
+
+        <label className="flex items-center gap-2 text-sm text-gray-700">
+          <input type="checkbox" checked={stackable} onChange={(e) => setStackable(e.target.checked)} />
+          Суммируемая (комбинируется с другими)
         </label>
       </div>
 

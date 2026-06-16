@@ -484,6 +484,35 @@ function mapPromoRow(row: Record<string, unknown>): PromoCode {
   };
 }
 
+/**
+ * Bulk-вставка таргетов акции в транзакции (DELETE-then-INSERT вызывается отдельно
+ * при update). Ровно одно *_id заполнено согласно targetType (Zod уже проверил,
+ * CHECK в БД дублирует инвариант). Пустой массив → ничего не вставляем.
+ */
+async function insertPromoTargets(
+  tx: TransactionSql,
+  promoCodeId: string,
+  targets: ReadonlyArray<{
+    targetType: 'category' | 'brand' | 'product' | 'variant';
+    categoryId?: string;
+    brandId?: string;
+    productId?: string;
+    variantId?: string;
+  }>,
+): Promise<void> {
+  for (const t of targets) {
+    await tx`
+      INSERT INTO promo_targets (
+        promo_code_id, target_type, category_id, brand_id, product_id, variant_id
+      ) VALUES (
+        ${promoCodeId}, ${t.targetType}, ${t.categoryId ?? null}, ${t.brandId ?? null},
+        ${t.productId ?? null}, ${t.variantId ?? null}
+      )
+      ON CONFLICT DO NOTHING
+    `;
+  }
+}
+
 export const createPromoCode = defineAction({
   permission: 'orders.write',
   input: PromoCreateSchema,
@@ -491,20 +520,27 @@ export const createPromoCode = defineAction({
     assertOrdersEnabled();
     let rows: Record<string, unknown>[];
     try {
-      rows = await sql<Record<string, unknown>[]>`
-        INSERT INTO promo_codes (
-          code, kind, value, min_order_total, max_discount, usage_limit,
-          per_customer_limit, starts_at, ends_at, is_active,
-          bogo_buy_qty, bogo_pay_qty, comment
-        ) VALUES (
-          ${data.code}, ${data.kind}, ${data.value}, ${data.minOrderTotal},
-          ${data.maxDiscount ?? null}, ${data.usageLimit ?? null},
-          ${data.perCustomerLimit ?? null}, ${data.startsAt ?? null},
-          ${data.endsAt ?? null}, ${data.isActive}, ${data.bogoBuyQty ?? null},
-          ${data.bogoPayQty ?? null}, ${data.comment}
-        )
-        RETURNING *
-      `;
+      rows = await sql.begin(async (tx: TransactionSql) => {
+        const inserted = await tx<Record<string, unknown>[]>`
+          INSERT INTO promo_codes (
+            code, kind, value, min_order_total, max_discount, usage_limit,
+            per_customer_limit, starts_at, ends_at, is_active,
+            bogo_buy_qty, bogo_pay_qty, apply_scope, priority, stackable, min_qty,
+            gift_product_id, gift_variant_id, gift_qty, comment
+          ) VALUES (
+            ${data.code}, ${data.kind}, ${data.value}, ${data.minOrderTotal},
+            ${data.maxDiscount ?? null}, ${data.usageLimit ?? null},
+            ${data.perCustomerLimit ?? null}, ${data.startsAt ?? null},
+            ${data.endsAt ?? null}, ${data.isActive}, ${data.bogoBuyQty ?? null},
+            ${data.bogoPayQty ?? null}, ${data.applyScope}, ${data.priority},
+            ${data.stackable}, ${data.minQty ?? null}, ${data.giftProductId ?? null},
+            ${data.giftVariantId ?? null}, ${data.giftQty ?? null}, ${data.comment}
+          )
+          RETURNING *
+        `;
+        await insertPromoTargets(tx, String(inserted[0]!.id), data.targets);
+        return inserted;
+      });
     } catch (err) {
       if (isUniqueViolation(err)) {
         throw new OrderError('duplicate_code', 'Промокод с таким кодом уже существует.');
@@ -519,7 +555,13 @@ export const createPromoCode = defineAction({
         action: 'promo.create',
         entityType: 'promo_code',
         entityId: promo.id,
-        after: { code: promo.code, kind: promo.kind, value: promo.value },
+        after: {
+          code: promo.code,
+          kind: promo.kind,
+          value: promo.value,
+          applyScope: promo.applyScope,
+          targets: data.targets.length,
+        },
       },
     };
   },
@@ -536,34 +578,60 @@ export const updatePromoCode = defineAction({
     if (!before[0]) {
       throw new OrderError('not_found', 'Промокод не найден.');
     }
+    // Управляем таргетами, когда задан scope ≠ cart, передан непустой targets,
+    // ИЛИ scope явно переводится в 'cart' (тогда чистим). При partial-update без
+    // упоминания scope/targets — таргеты не трогаем (сохраняем существующие).
+    const manageTargets =
+      (data.applyScope !== undefined && data.applyScope !== 'cart') ||
+      data.targets.length > 0 ||
+      data.applyScope === 'cart';
+
     let after: Record<string, unknown>[];
     try {
-      after = await sql<Record<string, unknown>[]>`
-        UPDATE promo_codes SET
-          code            = COALESCE(${data.code ?? null}, code),
-          kind            = COALESCE(${data.kind ?? null}, kind),
-          value           = COALESCE(${data.value ?? null}, value),
-          min_order_total = COALESCE(${data.minOrderTotal ?? null}, min_order_total),
-          max_discount    = CASE WHEN ${data.maxDiscount !== undefined}
-                                 THEN ${data.maxDiscount ?? null} ELSE max_discount END,
-          usage_limit     = CASE WHEN ${data.usageLimit !== undefined}
-                                 THEN ${data.usageLimit ?? null} ELSE usage_limit END,
-          per_customer_limit = CASE WHEN ${data.perCustomerLimit !== undefined}
-                                 THEN ${data.perCustomerLimit ?? null} ELSE per_customer_limit END,
-          starts_at       = CASE WHEN ${data.startsAt !== undefined}
-                                 THEN ${data.startsAt ?? null} ELSE starts_at END,
-          ends_at         = CASE WHEN ${data.endsAt !== undefined}
-                                 THEN ${data.endsAt ?? null} ELSE ends_at END,
-          is_active       = COALESCE(${data.isActive ?? null}, is_active),
-          bogo_buy_qty    = CASE WHEN ${data.bogoBuyQty !== undefined}
-                                 THEN ${data.bogoBuyQty ?? null} ELSE bogo_buy_qty END,
-          bogo_pay_qty    = CASE WHEN ${data.bogoPayQty !== undefined}
-                                 THEN ${data.bogoPayQty ?? null} ELSE bogo_pay_qty END,
-          comment         = COALESCE(${data.comment ?? null}, comment),
-          updated_at      = now()
-        WHERE id = ${data.id}
-        RETURNING *
-      `;
+      after = await sql.begin(async (tx: TransactionSql) => {
+        const updated = await tx<Record<string, unknown>[]>`
+          UPDATE promo_codes SET
+            code            = COALESCE(${data.code ?? null}, code),
+            kind            = COALESCE(${data.kind ?? null}, kind),
+            value           = COALESCE(${data.value ?? null}, value),
+            min_order_total = COALESCE(${data.minOrderTotal ?? null}, min_order_total),
+            max_discount    = CASE WHEN ${data.maxDiscount !== undefined}
+                                   THEN ${data.maxDiscount ?? null} ELSE max_discount END,
+            usage_limit     = CASE WHEN ${data.usageLimit !== undefined}
+                                   THEN ${data.usageLimit ?? null} ELSE usage_limit END,
+            per_customer_limit = CASE WHEN ${data.perCustomerLimit !== undefined}
+                                   THEN ${data.perCustomerLimit ?? null} ELSE per_customer_limit END,
+            starts_at       = CASE WHEN ${data.startsAt !== undefined}
+                                   THEN ${data.startsAt ?? null} ELSE starts_at END,
+            ends_at         = CASE WHEN ${data.endsAt !== undefined}
+                                   THEN ${data.endsAt ?? null} ELSE ends_at END,
+            is_active       = COALESCE(${data.isActive ?? null}, is_active),
+            bogo_buy_qty    = CASE WHEN ${data.bogoBuyQty !== undefined}
+                                   THEN ${data.bogoBuyQty ?? null} ELSE bogo_buy_qty END,
+            bogo_pay_qty    = CASE WHEN ${data.bogoPayQty !== undefined}
+                                   THEN ${data.bogoPayQty ?? null} ELSE bogo_pay_qty END,
+            apply_scope     = COALESCE(${data.applyScope ?? null}, apply_scope),
+            priority        = COALESCE(${data.priority ?? null}, priority),
+            stackable       = COALESCE(${data.stackable ?? null}, stackable),
+            min_qty         = CASE WHEN ${data.minQty !== undefined}
+                                   THEN ${data.minQty ?? null} ELSE min_qty END,
+            gift_product_id = CASE WHEN ${data.giftProductId !== undefined}
+                                   THEN ${data.giftProductId ?? null} ELSE gift_product_id END,
+            gift_variant_id = CASE WHEN ${data.giftVariantId !== undefined}
+                                   THEN ${data.giftVariantId ?? null} ELSE gift_variant_id END,
+            gift_qty        = CASE WHEN ${data.giftQty !== undefined}
+                                   THEN ${data.giftQty ?? null} ELSE gift_qty END,
+            comment         = COALESCE(${data.comment ?? null}, comment),
+            updated_at      = now()
+          WHERE id = ${data.id}
+          RETURNING *
+        `;
+        if (manageTargets) {
+          await tx`DELETE FROM promo_targets WHERE promo_code_id = ${data.id}`;
+          await insertPromoTargets(tx, data.id, data.targets);
+        }
+        return updated;
+      });
     } catch (err) {
       if (isUniqueViolation(err)) {
         throw new OrderError('duplicate_code', 'Промокод с таким кодом уже существует.');

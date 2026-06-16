@@ -16,7 +16,7 @@
 
 import { createHmac } from 'node:crypto';
 
-import type { Order, OrderItem } from '@/lib/orders/types';
+import type { Order, OrderItem, PromoCode, PromoApplyScope, PromoKind } from '@/lib/orders/types';
 import type { QuoteResult } from '@/lib/orders/pricing';
 
 // ---------------------------------------------------------------------------
@@ -202,6 +202,50 @@ export function toOrderCreatedDto(
     grandTotal: order.grandTotal,
     currency: order.currency,
     accessToken: orderAccessToken(order.id, env),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Promotions — публичный список активных акций (GET /promotions, бейджи).
+// ---------------------------------------------------------------------------
+
+/**
+ * Публичная акция для бейджей витрины («3 по 2», «−10% на бренд X»). СКРЫВАЕТ
+ * usageLimit/usedCount/perCustomerLimit/comment/id (как dto.ts каталога). Отдаёт
+ * только маркетинговые поля + резолвнутые slug категорий/брендов таргетов.
+ */
+export interface PublicPromotionDto {
+  /** Человекочитаемая метка (промокод как публичный лейбл). */
+  publicLabel: string;
+  kind: PromoKind;
+  applyScope: PromoApplyScope;
+  /** bogo «купи N / плати M» (null для прочих типов). */
+  bogoBuyQty: number | null;
+  bogoPayQty: number | null;
+  /** Slug-и категорий/брендов таргетов (для глубоких ссылок витрины). */
+  targetCategorySlugs: string[];
+  targetBrandSlugs: string[];
+  activeFrom: string | null;
+  activeTo: string | null;
+}
+
+/** Промокод + резолвнутые slug таргетов → публичный DTO акции (без приватных полей). */
+export function toPublicPromotionDto(input: {
+  promo: PromoCode;
+  targetCategorySlugs?: string[];
+  targetBrandSlugs?: string[];
+}): PublicPromotionDto {
+  const { promo } = input;
+  return {
+    publicLabel: promo.code,
+    kind: promo.kind,
+    applyScope: promo.applyScope,
+    bogoBuyQty: promo.bogoBuyQty,
+    bogoPayQty: promo.bogoPayQty,
+    targetCategorySlugs: input.targetCategorySlugs ?? [],
+    targetBrandSlugs: input.targetBrandSlugs ?? [],
+    activeFrom: promo.startsAt ? promo.startsAt.toISOString() : null,
+    activeTo: promo.endsAt ? promo.endsAt.toISOString() : null,
   };
 }
 
