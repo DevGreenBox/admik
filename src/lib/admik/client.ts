@@ -49,11 +49,11 @@ function resolveConfig(cfg?: Partial<AdmikClientConfig>): AdmikClientConfig {
     process.env.NEXT_PUBLIC_ADMIK_API_URL ??
     '';
   const baseUrl = rawBase.replace(/\/+$/, '');
-  const apiKey =
-    cfg?.apiKey ??
-    process.env.STOREFRONT_API_KEY ??
-    process.env.NEXT_PUBLIC_STOREFRONT_API_KEY ??
-    null;
+  // БЕЗОПАСНОСТЬ: ключ витрины берём ТОЛЬКО из серверной переменной STOREFRONT_API_KEY.
+  // НИКАКОГО NEXT_PUBLIC_* для ключа — иначе секрет вшился бы в клиентский бандл и
+  // утёк бы в браузер. Server-side запросы (внутри docker-сети) шлют ключ; браузерные
+  // запросы ключа НЕ имеют и авторизуются на стороне Admik по Origin (allowlist).
+  const apiKey = cfg?.apiKey ?? process.env.STOREFRONT_API_KEY ?? null;
   return { baseUrl, apiKey };
 }
 

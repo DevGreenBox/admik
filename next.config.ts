@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { NextConfig } from "next";
 
 /** Хосты для next/image: всегда localhost (dev MinIO/Caddy) + хост Admik из env. */
@@ -22,6 +23,12 @@ function buildRemotePatterns(): NonNullable<
 }
 
 const nextConfig: NextConfig = {
+  // Standalone-вывод для Docker: server.js + минимальный node_modules в .next/standalone.
+  output: "standalone",
+  // Витрина живёт внутри монорепо Admik (рядом есть pnpm-lock.yaml бэкенда) —
+  // фиксируем корень трассировки на каталоге витрины, чтобы standalone собирал
+  // правильный набор файлов и Next не путал workspace-root.
+  outputFileTracingRoot: path.join(__dirname),
   images: {
     formats: ["image/avif", "image/webp"],
     deviceSizes: [640, 750, 828, 1080, 1200, 1440],

@@ -5,7 +5,6 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "build:netlify": "node scripts/netlify-build.mjs",
     "start": "next start",
     "lint": "next lint",
     "images": "node scripts/process-images.mjs",
@@ -23,7 +22,6 @@
     "zustand": "^5.0.5"
   },
   "devDependencies": {
-    "@netlify/plugin-nextjs": "^5.15.11",
     "@tailwindcss/postcss": "^4.1.8",
     "@types/node": "^22.15.29",
     "@types/react": "^19.1.6",
