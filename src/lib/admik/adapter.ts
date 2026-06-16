@@ -106,9 +106,13 @@ function sizeRank(size: string): number {
   return idx === -1 ? SIZE_ORDER.length : idx;
 }
 
-/** Метка размера варианта: attributes.size → иначе sku. */
+/**
+ * Метка размера варианта: attributes.size → имя варианта → sku.
+ * (Вариантный attributes_cache в Admik пока не пересобирается, поэтому основной
+ * источник метки на практике — имя варианта из админки; см. docs/13 §3.3.)
+ */
 export function variantSize(v: AdmikVariantDto): string {
-  return readAttrString(v.attributes, ['size', 'размер']) || v.sku;
+  return readAttrString(v.attributes, ['size', 'размер']) || v.name?.trim() || v.sku;
 }
 
 export function toStorefrontVariant(v: AdmikVariantDto): StorefrontVariant {

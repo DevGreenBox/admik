@@ -28,6 +28,8 @@ export interface AdmikMediaDto {
 export interface AdmikVariantDto {
   id: string;
   sku: string;
+  /** Человекочитаемое название варианта (напр. «M» / «Красный / M»); '' если не задано. */
+  name: string;
   /** Эффективная цена варианта — строка NUMERIC (₽). */
   price: string;
   compareAtPrice: string | null;

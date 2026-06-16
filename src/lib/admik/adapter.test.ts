@@ -22,6 +22,7 @@ function variant(over: Partial<AdmikVariantDto> = {}): AdmikVariantDto {
   return {
     id: '00000000-0000-0000-0000-000000000001',
     sku: 'SKU-1',
+    name: 'M',
     price: '4900.00',
     compareAtPrice: null,
     discountPct: null,
@@ -87,9 +88,12 @@ describe('resolveGender', () => {
 });
 
 describe('варианты-размеры', () => {
-  it('variantSize: attributes.size → иначе sku', () => {
-    expect(variantSize(variant({ attributes: { size: 'L' } }))).toBe('L');
-    expect(variantSize(variant({ attributes: {}, sku: 'ONLY-SKU' }))).toBe('ONLY-SKU');
+  it('variantSize: attributes.size → имя варианта → sku', () => {
+    expect(variantSize(variant({ attributes: { size: 'L' }, name: 'X' }))).toBe('L');
+    // нет size-атрибута → имя варианта
+    expect(variantSize(variant({ attributes: {}, name: 'XL', sku: 'SKU-X' }))).toBe('XL');
+    // нет size-атрибута и имени → sku
+    expect(variantSize(variant({ attributes: {}, name: '', sku: 'ONLY-SKU' }))).toBe('ONLY-SKU');
   });
   it('toStorefrontVariant маппит цену и наличие', () => {
     const v = toStorefrontVariant(variant({ price: '5200.00', inStock: false }));
