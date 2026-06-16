@@ -1,5 +1,10 @@
 import type { JSONValue } from 'postgres';
 import { sql } from '@/lib/db/client';
+import { sanitize, sanitizeValue, isSensitiveKey } from './sanitize';
+
+// Санитизация вынесена в lib/audit/sanitize.ts (переиспользуется логгером без
+// связности с этим модулем). Реэкспорт сохраняет публичный API audit/log.
+export { sanitize, sanitizeValue, isSensitiveKey };
 
 /**
  * Единый helper записи в audit_log (§7.2).
@@ -35,62 +40,6 @@ export interface AuditContext {
   ip?: string;
   /** User-Agent инициатора. */
   userAgent?: string;
-}
-
-/**
- * Список чувствительных ключей, которые НИКОГДА не пишутся в аудит.
- * Сравнение ведётся без учёта регистра и по вхождению подстроки (`sessionToken`,
- * `refresh_token`, `API_SECRET` и т.п. тоже отсекаются).
- */
-const SENSITIVE_KEYS: readonly string[] = [
-  'password',
-  'password_hash',
-  'passwordhash',
-  'token',
-  'secret',
-  'credentials',
-  'apikey',
-  'api_key',
-  'private_key',
-  'privatekey',
-];
-
-/** true, если имя ключа содержит любой из чувствительных маркеров (регистронезависимо). */
-function isSensitiveKey(key: string): boolean {
-  const lower = key.toLowerCase();
-  return SENSITIVE_KEYS.some((marker) => lower.includes(marker));
-}
-
-/** Рекурсивно санитизирует произвольное значение (объект/массив/скаляр). */
-function sanitizeValue(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map(sanitizeValue);
-  }
-  if (value !== null && typeof value === 'object') {
-    const out: Record<string, unknown> = {};
-    for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
-      if (isSensitiveKey(key)) {
-        continue;
-      }
-      out[key] = sanitizeValue(val);
-    }
-    return out;
-  }
-  return value;
-}
-
-/**
- * Чистая функция санитизации снимка состояния для аудита.
- * Вырезает чувствительные ключи (SENSITIVE_KEYS) рекурсивно, не мутируя вход.
- * @returns очищенную копию или `null`, если на входе null/undefined.
- */
-export function sanitize(
-  data?: Record<string, unknown> | null,
-): Record<string, unknown> | null {
-  if (data === null || data === undefined) {
-    return null;
-  }
-  return sanitizeValue(data) as Record<string, unknown>;
 }
 
 /**

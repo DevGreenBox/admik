@@ -18,6 +18,15 @@ services:
     env_file:
       - .env
     restart: unless-stopped
+    # Ротация структурных JSON-логов приложения (Этап 6, 6.3; ADR-015 §6.3): защита
+    # диска от переполнения логами. Драйвер json-file (дефолтный) + ограничение
+    # размера/числа файлов. Кто хочет агрегатор (Loki/ELK) — меняет driver здесь
+    # (точка расширения, §6.3.4). Логи приложения = stdout (lib/logger.ts).
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     # Стартуем только когда зависимости реально готовы (healthcheck'и ниже)
     depends_on:
       postgres:
@@ -136,6 +145,12 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    # Ротация логов (Этап 6, 6.3): задачи cron пишут вывод в stdout контейнера.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     depends_on:
       app:
         condition: service_healthy
@@ -191,6 +206,12 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    # Ротация логов (Этап 6, 6.3): backup/restore-drill пишут отчёты в stdout.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     depends_on:
       postgres:
         condition: service_healthy

@@ -3,6 +3,10 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { getCdekConfig } from '@/lib/cdek/config';
 import { verifyWebhookIp, WebhookService } from '@/lib/cdek/services/webhook';
 import { isModuleEnabled } from '@/lib/config/modules';
+import { logger } from '@/lib/logger';
+
+/** Структурный логгер webhook СДЭК (наблюдаемость, Этап 6 §6.3). */
+const log = logger.child({ module: 'cdek.webhook' });
 
 /**
  * Webhook статусов СДЭК (docs/08 §8).
@@ -70,6 +74,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     testMode: cfg.testMode,
   });
   if (!ipOk) {
+    log.warn('webhook отклонён: IP вне whitelist', { ip, status: 403 });
     console.warn(`[cdek] webhook отклонён: IP "${ip}" вне whitelist.`);
     return NextResponse.json({ ok: false, error: 'forbidden_ip' }, { status: 403 });
   }
@@ -101,6 +106,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       duplicate: result.duplicate,
     });
   } catch (err) {
+    log.error('webhook: ошибка обработки события', {
+      err: err instanceof Error ? err.message : String(err),
+    });
     console.error('[cdek] webhook: ошибка обработки события:', err);
     return NextResponse.json({ ok: false, warn: 'handler_error' }, { status: 200 });
   }

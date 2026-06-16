@@ -11,6 +11,10 @@ import {
   writeAudit as defaultWriteAudit,
   type AuditEntry,
 } from '@/lib/audit/log';
+import { logger } from '@/lib/logger';
+
+/** Структурный логгер для наблюдаемости Server Actions (Этап 6, §6.3.1). */
+const actionLog = logger.child({ module: 'action' });
 
 /**
  * Унифицированный паттерн Server Action (docs/04 §4.7, ADR-002).
@@ -233,6 +237,12 @@ export function defineAction<I, O>(
       return { ok: true, data: output.result };
     } catch (error) {
       // Любая неожиданная ошибка → 'internal'; детали только в лог сервера.
+      // Структурный JSON-лог (наблюдаемость, §6.3): permission/action — контекст,
+      // текст ошибки — без секретов (санитизатор логгера вырежет чувствительное).
+      actionLog.error('неожиданная ошибка в Server Action', {
+        permission: opts.permission,
+        err: error instanceof Error ? error.message : String(error),
+      });
       console.error('[action] неожиданная ошибка в Server Action:', error);
       return { ok: false, error: 'internal' };
     }

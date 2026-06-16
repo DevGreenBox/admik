@@ -32,6 +32,21 @@ const envSchema = z.object({
   // Кеш / rate-limit.
   REDIS_URL: z.string().url().optional(),
 
+  // ---------------------------------------------------------------------------
+  // Логирование и мониторинг (Этап 6, пакет 6.3; lib/logger.ts; ADR-015 §6.3).
+  // ---------------------------------------------------------------------------
+  // Минимальный уровень логов приложения (debug<info<warn<error). Дефолт info.
+  LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+  // Человекочитаемый вывод логов вместо чистого JSON (для dev). Дефолт false.
+  LOG_PRETTY: z
+    .enum(['true', 'false', '1', '0'])
+    .default('false')
+    .transform((v) => v === 'true' || v === '1'),
+  // Webhook для алертов (Telegram/Slack incoming webhook). Пусто → алерты только
+  // в лог (graceful degradation). Читается healthcheck-monitor.sh; в env.ts —
+  // для единообразия конфигурации/документирования.
+  ALERT_WEBHOOK_URL: z.string().url().optional(),
+
   // S3-совместимое хранилище медиа.
   S3_ENDPOINT: z.string().url().optional(),
   S3_REGION: z.string().optional(),
