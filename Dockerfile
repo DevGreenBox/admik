@@ -12,8 +12,10 @@
 FROM node:20-alpine AS base
 # libc6-compat нужен некоторым нативным зависимостям на alpine
 RUN apk add --no-cache libc6-compat
-# Включаем pnpm через corepack (входит в Node 20)
-RUN corepack enable && corepack prepare pnpm@latest --activate
+# Включаем pnpm через corepack. ВАЖНО: пин под Node 20 — pnpm 11.x требует
+# node:sqlite (Node 22+) и падает на node:20-alpine. 9.15.9 = локальная версия +
+# совместима с lockfileVersion '9.0'.
+RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
 WORKDIR /app
 
 # -----------------------------------------------------------------------------
