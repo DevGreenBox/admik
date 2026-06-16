@@ -9,6 +9,16 @@ import { z } from 'zod';
  * будут становиться обязательными.
  */
 
+/**
+ * Опциональный URL. ВАЖНО: пустая строка (`ALERT_WEBHOOK_URL=` и т.п. — частый
+ * случай в .env) трактуется как «не задано», иначе `.url()` падал бы с «Invalid
+ * URL» и ронял запуск приложения. Непустое значение валидируется как URL.
+ */
+const optionalUrl = z.preprocess(
+  (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+  z.string().url().optional(),
+);
+
 const envSchema = z.object({
   // Окружение Node.
   NODE_ENV: z
@@ -16,7 +26,7 @@ const envSchema = z.object({
     .default('development'),
 
   // Подключение к БД (обязательно появится на этапе работы с данными).
-  DATABASE_URL: z.string().url().optional(),
+  DATABASE_URL: optionalUrl,
 
   // Seed владельца магазина (docs/04 §4.2). Используются init-shop при первом
   // развёртывании: создаётся учётка владельца (is_owner). Если OWNER_PASSWORD
@@ -30,7 +40,7 @@ const envSchema = z.object({
   MIGRATOR_PASSWORD: z.string().optional(),
 
   // Кеш / rate-limit.
-  REDIS_URL: z.string().url().optional(),
+  REDIS_URL: optionalUrl,
 
   // ---------------------------------------------------------------------------
   // Логирование и мониторинг (Этап 6, пакет 6.3; lib/logger.ts; ADR-015 §6.3).
@@ -45,22 +55,22 @@ const envSchema = z.object({
   // Webhook для алертов (Telegram/Slack incoming webhook). Пусто → алерты только
   // в лог (graceful degradation). Читается healthcheck-monitor.sh; в env.ts —
   // для единообразия конфигурации/документирования.
-  ALERT_WEBHOOK_URL: z.string().url().optional(),
+  ALERT_WEBHOOK_URL: optionalUrl,
 
   // S3-совместимое хранилище медиа.
-  S3_ENDPOINT: z.string().url().optional(),
+  S3_ENDPOINT: optionalUrl,
   S3_REGION: z.string().optional(),
   S3_ACCESS_KEY: z.string().optional(),
   S3_SECRET_KEY: z.string().optional(),
   S3_BUCKET: z.string().optional(),
-  S3_PUBLIC_URL: z.string().url().optional(),
+  S3_PUBLIC_URL: optionalUrl,
 
   // Набор включённых модулей (csv). Парсится в modules.ts.
   ADMIK_MODULES: z.string().optional(),
 
   // Брендинг магазина.
   SHOP_NAME: z.string().optional(),
-  SHOP_LOGO_URL: z.string().url().optional(),
+  SHOP_LOGO_URL: optionalUrl,
 
   // Каталог: валюта магазина (docs/06 §3.5) — форматирование цен в слое
   // представления/Storefront API; в данных каталога цены без символа валюты.
