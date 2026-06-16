@@ -210,6 +210,9 @@ export interface OrderItem {
   /** = unitPrice × quantity (считает сервер). */
   lineTotal: string;
 
+  /** Подарочная позиция (промокод gift_*): unitPrice/lineTotal = 0. */
+  isGift: boolean;
+
   createdAt: Date;
 }
 

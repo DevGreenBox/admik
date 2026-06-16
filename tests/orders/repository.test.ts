@@ -57,17 +57,22 @@ describe.skipIf(!INTEGRATION_DB_URL)('orders/repository (интеграция, �
     bogoPayQty?: number | null;
     applyScope?: 'cart' | 'category' | 'brand' | 'set';
     minQty?: number | null;
+    giftProductId?: string | null;
+    giftVariantId?: string | null;
+    giftQty?: number | null;
   }): Promise<string> {
     const [r] = await sql<{ id: string }[]>`
       INSERT INTO promo_codes (
         code, kind, value, min_order_total, usage_limit, per_customer_limit,
-        bogo_buy_qty, bogo_pay_qty, apply_scope, min_qty, is_active
+        bogo_buy_qty, bogo_pay_qty, apply_scope, min_qty,
+        gift_product_id, gift_variant_id, gift_qty, is_active
       )
       VALUES (
         ${over.code}, ${over.kind}, ${over.value ?? '0'}, ${over.minOrderTotal ?? '0'},
         ${over.usageLimit ?? null}, ${over.perCustomerLimit ?? null},
         ${over.bogoBuyQty ?? null}, ${over.bogoPayQty ?? null},
-        ${over.applyScope ?? 'cart'}, ${over.minQty ?? null}, true
+        ${over.applyScope ?? 'cart'}, ${over.minQty ?? null},
+        ${over.giftProductId ?? null}, ${over.giftVariantId ?? null}, ${over.giftQty ?? null}, true
       )
       RETURNING id
     `;
@@ -121,7 +126,7 @@ describe.skipIf(!INTEGRATION_DB_URL)('orders/repository (интеграция, �
     for (const id of created.orderIds) {
       await sql`DELETE FROM orders WHERE id = ${id}`;
     }
-    await sql`DELETE FROM orders WHERE customer_email IN ('buyer@example.com','race@example.com','limit@example.com','percust@example.com','percustrace@example.com')`;
+    await sql`DELETE FROM orders WHERE customer_email IN ('buyer@example.com','race@example.com','limit@example.com','percust@example.com','percustrace@example.com','gift@example.com')`;
     for (const id of created.promoIds) {
       await sql`DELETE FROM promo_codes WHERE id = ${id}`;
     }
@@ -427,6 +432,75 @@ describe.skipIf(!INTEGRATION_DB_URL)('orders/repository (интеграция, �
     for (const x of [a, b]) if (x.ok) created.orderIds.push(x.order.id);
     const rejected = [a, b].find((x) => !x.ok);
     if (rejected && !rejected.ok) expect(rejected.code).toBe('invalid_promo');
+  });
+
+  it('createOrder выдаёт подарок (gift_*) строкой is_gift с ценой 0 + резервирует подарок (ADR-016)', async () => {
+    const buyProduct = await makeProduct({ basePrice: '1000.00', quantity: 10 });
+    const giftProduct = await makeProduct({ basePrice: '300.00', quantity: 5 });
+    await makePromo({
+      code: 'GIFTPROMO',
+      kind: 'fixed',
+      value: '100.00',
+      giftProductId: giftProduct,
+      giftQty: 1,
+    });
+    const r = await repo.createOrder({
+      items: [{ productId: buyProduct, qty: 1 }],
+      customer: customer('gift@example.com'),
+      delivery: { type: 'courier' },
+      paymentMethod: 'cod',
+      promoCode: 'GIFTPROMO',
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    created.orderIds.push(r.order.id);
+
+    // Подарок — отдельная строка is_gift, цена и сумма 0, qty=1.
+    const detail = await repo.getOrderById(r.order.id);
+    const gift = detail?.items.find((i) => i.isGift);
+    expect(gift).toBeTruthy();
+    expect(gift?.unitPrice).toBe('0.00');
+    expect(gift?.lineTotal).toBe('0.00');
+    expect(gift?.quantity).toBe(1);
+    // Обычная позиция осталась платной.
+    expect(detail?.items.filter((i) => !i.isGift)).toHaveLength(1);
+
+    // Подарок зарезервирован (анти-оверселл).
+    const [inv] = await sql<{ reserved: number }[]>`
+      SELECT reserved FROM inventory WHERE product_id = ${giftProduct} AND warehouse_code = 'main'
+    `;
+    expect(Number(inv!.reserved)).toBe(1);
+
+    // Итог НЕ включает подарок: 1000 − 100 скидки + 0 = 900.
+    expect(r.order.itemsTotal).toBe('1000.00');
+    expect(r.order.discountTotal).toBe('100.00');
+    expect(r.order.grandTotal).toBe('900.00');
+  });
+
+  it('createOrder: подарок без остатка → заказ создаётся БЕЗ подарка (best-effort)', async () => {
+    const buyProduct = await makeProduct({ basePrice: '1000.00', quantity: 10 });
+    const giftProduct = await makeProduct({ basePrice: '300.00', quantity: 0 });
+    await makePromo({
+      code: 'GIFTNOSTOCK',
+      kind: 'fixed',
+      value: '100.00',
+      giftProductId: giftProduct,
+      giftQty: 1,
+    });
+    const r = await repo.createOrder({
+      items: [{ productId: buyProduct, qty: 1 }],
+      customer: customer('gift@example.com'),
+      delivery: { type: 'courier' },
+      paymentMethod: 'cod',
+      promoCode: 'GIFTNOSTOCK',
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    created.orderIds.push(r.order.id);
+    // Подарок не выдан, заказ создан и оплачиваем.
+    const detail = await repo.getOrderById(r.order.id);
+    expect(detail?.items.some((i) => i.isGift)).toBe(false);
+    expect(detail?.items).toHaveLength(1);
   });
 
   it('commitReservation/releaseReservation двигают остаток корректно', async () => {

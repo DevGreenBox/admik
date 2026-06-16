@@ -109,6 +109,7 @@ function makeItem(over: Partial<OrderItem> = {}): OrderItem {
     compareAtSnapshot: null,
     quantity: 2,
     lineTotal: '1000.00',
+    isGift: false,
     createdAt: new Date(),
     ...over,
   };

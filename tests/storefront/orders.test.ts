@@ -89,6 +89,7 @@ function makeItem(over: Partial<OrderItem> = {}): OrderItem {
     compareAtSnapshot: '2000.00',
     quantity: 2,
     lineTotal: '3000.00',
+    isGift: false,
     createdAt: new Date('2026-06-15T10:00:00.000Z'),
     ...over,
   };
@@ -153,6 +154,7 @@ describe('order-dto — публичный маппинг заказа (без �
       compareAtPrice: '2000.00',
       qty: 2,
       lineTotal: '3000.00',
+      isGift: false,
     });
     expect(dto).not.toHaveProperty('id');
     expect(dto).not.toHaveProperty('orderId');

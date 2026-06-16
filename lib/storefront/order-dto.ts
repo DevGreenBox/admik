@@ -100,6 +100,8 @@ export interface OrderItemDto {
   compareAtPrice: string | null;
   qty: number;
   lineTotal: string;
+  /** Подарочная позиция (промокод gift_*): unitPrice/lineTotal = 0. */
+  isGift: boolean;
 }
 
 /** Публичный статус заказа для трекинга/ЛК (GET /orders/:number). */
@@ -155,6 +157,7 @@ export function toOrderItemDto(item: OrderItem): OrderItemDto {
     compareAtPrice: item.compareAtSnapshot,
     qty: item.quantity,
     lineTotal: item.lineTotal,
+    isGift: item.isGift,
   };
 }
 
@@ -261,6 +264,8 @@ export interface QuoteLineDto {
   compareAtPrice: string | null;
   qty: number;
   lineTotal: string;
+  /** Подарочная позиция (промокод gift_*): unitPrice/lineTotal = 0. */
+  isGift: boolean;
 }
 
 /** Публичный DTO расчёта корзины (anti-tamper: суммы серверные). */
@@ -314,6 +319,7 @@ export function toQuoteDto(input: {
       compareAtPrice: l.compareAt,
       qty: l.qty,
       lineTotal: l.lineTotal,
+      isGift: l.isGift ?? false,
     })),
     promo: {
       applied: quote.promo.applied,

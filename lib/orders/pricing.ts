@@ -216,6 +216,35 @@ export interface QuoteLine {
   qty: number;
   /** = unitPrice × qty. */
   lineTotal: MoneyString;
+  /** Подарочная позиция (промокод gift_*): unitPrice/lineTotal = 0. */
+  isGift?: boolean;
+}
+
+/**
+ * Строит подарочную позицию (товар-подарок промокода gift_*): цена и сумма = 0,
+ * `compareAt` = «ценность» подарка (каталожная цена за единицу), `isGift=true`.
+ * Чистая функция — подарок считается ОТДЕЛЬНО и добавляется к позициям ПОСЛЕ
+ * расчёта итога (не входит в itemsTotal/скидку/порог бесплатной доставки).
+ */
+export function giftQuoteLine(opts: {
+  name: string;
+  sku: string;
+  /** Каталожная цена подарка за единицу — показывается как «ценность» (было). */
+  value: MoneyString | null;
+  qty: number;
+}): QuoteLine {
+  if (!Number.isInteger(opts.qty) || opts.qty < 1) {
+    throw new Error(`Некорректное количество подарка "${opts.sku}": ${opts.qty}.`);
+  }
+  return {
+    name: opts.name,
+    sku: opts.sku,
+    unitPrice: fromMinor(0),
+    compareAt: opts.value != null ? fromMinor(toMinor(opts.value)) : null,
+    qty: opts.qty,
+    lineTotal: fromMinor(0),
+    isGift: true,
+  };
 }
 
 /** Разбивка скидки промокода. */

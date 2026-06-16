@@ -25,6 +25,7 @@ import {
   calculateQuote,
   effectiveUnitPriceMinor,
   emptyScopeTargets,
+  giftQuoteLine,
   type AppliedPromo,
   type PricedLine,
   type PromoScopeTargets,
@@ -150,6 +151,7 @@ export function mapOrderItem(row: Record<string, unknown>): OrderItem {
     compareAtSnapshot: strOrNull(row.compare_at_snapshot),
     quantity: Number(row.quantity),
     lineTotal: String(row.line_total),
+    isGift: row.is_gift === true,
     createdAt: asDate(row.created_at),
   };
 }
@@ -407,6 +409,26 @@ export async function resolveCartLine(input: {
   };
 }
 
+/**
+ * Резолвит подарочную позицию промокода (gift_*) в каталожную строку
+ * (anti-tamper: товар/цена берутся из каталога). Подарок выдаётся, когда у
+ * валидного применённого промокода задан `giftQty >= 1` И хотя бы один из
+ * `giftVariantId` / `giftProductId` (вариант приоритетен). Возвращает
+ * `ResolvedLine` (с available/inStock) или null — если подарок не задан либо
+ * товар-подарок не найден/неактивен. Любой kind промокода может нести подарок.
+ */
+export async function resolveGiftLine(promo: PromoCode): Promise<ResolvedLine | null> {
+  const qty = promo.giftQty ?? 0;
+  if (!Number.isInteger(qty) || qty < 1) return null;
+  if (!promo.giftVariantId && !promo.giftProductId) return null;
+  const res = await resolveCartLine({
+    productId: promo.giftProductId ?? undefined,
+    variantId: promo.giftVariantId ?? undefined,
+    qty,
+  });
+  return res.ok ? res.line : null;
+}
+
 // =============================================================================
 // Доставка (расчёт через адаптер lib/orders/delivery-cost, docs/08 §5).
 // =============================================================================
@@ -487,6 +509,7 @@ export async function quoteCart(
   let promoResult: PromoValidationResult | null = null;
   let appliedPromo: AppliedPromo | null = null;
   let scopeTargets: PromoScopeTargets = emptyScopeTargets();
+  let giftPromo: PromoCode | null = null;
   if (input.promoCode) {
     const found = await getPromoWithTargets(input.promoCode, input.customerEmail);
     if (!found) {
@@ -506,6 +529,7 @@ export async function quoteCart(
       if (promoResult.valid) {
         appliedPromo = promoResult.promo;
         scopeTargets = found.scopeTargets;
+        giftPromo = found.promo;
       }
     }
   }
@@ -526,6 +550,18 @@ export async function quoteCart(
     },
     scopeTargets,
   });
+
+  // Подарок (gift_*): если применённый промокод валиден и несёт подарок, показываем
+  // подарочную позицию в превью (price 0). Подарок НЕ входит в itemsTotal/скидку/
+  // порог (добавляется ПОСЛЕ расчёта). Best-effort: только если есть остаток.
+  if (giftPromo) {
+    const gift = await resolveGiftLine(giftPromo);
+    if (gift && gift.inStock) {
+      quote.lines.push(
+        giftQuoteLine({ name: gift.name, sku: gift.sku, value: gift.unitPrice, qty: gift.qty }),
+      );
+    }
+  }
 
   const fulfillable =
     issues.length === 0 && lines.length === input.items.length && lines.length > 0;
@@ -726,6 +762,10 @@ export async function createOrder(
     scopeTargets,
   });
 
+  // Подарок (gift_*): резолвим каталожную строку подарка ДО транзакции (чтение).
+  // Резерв и вставка — в транзакции ниже (best-effort: нет остатка → без подарка).
+  const giftLine: ResolvedLine | null = promoRow ? await resolveGiftLine(promoRow) : null;
+
   try {
     const order = await sql.begin(async (tx) => {
       // Повторная проверка идемпотентности внутри транзакции (гонка двух запросов).
@@ -818,11 +858,11 @@ export async function createOrder(
         await tx`
           INSERT INTO order_items (
             order_id, product_id, variant_id, name_snapshot, sku_snapshot,
-            attributes_snapshot, unit_price, compare_at_snapshot, quantity, line_total
+            attributes_snapshot, unit_price, compare_at_snapshot, quantity, line_total, is_gift
           ) VALUES (
             ${orderId}, ${l.productId}, ${l.variantId}, ${l.name}, ${l.sku},
             ${tx.json(l.attributesSnapshot as Record<string, never>)}, ${l.unitPrice}, ${l.compareAt},
-            ${l.qty}, ${lineTotal}
+            ${l.qty}, ${lineTotal}, false
           )
         `;
       }
@@ -834,6 +874,30 @@ export async function createOrder(
           VALUES (${promoRow.id}, ${orderId}, ${input.customer.email}, ${quote.discount})
           ON CONFLICT (promo_code_id, order_id) DO NOTHING
         `;
+      }
+
+      // 6b) Подарок (gift_*) — best-effort. Резервируем подарок как обычную
+      //     позицию (анти-оверселл); если остатка нет — подарок просто НЕ
+      //     добавляется, заказ НЕ падает из-за бесплатного подарка. Подарочная
+      //     строка: unit_price/line_total = 0, compare_at = «ценность», is_gift=true.
+      if (giftLine) {
+        const giftReserved = await reserveUnit(tx, {
+          productId: giftLine.productId,
+          variantId: giftLine.variantId,
+          qty: giftLine.qty,
+        });
+        if (giftReserved) {
+          await tx`
+            INSERT INTO order_items (
+              order_id, product_id, variant_id, name_snapshot, sku_snapshot,
+              attributes_snapshot, unit_price, compare_at_snapshot, quantity, line_total, is_gift
+            ) VALUES (
+              ${orderId}, ${giftLine.productId}, ${giftLine.variantId}, ${giftLine.name}, ${giftLine.sku},
+              ${tx.json(giftLine.attributesSnapshot as Record<string, never>)}, ${fromMinor(0)},
+              ${giftLine.unitPrice}, ${giftLine.qty}, ${fromMinor(0)}, true
+            )
+          `;
+        }
       }
 
       // 7) Начальная запись истории статуса.
