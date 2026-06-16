@@ -84,6 +84,30 @@ describe('check-migrations.sh — запрещённый деструктивн�
     const f = fixture('bad_set_nn.sql', 'ALTER TABLE x ALTER COLUMN c SET NOT NULL;\n');
     expect(runLint(f).code).not.toBe(0);
   });
+
+  // --- MAJOR (QA): деструктив, разнесённый по физическим строкам, обходил
+  // построчный матч. Линтер обязан матчить ЛОГИЧЕСКИЕ statement'ы. ---
+
+  it('многострочный DROP COLUMN (DROP\\n COLUMN) → fail', () => {
+    const f = fixture(
+      'bad_drop_column_multiline.sql',
+      'ALTER TABLE users DROP\n  COLUMN email;\n',
+    );
+    expect(runLint(f).code).not.toBe(0);
+  });
+
+  it('многострочный DROP TABLE (DROP\\n TABLE) → fail', () => {
+    const f = fixture('bad_drop_table_multiline.sql', 'DROP\n  TABLE legacy;\n');
+    expect(runLint(f).code).not.toBe(0);
+  });
+
+  it('многострочный ALTER ... RENAME COLUMN → fail', () => {
+    const f = fixture(
+      'bad_rename_multiline.sql',
+      'ALTER TABLE x\n  RENAME COLUMN a TO b;\n',
+    );
+    expect(runLint(f).code).not.toBe(0);
+  });
 });
 
 describe('check-migrations.sh — аддитивный DDL → exit 0', () => {
@@ -123,6 +147,25 @@ describe('check-migrations.sh — аддитивный DDL → exit 0', () => {
     const f = fixture(
       'ok_add_constraint.sql',
       'ALTER TABLE x ADD CONSTRAINT x_price_chk CHECK (price >= 0) NOT VALID;\n',
+    );
+    expect(runLint(f).code).toBe(0);
+  });
+
+  // --- КОНТРОЛЬ: после перехода на statement-уровень нормализации не должно
+  // появиться ложных срабатываний на легитимном многострочном SQL. ---
+
+  it('многострочный ADD COLUMN IF NOT EXISTS ... NOT NULL DEFAULT → ok', () => {
+    const f = fixture(
+      'ok_add_column_multiline.sql',
+      "ALTER TABLE x ADD COLUMN IF NOT EXISTS\n  foo text NOT NULL DEFAULT '';\n",
+    );
+    expect(runLint(f).code).toBe(0);
+  });
+
+  it('DROP COLUMN внутри многострочного --комментария → ok', () => {
+    const f = fixture(
+      'ok_comment_multiline.sql',
+      '-- сначала мы рассматривали DROP\n-- COLUMN email, но отказались\nCREATE INDEX IF NOT EXISTS i ON t (id);\n',
     );
     expect(runLint(f).code).toBe(0);
   });
