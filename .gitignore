@@ -40,3 +40,6 @@ data/
 .data/
 postgres-data/
 minio-data/
+
+# Бэкапы БД и медиа (Этап 6, 6.2) — содержат данные магазина, не в git
+backups/
