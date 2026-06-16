@@ -18,7 +18,7 @@ import { getEnv } from '@/lib/config/env';
 import { getEffectiveSettings } from '@/lib/config/settings';
 import { getProductById } from '@/lib/catalog/repository';
 import { effectiveCompareAt } from '@/lib/catalog/pricing';
-import type { ProductDetail, ProductVariant } from '@/lib/catalog/types';
+import type { Product, ProductDetail, ProductVariant } from '@/lib/catalog/types';
 
 import { fromMinor, normalizeMoney, toMinor } from './money';
 import {
@@ -152,6 +152,10 @@ export function mapOrderItem(row: Record<string, unknown>): OrderItem {
     quantity: Number(row.quantity),
     lineTotal: String(row.line_total),
     isGift: row.is_gift === true,
+    weightG: numOrNull(row.weight_g),
+    lengthCm: numOrNull(row.length_cm),
+    widthCm: numOrNull(row.width_cm),
+    heightCm: numOrNull(row.height_cm),
     createdAt: asDate(row.created_at),
   };
 }
@@ -319,11 +323,39 @@ export interface ResolvedLine extends PricedLine {
   available: number;
   /** Достаточно ли остатка под запрошенный qty. */
   inStock: boolean;
+  /**
+   * Снимок веса/габаритов единицы (резолв вариант→товар, 0018/0026). null →
+   * дефолт магазина (CDEK_DEFAULT_*) подставит aggregatePackage. Дефолт env
+   * здесь НЕ подмешиваем: пишем «как есть в каталоге», чтобы при смене дефолта
+   * магазина старые заказы остались на снимке каталога, а пустые брали актуальный.
+   */
+  weightG: number | null;
+  lengthCm: number | null;
+  widthCm: number | null;
+  heightCm: number | null;
 }
 
 export type LineResolution =
   | { ok: true; line: ResolvedLine }
   | { ok: false; reason: 'product_not_found' | 'variant_not_found' | 'inactive' };
+
+/**
+ * Резолв веса/габаритов позиции по приоритету вариант→товар (0018, docs/08 §3.2).
+ * Чистая, тестируемая без БД. Возвращает «как в каталоге»: NULL означает «нет
+ * значения на этих уровнях» → дефолт магазина подставит aggregatePackage СДЭК.
+ * Дефолт env здесь НЕ применяется (снимок каталога, не снимок дефолта).
+ */
+export function resolveLineDims(
+  product: Pick<Product, 'weightG' | 'lengthCm' | 'widthCm' | 'heightCm'>,
+  variant: Pick<ProductVariant, 'weightG' | 'lengthCm' | 'widthCm' | 'heightCm'> | null,
+): { weightG: number | null; lengthCm: number | null; widthCm: number | null; heightCm: number | null } {
+  return {
+    weightG: variant?.weightG ?? product.weightG ?? null,
+    lengthCm: variant?.lengthCm ?? product.lengthCm ?? null,
+    widthCm: variant?.widthCm ?? product.widthCm ?? null,
+    heightCm: variant?.heightCm ?? product.heightCm ?? null,
+  };
+}
 
 /** Доступный остаток юнита (product/variant/main) из ProductDetail.inventory. */
 function availableFor(product: ProductDetail, variantId: string | null): number {
@@ -387,6 +419,9 @@ export async function resolveCartLine(input: {
 
   const variantId = variant?.id ?? null;
   const available = availableFor(product, variantId);
+  // Вес/габариты — резолв вариант→товар из каталога (anti-tamper, ADR-010): сервер
+  // фиксирует снимок для СДЭК, из тела запроса они НЕ берутся.
+  const dims = resolveLineDims(product, variant);
 
   return {
     ok: true,
@@ -405,6 +440,7 @@ export async function resolveCartLine(input: {
       attributesSnapshot: variant?.attributesCache ?? product.attributesCache ?? {},
       available,
       inStock: available >= input.qty,
+      ...dims,
     },
   };
 }
@@ -858,11 +894,13 @@ export async function createOrder(
         await tx`
           INSERT INTO order_items (
             order_id, product_id, variant_id, name_snapshot, sku_snapshot,
-            attributes_snapshot, unit_price, compare_at_snapshot, quantity, line_total, is_gift
+            attributes_snapshot, unit_price, compare_at_snapshot, quantity, line_total, is_gift,
+            weight_g, length_cm, width_cm, height_cm
           ) VALUES (
             ${orderId}, ${l.productId}, ${l.variantId}, ${l.name}, ${l.sku},
             ${tx.json(l.attributesSnapshot as Record<string, never>)}, ${l.unitPrice}, ${l.compareAt},
-            ${l.qty}, ${lineTotal}, false
+            ${l.qty}, ${lineTotal}, false,
+            ${l.weightG}, ${l.lengthCm}, ${l.widthCm}, ${l.heightCm}
           )
         `;
       }
@@ -890,11 +928,13 @@ export async function createOrder(
           await tx`
             INSERT INTO order_items (
               order_id, product_id, variant_id, name_snapshot, sku_snapshot,
-              attributes_snapshot, unit_price, compare_at_snapshot, quantity, line_total, is_gift
+              attributes_snapshot, unit_price, compare_at_snapshot, quantity, line_total, is_gift,
+              weight_g, length_cm, width_cm, height_cm
             ) VALUES (
               ${orderId}, ${giftLine.productId}, ${giftLine.variantId}, ${giftLine.name}, ${giftLine.sku},
               ${tx.json(giftLine.attributesSnapshot as Record<string, never>)}, ${fromMinor(0)},
-              ${giftLine.unitPrice}, ${giftLine.qty}, ${fromMinor(0)}, true
+              ${giftLine.unitPrice}, ${giftLine.qty}, ${fromMinor(0)}, true,
+              ${giftLine.weightG}, ${giftLine.lengthCm}, ${giftLine.widthCm}, ${giftLine.heightCm}
             )
           `;
         }

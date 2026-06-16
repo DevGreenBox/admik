@@ -213,6 +213,14 @@ export interface OrderItem {
   /** Подарочная позиция (промокод gift_*): unitPrice/lineTotal = 0. */
   isGift: boolean;
 
+  // ---- Снимок веса/габаритов для СДЭК (0026, резолв вариант→товар) ----
+  /** Вес единицы в граммах на момент покупки; null → дефолт магазина (CDEK_DEFAULT_*). */
+  weightG: number | null;
+  /** Габариты единицы в см на момент покупки; null → дефолт магазина. */
+  lengthCm: number | null;
+  widthCm: number | null;
+  heightCm: number | null;
+
   createdAt: Date;
 }
 

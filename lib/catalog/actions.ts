@@ -298,13 +298,16 @@ export const createProduct = defineAction({
       const rows = await sql<{ id: string }[]>`
         INSERT INTO products (sku, slug, name, description, status, base_price,
                               compare_at_price, is_featured, is_new, brand_id,
-                              seo_title, seo_description)
+                              seo_title, seo_description,
+                              weight_g, length_cm, width_cm, height_cm)
         VALUES (
           ${data.sku}, ${slug}, ${data.name}, ${data.description ?? ''},
           ${data.status ?? 'draft'}, ${data.basePrice ?? '0'},
           ${data.compareAtPrice ?? null}, ${data.isFeatured ?? false},
           ${data.isNew ?? null}, ${data.brandId ?? null},
-          ${data.seoTitle ?? null}, ${data.seoDescription ?? null}
+          ${data.seoTitle ?? null}, ${data.seoDescription ?? null},
+          ${data.weightG ?? null}, ${data.lengthCm ?? null},
+          ${data.widthCm ?? null}, ${data.heightCm ?? null}
         )
         RETURNING id
       `;
@@ -368,6 +371,14 @@ export const updateProduct = defineAction({
         canonical_url   = CASE WHEN ${data.canonicalUrl !== undefined}
                                THEN ${data.canonicalUrl ?? null} ELSE canonical_url END,
         noindex         = COALESCE(${data.noindex ?? null}, noindex),
+        weight_g        = CASE WHEN ${data.weightG !== undefined}
+                               THEN ${data.weightG ?? null} ELSE weight_g END,
+        length_cm       = CASE WHEN ${data.lengthCm !== undefined}
+                               THEN ${data.lengthCm ?? null} ELSE length_cm END,
+        width_cm        = CASE WHEN ${data.widthCm !== undefined}
+                               THEN ${data.widthCm ?? null} ELSE width_cm END,
+        height_cm       = CASE WHEN ${data.heightCm !== undefined}
+                               THEN ${data.heightCm ?? null} ELSE height_cm END,
         updated_at      = now()
       WHERE id = ${data.id}
       RETURNING *
@@ -430,11 +441,14 @@ export const createVariant = defineAction({
     assertCatalogEnabled();
     const rows = await sql<{ id: string }[]>`
       INSERT INTO product_variants
-        (product_id, sku, name, price_override, price_delta, compare_at_price, is_active, sort)
+        (product_id, sku, name, price_override, price_delta, compare_at_price, is_active, sort,
+         weight_g, length_cm, width_cm, height_cm)
       VALUES (
         ${data.productId}, ${data.sku}, ${data.name ?? ''},
         ${data.priceOverride ?? null}, ${data.priceDelta ?? '0'},
-        ${data.compareAtPrice ?? null}, ${data.isActive ?? true}, ${data.sort ?? 0}
+        ${data.compareAtPrice ?? null}, ${data.isActive ?? true}, ${data.sort ?? 0},
+        ${data.weightG ?? null}, ${data.lengthCm ?? null},
+        ${data.widthCm ?? null}, ${data.heightCm ?? null}
       )
       RETURNING id
     `;
@@ -480,6 +494,14 @@ export const updateVariant = defineAction({
                                 THEN ${data.compareAtPrice ?? null} ELSE compare_at_price END,
         is_active      = COALESCE(${data.isActive ?? null}, is_active),
         sort           = COALESCE(${data.sort ?? null}, sort),
+        weight_g       = CASE WHEN ${data.weightG !== undefined}
+                              THEN ${data.weightG ?? null} ELSE weight_g END,
+        length_cm      = CASE WHEN ${data.lengthCm !== undefined}
+                              THEN ${data.lengthCm ?? null} ELSE length_cm END,
+        width_cm       = CASE WHEN ${data.widthCm !== undefined}
+                              THEN ${data.widthCm ?? null} ELSE width_cm END,
+        height_cm      = CASE WHEN ${data.heightCm !== undefined}
+                              THEN ${data.heightCm ?? null} ELSE height_cm END,
         updated_at     = now()
       WHERE id = ${data.id}
       RETURNING *

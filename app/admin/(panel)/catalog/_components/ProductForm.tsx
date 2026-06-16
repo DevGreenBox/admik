@@ -83,6 +83,12 @@ export function ProductForm({
   const [basePrice, setBasePrice] = useState(product?.basePrice ?? '0');
   const [compareAtPrice, setCompareAtPrice] = useState(product?.compareAtPrice ?? '');
   const [brandId, setBrandId] = useState(product?.brandId ?? '');
+  // Вес/габариты для СДЭК (0018): пустая строка = null (дефолт магазина).
+  const numToStr = (v: number | null | undefined) => (v === null || v === undefined ? '' : String(v));
+  const [weightG, setWeightG] = useState(numToStr(product?.weightG));
+  const [lengthCm, setLengthCm] = useState(numToStr(product?.lengthCm));
+  const [widthCm, setWidthCm] = useState(numToStr(product?.widthCm));
+  const [heightCm, setHeightCm] = useState(numToStr(product?.heightCm));
   const [isFeatured, setIsFeatured] = useState(product?.isFeatured ?? false);
   // is_new — троичная логика: 'auto' (null) | 'yes' (true) | 'no' (false).
   const [isNewMode, setIsNewMode] = useState<'auto' | 'yes' | 'no'>(
@@ -123,6 +129,13 @@ export function ProductForm({
     setSuccess(null);
 
     const isNew = isNewMode === 'auto' ? null : isNewMode === 'yes';
+    // Пустая строка → null (дефолт магазина); иначе целое (Zod проверит ≥ 0).
+    const strToNum = (v: string): number | null => {
+      const t = v.trim();
+      if (t === '') return null;
+      const n = Number(t);
+      return Number.isFinite(n) ? Math.trunc(n) : null;
+    };
     const payload = {
       sku: sku.trim(),
       slug: slug.trim() || undefined,
@@ -138,6 +151,10 @@ export function ProductForm({
       primaryCategoryId: primaryCategoryId || null,
       seoTitle: seo.seoTitle.trim() || undefined,
       seoDescription: seo.seoDescription.trim() || undefined,
+      weightG: strToNum(weightG),
+      lengthCm: strToNum(lengthCm),
+      widthCm: strToNum(widthCm),
+      heightCm: strToNum(heightCm),
     };
 
     // Расширенные SEO/OG-поля принимает только Update-схема (docs/11 §5.3.3).
@@ -329,6 +346,69 @@ export function ProductForm({
                 ))}
               </select>
             </div>
+
+            <fieldset className="lg:col-span-2">
+              <legend className="text-sm font-medium text-gray-700">
+                Вес и габариты (для расчёта доставки СДЭК)
+              </legend>
+              <p className="mt-1 text-xs text-gray-500">
+                Пусто — берётся дефолт магазина. На уровне варианта можно переопределить.
+              </p>
+              <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div>
+                  <label htmlFor="p-weight" className="block text-xs font-medium text-gray-600">
+                    Вес (г)
+                  </label>
+                  <input
+                    id="p-weight"
+                    inputMode="numeric"
+                    value={weightG}
+                    onChange={(e) => setWeightG(e.target.value)}
+                    className="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
+                  />
+                  {fieldErr('weightG') ? <p className="mt-1 text-xs text-red-600">{fieldErr('weightG')}</p> : null}
+                </div>
+                <div>
+                  <label htmlFor="p-length" className="block text-xs font-medium text-gray-600">
+                    Длина (см)
+                  </label>
+                  <input
+                    id="p-length"
+                    inputMode="numeric"
+                    value={lengthCm}
+                    onChange={(e) => setLengthCm(e.target.value)}
+                    className="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
+                  />
+                  {fieldErr('lengthCm') ? <p className="mt-1 text-xs text-red-600">{fieldErr('lengthCm')}</p> : null}
+                </div>
+                <div>
+                  <label htmlFor="p-width" className="block text-xs font-medium text-gray-600">
+                    Ширина (см)
+                  </label>
+                  <input
+                    id="p-width"
+                    inputMode="numeric"
+                    value={widthCm}
+                    onChange={(e) => setWidthCm(e.target.value)}
+                    className="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
+                  />
+                  {fieldErr('widthCm') ? <p className="mt-1 text-xs text-red-600">{fieldErr('widthCm')}</p> : null}
+                </div>
+                <div>
+                  <label htmlFor="p-height" className="block text-xs font-medium text-gray-600">
+                    Высота (см)
+                  </label>
+                  <input
+                    id="p-height"
+                    inputMode="numeric"
+                    value={heightCm}
+                    onChange={(e) => setHeightCm(e.target.value)}
+                    className="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
+                  />
+                  {fieldErr('heightCm') ? <p className="mt-1 text-xs text-red-600">{fieldErr('heightCm')}</p> : null}
+                </div>
+              </div>
+            </fieldset>
 
             <fieldset className="flex flex-col gap-2">
               <legend className="text-sm font-medium text-gray-700">Флаги</legend>

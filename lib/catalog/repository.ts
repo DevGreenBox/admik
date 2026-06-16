@@ -47,6 +47,24 @@ function asJson(v: any): Record<string, unknown> {
   }
   return {};
 }
+/** Целое или null (вес/габариты СДЭК, 0018): NULL/undefined → null, иначе Number. */
+function asIntOrNull(v: any): number | null {
+  return v === null || v === undefined ? null : Number(v);
+}
+/** Вес/габариты товара или варианта (0018) — общий для mapProduct/mapVariant. */
+function mapDimsFields(row: any): {
+  weightG: number | null;
+  lengthCm: number | null;
+  widthCm: number | null;
+  heightCm: number | null;
+} {
+  return {
+    weightG: asIntOrNull(row.weight_g),
+    lengthCm: asIntOrNull(row.length_cm),
+    widthCm: asIntOrNull(row.width_cm),
+    heightCm: asIntOrNull(row.height_cm),
+  };
+}
 
 /** Маппер расширенных SEO/OG-полей сущности (docs/11 §5.3); общий для 3 сущностей. */
 function mapSeoFields(row: any): {
@@ -105,6 +123,7 @@ export function mapProduct(row: any): Product {
     seoTitle: row.seo_title ?? null,
     seoDescription: row.seo_description ?? null,
     ...mapSeoFields(row),
+    ...mapDimsFields(row),
     createdAt: asDate(row.created_at),
     updatedAt: asDate(row.updated_at),
   };
@@ -160,6 +179,7 @@ export function mapVariant(row: any): ProductVariant {
     isActive: Boolean(row.is_active),
     sort: Number(row.sort),
     attributesCache: asJson(row.attributes_cache),
+    ...mapDimsFields(row),
     createdAt: asDate(row.created_at),
     updatedAt: asDate(row.updated_at),
   };
@@ -424,6 +444,7 @@ export async function getProductById(
            p.compare_at_price, p.is_featured, p.is_new, p.brand_id,
            p.attributes_cache, p.seo_title, p.seo_description,
            p.og_title, p.og_description, p.og_image_key, p.canonical_url, p.noindex,
+           p.weight_g, p.length_cm, p.width_cm, p.height_cm,
            p.created_at, p.updated_at,
            b.id AS b_id, b.slug AS b_slug, b.name AS b_name, b.logo_key AS b_logo_key
     FROM products p
@@ -442,7 +463,8 @@ export async function getProductById(
     `,
     sql<Record<string, unknown>[]>`
       SELECT id, product_id, sku, name, price_override, price_delta,
-             compare_at_price, is_active, sort, attributes_cache, created_at, updated_at
+             compare_at_price, is_active, sort, attributes_cache,
+             weight_g, length_cm, width_cm, height_cm, created_at, updated_at
       FROM product_variants WHERE product_id = ${id} ORDER BY sort, name
     `,
     sql<Record<string, unknown>[]>`

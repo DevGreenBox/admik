@@ -155,6 +155,38 @@ describe('ProductCreate/Update — новые поля (docs/06 §3.1–§3.3)',
   });
 });
 
+describe('вес/габариты (0018) — товар и вариант', () => {
+  const dimKeys = ['weightG', 'lengthCm', 'widthCm', 'heightCm'] as const;
+
+  it('товар: целые ≥ 0 и null допустимы; отрицательное/дробное — нет', () => {
+    for (const k of dimKeys) {
+      expect(ProductCreateSchema.safeParse({ sku: 'S', slug: 's', name: 'X', [k]: 500 }).success).toBe(true);
+      expect(ProductCreateSchema.safeParse({ sku: 'S', slug: 's', name: 'X', [k]: 0 }).success).toBe(true);
+      expect(ProductCreateSchema.safeParse({ sku: 'S', slug: 's', name: 'X', [k]: null }).success).toBe(true);
+      expect(ProductCreateSchema.safeParse({ sku: 'S', slug: 's', name: 'X', [k]: -1 }).success).toBe(false);
+      expect(ProductCreateSchema.safeParse({ sku: 'S', slug: 's', name: 'X', [k]: 1.5 }).success).toBe(false);
+    }
+  });
+
+  it('товар: поля опциональны (можно не передавать)', () => {
+    const res = ProductCreateSchema.safeParse({ sku: 'S', slug: 's', name: 'X' });
+    expect(res.success).toBe(true);
+  });
+
+  it('товар update: null допустим (сброс к дефолту магазина)', () => {
+    expect(ProductUpdateSchema.safeParse({ id: UUID, weightG: null }).success).toBe(true);
+    expect(ProductUpdateSchema.safeParse({ id: UUID, heightCm: -3 }).success).toBe(false);
+  });
+
+  it('вариант create/update: целые ≥ 0 / null', () => {
+    for (const k of dimKeys) {
+      expect(VariantCreateSchema.safeParse({ productId: UUID, sku: 'V', [k]: 120 }).success).toBe(true);
+      expect(VariantCreateSchema.safeParse({ productId: UUID, sku: 'V', [k]: -1 }).success).toBe(false);
+      expect(VariantUpdateSchema.safeParse({ id: UUID, [k]: null }).success).toBe(true);
+    }
+  });
+});
+
 describe('VariantUpdateSchema — compareAtPrice', () => {
   it('допускает деньги/null, отклоняет отрицательное', () => {
     expect(VariantUpdateSchema.safeParse({ id: UUID, compareAtPrice: '50' }).success).toBe(true);

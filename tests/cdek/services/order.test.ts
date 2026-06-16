@@ -110,6 +110,10 @@ function makeItem(over: Partial<OrderItem> = {}): OrderItem {
     quantity: 2,
     lineTotal: '1000.00',
     isGift: false,
+    weightG: null,
+    lengthCm: null,
+    widthCm: null,
+    heightCm: null,
     createdAt: new Date(),
     ...over,
   };
@@ -191,12 +195,38 @@ describe('cdek/order — buildPayload (чистая)', () => {
     expect(p.from_location).toBeUndefined();
   });
 
-  it('packages агрегирует вес позиций (qty × дефолт)', () => {
+  it('packages агрегирует вес позиций (qty × дефолт), когда снимок пуст', () => {
     const p = buildPayload(makeOrder(), [makeItem({ quantity: 2 })], buildOpts);
-    // 2 × дефолтный вес магазина
+    // 2 × дефолтный вес магазина (снимок позиции NULL → дефолт)
     expect(p.packages[0].weight).toBe(buildOpts.defaultDimensions.weightG * 2);
     expect(p.packages[0].items).toHaveLength(1);
     expect(p.packages[0].items[0].ware_key).toBe('v-1');
+    // item-уровень тоже на дефолте (вес единицы)
+    expect(p.packages[0].items[0].weight).toBe(buildOpts.defaultDimensions.weightG);
+  });
+
+  it('packages берёт РЕАЛЬНЫЙ вес/габариты из снимка позиции (а не дефолт)', () => {
+    const item = makeItem({ quantity: 2, weightG: 300, lengthCm: 25, widthCm: 12, heightCm: 4 });
+    const p = buildPayload(makeOrder(), [item], buildOpts);
+    expect(p.packages[0].weight).toBe(300 * 2); // Σ(weightG × qty)
+    expect(p.packages[0].length).toBe(25); // max
+    expect(p.packages[0].width).toBe(12); // max
+    expect(p.packages[0].height).toBe(4 * 2); // Σ(qty × h)
+    // item-уровень: вес ЕДИНИЦЫ из снимка
+    expect(p.packages[0].items[0].weight).toBe(300);
+  });
+
+  it('несколько позиций: вес агрегируется по реальным снимкам', () => {
+    const p = buildPayload(
+      makeOrder(),
+      [
+        makeItem({ id: 'a', quantity: 2, weightG: 300, heightCm: 5 }),
+        makeItem({ id: 'b', quantity: 1, weightG: 500, heightCm: 8 }),
+      ],
+      buildOpts,
+    );
+    expect(p.packages[0].weight).toBe(300 * 2 + 500); // 1100
+    expect(p.packages[0].height).toBe(5 * 2 + 8); // 18
   });
 
   it('ПВЗ-режим без кода ПВЗ → ошибка', () => {

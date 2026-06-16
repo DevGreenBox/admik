@@ -148,7 +148,8 @@ describe('storefront/dto — computeInStock / цена варианта', () => 
     const base: ProductVariant = {
       id: 'v', productId: 'p', sku: 's', name: '', priceOverride: null,
       priceDelta: '50.00', compareAtPrice: null, isActive: true, sort: 0,
-      attributesCache: {}, createdAt: D, updatedAt: D,
+      attributesCache: {}, weightG: null, lengthCm: null, widthCm: null, heightCm: null,
+      createdAt: D, updatedAt: D,
     };
     expect(effectiveVariantPrice(base, '100.00')).toBe('150.00');
     expect(effectiveVariantPrice({ ...base, priceOverride: '200.00' }, '100.00')).toBe('200.00');
@@ -159,7 +160,9 @@ describe('storefront/dto — карточка товара', () => {
   const variant: ProductVariant = {
     id: 'v1', productId: 'p1', sku: 'V1', name: 'M',
     priceOverride: null, priceDelta: '0.00', compareAtPrice: null,
-    isActive: true, sort: 0, attributesCache: { size: 'M' }, createdAt: D, updatedAt: D,
+    isActive: true, sort: 0, attributesCache: { size: 'M' },
+    weightG: null, lengthCm: null, widthCm: null, heightCm: null,
+    createdAt: D, updatedAt: D,
   };
   const inactiveVariant: ProductVariant = { ...variant, id: 'v2', isActive: false };
 
@@ -169,6 +172,7 @@ describe('storefront/dto — карточка товара', () => {
     isFeatured: false, isNew: null, brandId: 'b1',
     attributesCache: { color: 'white' }, seoTitle: null, seoDescription: null,
     ogTitle: null, ogDescription: null, ogImageKey: null, canonicalUrl: null, noindex: false,
+    weightG: null, lengthCm: null, widthCm: null, heightCm: null,
     createdAt: D, updatedAt: D,
     categories: [{ categoryId: 'c1', isPrimary: true }],
     variants: [variant, inactiveVariant],

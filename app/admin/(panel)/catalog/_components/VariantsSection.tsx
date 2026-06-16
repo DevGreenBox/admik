@@ -28,6 +28,19 @@ export function VariantsSection({ product }: { product: ProductDetail }) {
   const [newName, setNewName] = useState('');
   const [newOverride, setNewOverride] = useState('');
   const [newDelta, setNewDelta] = useState('0');
+  // Вес/габариты варианта (0018): пусто = берётся от товара → дефолт магазина.
+  const [newWeight, setNewWeight] = useState('');
+  const [newLength, setNewLength] = useState('');
+  const [newWidth, setNewWidth] = useState('');
+  const [newHeight, setNewHeight] = useState('');
+
+  /** Пустая строка → null (наследует от товара); иначе целое ≥ 0. */
+  const strToNum = (v: string): number | null => {
+    const t = v.trim();
+    if (t === '') return null;
+    const n = Number(t);
+    return Number.isFinite(n) ? Math.trunc(n) : null;
+  };
 
   async function addVariant() {
     setPending(true);
@@ -38,6 +51,10 @@ export function VariantsSection({ product }: { product: ProductDetail }) {
       name: newName.trim(),
       priceOverride: newOverride.trim() ? newOverride.trim() : null,
       priceDelta: newDelta.trim() || '0',
+      weightG: strToNum(newWeight),
+      lengthCm: strToNum(newLength),
+      widthCm: strToNum(newWidth),
+      heightCm: strToNum(newHeight),
     });
     setPending(false);
     if (result.ok) {
@@ -45,6 +62,10 @@ export function VariantsSection({ product }: { product: ProductDetail }) {
       setNewName('');
       setNewOverride('');
       setNewDelta('0');
+      setNewWeight('');
+      setNewLength('');
+      setNewWidth('');
+      setNewHeight('');
       router.refresh();
     } else {
       setError(result);
@@ -81,6 +102,7 @@ export function VariantsSection({ product }: { product: ProductDetail }) {
               <th scope="col" className="px-3 py-2 font-medium">Название</th>
               <th scope="col" className="px-3 py-2 font-medium">Цена (override)</th>
               <th scope="col" className="px-3 py-2 font-medium">Надбавка</th>
+              <th scope="col" className="px-3 py-2 font-medium">Вес/габариты</th>
               <th scope="col" className="px-3 py-2 font-medium">Активен</th>
               <th scope="col" className="px-3 py-2 font-medium">Действия</th>
             </tr>
@@ -88,7 +110,7 @@ export function VariantsSection({ product }: { product: ProductDetail }) {
           <tbody className="divide-y divide-gray-100">
             {product.variants.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-3 py-4 text-center text-gray-400">
+                <td colSpan={7} className="px-3 py-4 text-center text-gray-400">
                   Вариантов пока нет.
                 </td>
               </tr>
@@ -99,6 +121,11 @@ export function VariantsSection({ product }: { product: ProductDetail }) {
                   <td className="px-3 py-2 text-gray-700">{v.name || '—'}</td>
                   <td className="px-3 py-2 text-gray-700">{v.priceOverride ?? '—'}</td>
                   <td className="px-3 py-2 text-gray-700">{v.priceDelta}</td>
+                  <td className="px-3 py-2 text-xs text-gray-500">
+                    {v.weightG !== null || v.lengthCm !== null || v.widthCm !== null || v.heightCm !== null
+                      ? `${v.weightG ?? '—'} г / ${v.lengthCm ?? '—'}×${v.widthCm ?? '—'}×${v.heightCm ?? '—'} см`
+                      : '—'}
+                  </td>
                   <td className="px-3 py-2">{v.isActive ? 'да' : 'нет'}</td>
                   <td className="px-3 py-2">
                     <div className="flex gap-2">
@@ -147,6 +174,31 @@ export function VariantsSection({ product }: { product: ProductDetail }) {
           <div>
             <label htmlFor="v-delta" className="block text-xs font-medium text-gray-600">Надбавка</label>
             <input id="v-delta" inputMode="decimal" value={newDelta} onChange={(e) => setNewDelta(e.target.value)}
+              className="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-sm" />
+          </div>
+        </div>
+        <p className="mt-3 text-xs text-gray-500">
+          Вес/габариты варианта (пусто — берётся от товара → дефолт магазина):
+        </p>
+        <div className="mt-1 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div>
+            <label htmlFor="v-weight" className="block text-xs font-medium text-gray-600">Вес (г)</label>
+            <input id="v-weight" inputMode="numeric" value={newWeight} onChange={(e) => setNewWeight(e.target.value)}
+              className="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-sm" />
+          </div>
+          <div>
+            <label htmlFor="v-length" className="block text-xs font-medium text-gray-600">Длина (см)</label>
+            <input id="v-length" inputMode="numeric" value={newLength} onChange={(e) => setNewLength(e.target.value)}
+              className="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-sm" />
+          </div>
+          <div>
+            <label htmlFor="v-width" className="block text-xs font-medium text-gray-600">Ширина (см)</label>
+            <input id="v-width" inputMode="numeric" value={newWidth} onChange={(e) => setNewWidth(e.target.value)}
+              className="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-sm" />
+          </div>
+          <div>
+            <label htmlFor="v-height" className="block text-xs font-medium text-gray-600">Высота (см)</label>
+            <input id="v-height" inputMode="numeric" value={newHeight} onChange={(e) => setNewHeight(e.target.value)}
               className="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-sm" />
           </div>
         </div>

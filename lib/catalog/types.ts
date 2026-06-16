@@ -94,6 +94,12 @@ export interface Product {
   ogImageKey: string | null;
   canonicalUrl: string | null;
   noindex: boolean;
+  /** Вес товара в граммах для расчёта/создания доставки СДЭК (0018); null → дефолт магазина. */
+  weightG: number | null;
+  /** Габариты товара в см (0018); null → дефолт магазина (CDEK_DEFAULT_*). */
+  lengthCm: number | null;
+  widthCm: number | null;
+  heightCm: number | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -146,6 +152,12 @@ export interface ProductVariant {
   isActive: boolean;
   sort: number;
   attributesCache: Record<string, unknown>;
+  /** Вес варианта в граммах (0018); null → берётся от товара → дефолт магазина. */
+  weightG: number | null;
+  /** Габариты варианта в см (0018); null → берётся от товара → дефолт магазина. */
+  lengthCm: number | null;
+  widthCm: number | null;
+  heightCm: number | null;
   createdAt: Date;
   updatedAt: Date;
 }

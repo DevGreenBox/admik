@@ -74,11 +74,30 @@ export function deliveryModeFor(order: Order): CdekDeliveryMode {
   }
 }
 
-/** Позиции заказа → строки для агрегации упаковки (вес/габариты — снимок). */
+/**
+ * Позиции заказа → строки для агрегации упаковки. Вес/габариты берутся из СНИМКА
+ * заказа (order_items, 0026), который при createOrder резолвится приоритетом
+ * вариант→товар из каталога (resolveLineDims). NULL-поля → дефолт магазина
+ * (CDEK_DEFAULT_*) подставит aggregatePackage. Так СДЭК использует РЕАЛЬНЫЕ
+ * габариты позиции, а не только дефолт.
+ */
 function linesFromItems(items: readonly OrderItem[]): CartLineDims[] {
-  // У позиции заказа нет веса/габаритов (снимок каталога их не хранит) — берём
-  // qty, остальное подставит дефолт магазина в aggregatePackage.
-  return items.map((it) => ({ qty: it.quantity }));
+  return items.map((it) => ({
+    qty: it.quantity,
+    weightG: it.weightG ?? null,
+    lengthCm: it.lengthCm ?? null,
+    widthCm: it.widthCm ?? null,
+    heightCm: it.heightCm ?? null,
+  }));
+}
+
+/**
+ * Вес ОДНОЙ единицы позиции для item-уровня payload СДЭК (граммы, ≥ 1).
+ * Приоритет: снимок позиции (вес единицы) → дефолт магазина. Целое (округление).
+ */
+function itemUnitWeight(item: OrderItem, defaultWeightG: number): number {
+  const w = item.weightG ?? defaultWeightG;
+  return Math.max(1, Math.round(w));
 }
 
 // -----------------------------------------------------------------------------
@@ -188,7 +207,8 @@ export function buildPayload(
           payment: { value: 0 },
           cost: Number(it.unitPrice),
           amount: it.quantity,
-          weight: Math.max(1, Math.round(opts.defaultDimensions.weightG)),
+          // Вес ЕДИНИЦЫ из снимка позиции (вариант→товар, 0026); пусто → дефолт магазина.
+          weight: itemUnitWeight(it, opts.defaultDimensions.weightG),
         })),
       },
     ],

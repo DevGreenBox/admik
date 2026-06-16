@@ -76,6 +76,21 @@ const seoTitle = z.string().max(255).optional();
 const seoDescription = z.string().max(1000).optional();
 
 /**
+ * Вес/габариты для расчёта СДЭК (0018, docs/08 §3.2): целое ≥ 0, nullable.
+ * null → берётся вышестоящий уровень (вариант→товар) или дефолт магазина
+ * (CDEK_DEFAULT_*). Вес — в граммах, габариты — в сантиметрах.
+ */
+const dimensionSchema = z.number().int().min(0).nullish();
+
+/** Поля веса/габаритов товара/варианта (0018) — подмешиваются в create/update-схемы. */
+export const dimensionFields = {
+  weightG: dimensionSchema,
+  lengthCm: dimensionSchema,
+  widthCm: dimensionSchema,
+  heightCm: dimensionSchema,
+} as const;
+
+/**
  * Расширенные SEO/OG-поля сущностей каталога (docs/11 §5.3). Подмешиваются в
  * Update-схемы товара/категории/бренда. canonicalUrl валидируется на безопасность
  * (абсолютный https / path с '/'); мусор (javascript:, относительный без '/') →
@@ -142,6 +157,7 @@ export const ProductCreateSchema = z
     primaryCategoryId: uuidSchema.nullish(),
     seoTitle,
     seoDescription,
+    ...dimensionFields,
   })
   .refine(
     (v) =>
@@ -171,6 +187,7 @@ export const ProductUpdateSchema = z.object({
   seoTitle,
   seoDescription,
   ...seoEntityFields,
+  ...dimensionFields,
 });
 export type ProductUpdateInput = z.infer<typeof ProductUpdateSchema>;
 
@@ -189,6 +206,7 @@ export const VariantCreateSchema = z.object({
   compareAtPrice: moneySchema.nullish(),
   isActive: z.boolean().optional().default(true),
   sort: z.number().int().min(0).optional().default(0),
+  ...dimensionFields,
 });
 export type VariantCreateInput = z.infer<typeof VariantCreateSchema>;
 
@@ -201,6 +219,7 @@ export const VariantUpdateSchema = z.object({
   compareAtPrice: moneySchema.nullish(),
   isActive: z.boolean().optional(),
   sort: z.number().int().min(0).optional(),
+  ...dimensionFields,
 });
 export type VariantUpdateInput = z.infer<typeof VariantUpdateSchema>;
 

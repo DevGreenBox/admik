@@ -8,9 +8,13 @@
  * ANTI-TAMPER (ADR-010): отправление (from_location) — ВСЕГДА серверное
  * (CDEK_FROM_LOCATION_CODE из config), из тела НЕ читается. Назначение (to) —
  * из тела. Любые поля from/from_location в теле игнорируются Zod-схемой (strip).
+ * Вес/габариты позиций — ТОЖЕ серверные: резолвятся из каталога по variantId/
+ * productId (приоритет вариант→товар→дефолт магазина), из тела НЕ читаются
+ * (иначе клиент мог бы занизить вес и удешевить доставку). Поля weightG/… в теле
+ * игнорируются схемой (strip).
  *
  * Body: { to:{ city_code?, postal_code? }, deliveryMode:'pvz'|'postamat'|'door',
- *         items:[{ variantId?, qty, weightG? }], tariffCode? }.
+ *         items:[{ variantId?, productId?, qty }], tariffCode? }.
  * Ответ: { data:{ tariffCode, cost, etaDays, periodMin, periodMax } }.
  */
 
@@ -25,17 +29,16 @@ import {
 import { STOREFRONT_WRITE_METHODS } from '@/lib/storefront/cors';
 import { getCdekManager } from '@/lib/cdek/manager';
 import { Calculator, type CartLineDims } from '@/lib/cdek/services/calculator';
+import { resolveCartLine } from '@/lib/orders/repository';
 
 export const dynamic = 'force-dynamic';
 
+// weightG/lengthCm/… НЕ описаны в схеме → strip убирает их (anti-tamper): вес
+// резолвит сервер из каталога, не из тела.
 const itemSchema = z.object({
   variantId: z.string().optional(),
   productId: z.string().optional(),
   qty: z.number().int().min(1).max(1000),
-  weightG: z.number().int().min(0).optional(),
-  lengthCm: z.number().int().min(0).optional(),
-  widthCm: z.number().int().min(0).optional(),
-  heightCm: z.number().int().min(0).optional(),
 });
 
 // from/from_location НЕ описаны в схеме → .strict()-strip убирает их (anti-tamper).
@@ -74,13 +77,32 @@ export async function POST(req: Request): Promise<Response> {
       }
 
       const { to, items, tariffCode } = parsed.data;
-      const lines: CartLineDims[] = items.map((it) => ({
-        qty: it.qty,
-        weightG: it.weightG ?? null,
-        lengthCm: it.lengthCm ?? null,
-        widthCm: it.widthCm ?? null,
-        heightCm: it.heightCm ?? null,
-      }));
+      // Вес/габариты позиций — СЕРВЕРНЫЕ (anti-tamper): резолвим из каталога по
+      // variantId/productId (приоритет вариант→товар→дефолт магазина). Позиции, не
+      // найденные/неактивные/без идентификатора → qty без габаритов (дефолт
+      // магазина), расчёт не падает (best-effort, как в quoteCart).
+      const lines: CartLineDims[] = await Promise.all(
+        items.map(async (it): Promise<CartLineDims> => {
+          if (!it.variantId && !it.productId) {
+            return { qty: it.qty };
+          }
+          const res = await resolveCartLine({
+            productId: it.productId,
+            variantId: it.variantId,
+            qty: it.qty,
+          });
+          if (!res.ok) {
+            return { qty: it.qty };
+          }
+          return {
+            qty: it.qty,
+            weightG: res.line.weightG,
+            lengthCm: res.line.lengthCm,
+            widthCm: res.line.widthCm,
+            heightCm: res.line.heightCm,
+          };
+        }),
+      );
 
       const calc = new Calculator(getCdekManager());
       // from_location — серверный (внутри Calculator), здесь только назначение.

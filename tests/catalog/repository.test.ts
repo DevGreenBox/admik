@@ -82,6 +82,31 @@ describe('mapProduct', () => {
     expect(p.isNew).toBe(false);
     expect(p.brandId).toBeNull();
   });
+
+  it('вес/габариты (0018): числа приводятся, NULL → null', () => {
+    const p = mapProduct({
+      id: 'p3', sku: 'S', slug: 's', name: 'N', status: 'active',
+      base_price: '0', attributes_cache: {},
+      weight_g: '450', length_cm: '30', width_cm: '20', height_cm: null,
+      created_at: new Date(), updated_at: new Date(),
+    });
+    expect(p.weightG).toBe(450);
+    expect(p.lengthCm).toBe(30);
+    expect(p.widthCm).toBe(20);
+    expect(p.heightCm).toBeNull();
+  });
+
+  it('отсутствующие колонки веса/габаритов → null (мульти-магазин без габаритов)', () => {
+    const p = mapProduct({
+      id: 'p4', sku: 'S', slug: 's', name: 'N', status: 'active',
+      base_price: '0', attributes_cache: {},
+      created_at: new Date(), updated_at: new Date(),
+    });
+    expect(p.weightG).toBeNull();
+    expect(p.lengthCm).toBeNull();
+    expect(p.widthCm).toBeNull();
+    expect(p.heightCm).toBeNull();
+  });
 });
 
 describe('mapVariant', () => {
@@ -116,6 +141,19 @@ describe('mapVariant', () => {
       attributes_cache: {}, created_at: new Date(), updated_at: new Date(),
     });
     expect(v2.compareAtPrice).toBeNull();
+  });
+
+  it('вес/габариты варианта (0018): переопределение или null', () => {
+    const v = mapVariant({
+      id: 'v4', product_id: 'p1', sku: 'V', name: '', price_override: null,
+      price_delta: '0', is_active: true, sort: 0, attributes_cache: {},
+      weight_g: '120', length_cm: null, width_cm: '8', height_cm: '3',
+      created_at: new Date(), updated_at: new Date(),
+    });
+    expect(v.weightG).toBe(120);
+    expect(v.lengthCm).toBeNull();
+    expect(v.widthCm).toBe(8);
+    expect(v.heightCm).toBe(3);
   });
 });
 

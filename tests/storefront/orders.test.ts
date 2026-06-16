@@ -90,6 +90,10 @@ function makeItem(over: Partial<OrderItem> = {}): OrderItem {
     quantity: 2,
     lineTotal: '3000.00',
     isGift: false,
+    weightG: null,
+    lengthCm: null,
+    widthCm: null,
+    heightCm: null,
     createdAt: new Date('2026-06-15T10:00:00.000Z'),
     ...over,
   };
