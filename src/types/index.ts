@@ -1,0 +1,40 @@
+/**
+ * Доменные типы витрины THE CASE.
+ *
+ * Каталог/категории/товары/варианты приходят из Admik Storefront API и описаны
+ * в `@/lib/admik/types` (DTO) и `@/lib/admik/adapter` (модель карточки). Здесь
+ * остаётся только UX-состояние, которое витрина хранит сама (zustand): корзина,
+ * покупатель, локальные ссылки на заказы для трекинга.
+ */
+
+export interface CartItem {
+  variantId: string;
+  slug: string;
+  name: string;
+  size: string;
+  price: number;
+  imageUrl: string | null;
+  quantity: number;
+}
+
+export interface User {
+  id: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  phone: string;
+}
+
+/**
+ * Локальная запись о заказе витрины: номер Admik + токен доступа к трекингу
+ * (GET /orders/{number}?token=). Источник истины по статусу/суммам — Admik;
+ * здесь храним только то, чем заказ находится в ЛК.
+ */
+export interface Order {
+  /** Номер заказа Admik (используется в трекинге/ЛК). */
+  number: string;
+  /** Токен доступа к заказу (выдан при создании; в БД не хранится). */
+  accessToken: string;
+  /** Момент сохранения локально (ISO). */
+  createdAt: string;
+}
