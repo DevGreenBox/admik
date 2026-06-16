@@ -217,6 +217,7 @@ describe('storefront/dto — карточка товара', () => {
     expect(dto.variants).toHaveLength(1);
     const v = dto.variants[0]!;
     expect(v.id).toBe('v1');
+    expect(v.name).toBe('M'); // человекочитаемая метка варианта (размер) для витрины
     expect(v.inStock).toBe(true);
     expect(v.attributes).toEqual({ size: 'M' });
     expect(v).not.toHaveProperty('priceDelta');

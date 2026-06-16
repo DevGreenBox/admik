@@ -81,6 +81,8 @@ export interface MediaDto {
 export interface VariantDto {
   id: string;
   sku: string;
+  /** Человекочитаемое название варианта (напр. «M» или «Красный / M»); '' если не задано. */
+  name: string;
   /** Эффективная цена варианта как строка NUMERIC (точность не теряется). */
   price: string;
   compareAtPrice: string | null;
@@ -283,6 +285,7 @@ export function toVariantDto(
   return {
     id: variant.id,
     sku: variant.sku,
+    name: variant.name ?? '',
     price,
     compareAtPrice: compareAtStr,
     discountPct: discountPercent(price, compareAtStr),
