@@ -5,11 +5,24 @@
  * ключей (ADR-002, docs/02). Никакой сети — только статика и чистые формулы.
  */
 
-import type { CdekOffice } from '../types';
+import type { CdekCity, CdekOffice } from '../types';
 
 /** Коды городов для фикстур (carre/спека: 44 = Москва, 137 = Санкт-Петербург). */
 export const MOCK_CITY_MOSCOW = 44;
 export const MOCK_CITY_SPB = 137;
+
+/**
+ * Фикстурный список городов для автокомплита (mock-режим). Коды — реальные коды
+ * СДЭК популярных городов (детерминированно, без сети).
+ */
+export const MOCK_CITIES: readonly CdekCity[] = [
+  { code: MOCK_CITY_MOSCOW, name: 'Москва', region: 'Москва' },
+  { code: MOCK_CITY_SPB, name: 'Санкт-Петербург', region: 'Санкт-Петербург' },
+  { code: 270, name: 'Новосибирск', region: 'Новосибирская область' },
+  { code: 344, name: 'Екатеринбург', region: 'Свердловская область' },
+  { code: 430, name: 'Казань', region: 'Республика Татарстан' },
+  { code: 414, name: 'Нижний Новгород', region: 'Нижегородская область' },
+] as const;
 
 /**
  * Небольшой фикстур-набор ПВЗ по нескольким городам (Москва/СПб). Координаты —

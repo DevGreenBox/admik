@@ -9,6 +9,7 @@
 import { runStorefront, jsonData, handlePreflight } from '@/lib/storefront/response';
 import { listProducts } from '@/lib/catalog/repository';
 import type { ProductListFilter } from '@/lib/catalog/repository';
+import { getActiveCategoryIdBySlug } from '@/lib/storefront/queries';
 import { toProductListItemDto } from '@/lib/storefront/dto';
 
 export const dynamic = 'force-dynamic';
@@ -35,12 +36,24 @@ export async function GET(req: Request): Promise<Response> {
     const offset = Math.max(0, parseIntOr(q.get('offset'), 0));
     const page = Math.floor(offset / limit) + 1;
 
+    // Категория может прийти как categoryId (uuid) или как category (slug).
+    // Slug удобнее витрине (она знает дерево /categories по slug). Явный
+    // categoryId имеет приоритет; иначе резолвим slug → id (нет такой → пусто).
+    let categoryId = q.get('categoryId') ?? undefined;
+    const categorySlug = q.get('category')?.trim();
+    if (!categoryId && categorySlug) {
+      // Нет такой категории → nil-uuid: валиден для ::uuid-каста, не матчит ничего.
+      categoryId =
+        (await getActiveCategoryIdBySlug(categorySlug)) ??
+        '00000000-0000-0000-0000-000000000000';
+    }
+
     const filter: ProductListFilter = {
       search: q.get('q') ?? undefined,
       // Витрине отдаём только опубликованные товары.
       status: 'active',
       brandId: q.get('brandId') ?? undefined,
-      categoryId: q.get('categoryId') ?? undefined,
+      categoryId,
       isFeatured: parseBool(q.get('featured')),
       isNew: parseBool(q.get('new')),
       onSale: parseBool(q.get('sale')),

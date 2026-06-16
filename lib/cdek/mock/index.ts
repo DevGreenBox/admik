@@ -24,6 +24,7 @@ import type {
   CdekTariffResult,
 } from '../types';
 import {
+  MOCK_CITIES,
   MOCK_OFFICES,
   MOCK_PERIOD_MAX,
   MOCK_PERIOD_MIN,
@@ -33,8 +34,10 @@ import {
   MOCK_TARIFF_PVZ,
   mockDeliverySum,
 } from './fixtures';
+import type { CdekCity } from '../types';
 
 export {
+  MOCK_CITIES,
   MOCK_OFFICES,
   MOCK_CITY_MOSCOW,
   MOCK_CITY_SPB,
@@ -112,6 +115,16 @@ export function mockGetOffices(filters: MockOfficeFilters = {}): CdekOffice[] {
 /** Поиск ПВЗ по коду (positive/negative). */
 export function mockFindOfficeByCode(code: string): CdekOffice | null {
   return MOCK_OFFICES.find((o) => o.code === code) ?? null;
+}
+
+/**
+ * Mock-поиск городов по подстроке имени (аналог GET /v2/location/cities).
+ * Регистронезависимо; пустой/короткий запрос → пустой список. Детерминированно.
+ */
+export function mockSearchCities(query: string): CdekCity[] {
+  const q = (query ?? '').trim().toLowerCase();
+  if (q.length < 2) return [];
+  return MOCK_CITIES.filter((c) => c.name.toLowerCase().includes(q));
 }
 
 /** Результат mock-создания отправления (фейковые uuid/трек, is_mock). */

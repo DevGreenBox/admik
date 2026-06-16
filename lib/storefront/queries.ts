@@ -25,6 +25,22 @@ export async function getActiveProductIdBySlug(
   return rows[0]?.id ?? null;
 }
 
+/**
+ * Находит id активной категории по slug (для фильтра списка товаров витрины:
+ * витрина знает slug категории из дерева /categories, но listProducts фильтрует
+ * по categoryId). Возвращает null, если категории нет или она неактивна.
+ */
+export async function getActiveCategoryIdBySlug(
+  slug: string,
+): Promise<string | null> {
+  const rows = await sql<{ id: string }[]>`
+    SELECT id FROM categories
+    WHERE slug = ${slug} AND is_active = true
+    LIMIT 1
+  `;
+  return rows[0]?.id ?? null;
+}
+
 /** Slug-и категорий товара (для публичной карточки), только активные категории. */
 export async function getProductCategorySlugs(
   productId: string,
