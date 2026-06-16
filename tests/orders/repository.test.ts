@@ -121,7 +121,7 @@ describe.skipIf(!INTEGRATION_DB_URL)('orders/repository (интеграция, �
     for (const id of created.orderIds) {
       await sql`DELETE FROM orders WHERE id = ${id}`;
     }
-    await sql`DELETE FROM orders WHERE customer_email IN ('buyer@example.com','race@example.com','limit@example.com')`;
+    await sql`DELETE FROM orders WHERE customer_email IN ('buyer@example.com','race@example.com','limit@example.com','percust@example.com','percustrace@example.com')`;
     for (const id of created.promoIds) {
       await sql`DELETE FROM promo_codes WHERE id = ${id}`;
     }
@@ -378,6 +378,55 @@ describe.skipIf(!INTEGRATION_DB_URL)('orders/repository (интеграция, �
     const b = await mk();
     expect(b.ok).toBe(false);
     if (!b.ok) expect(b.code).toBe('invalid_promo');
+  });
+
+  it('per_customer_limit: второй заказ того же покупателя отклоняется (последовательно)', async () => {
+    const productId = await makeProduct({ basePrice: '1000.00', quantity: 10 });
+    await makePromo({
+      code: 'PERCUST1',
+      kind: 'fixed',
+      value: '100.00',
+      perCustomerLimit: 1,
+    });
+    const mk = () =>
+      repo.createOrder({
+        items: [{ productId, qty: 1 }],
+        customer: customer('percust@example.com'),
+        delivery: { type: 'courier' },
+        paymentMethod: 'cod',
+        promoCode: 'PERCUST1',
+      });
+    const a = await mk();
+    expect(a.ok).toBe(true);
+    if (a.ok) created.orderIds.push(a.order.id);
+    const b = await mk();
+    expect(b.ok).toBe(false);
+    if (!b.ok) expect(b.code).toBe('invalid_promo');
+  });
+
+  it('per_customer_limit: гонка двух одновременных чекаутов одного email — проходит ровно один (N1)', async () => {
+    const productId = await makeProduct({ basePrice: '1000.00', quantity: 10 });
+    await makePromo({
+      code: 'PERCUSTRACE',
+      kind: 'fixed',
+      value: '100.00',
+      perCustomerLimit: 1,
+    });
+    const mk = () =>
+      repo.createOrder({
+        items: [{ productId, qty: 1 }],
+        customer: customer('percustrace@example.com'),
+        delivery: { type: 'courier' },
+        paymentMethod: 'cod',
+        promoCode: 'PERCUSTRACE',
+      });
+    const [a, b] = await Promise.all([mk(), mk()]);
+    const oks = [a, b].filter((x) => x.ok);
+    // Ровно один заказ проходит, второй отклонён по per_customer_limit.
+    expect(oks).toHaveLength(1);
+    for (const x of [a, b]) if (x.ok) created.orderIds.push(x.order.id);
+    const rejected = [a, b].find((x) => !x.ok);
+    if (rejected && !rejected.ok) expect(rejected.code).toBe('invalid_promo');
   });
 
   it('commitReservation/releaseReservation двигают остаток корректно', async () => {

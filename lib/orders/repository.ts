@@ -750,7 +750,11 @@ export async function createOrder(
         }
       }
 
-      // 2) Промокод: атомарный инкремент used_count с проверкой лимита (гонка).
+      // 2) Промокод: атомарный инкремент used_count с проверкой ГЛОБАЛЬНОГО лимита
+      //    (гонка). Важный побочный эффект: этот UPDATE берёт блокировку строки
+      //    promo_codes, поэтому конкурентные чекауты ТОГО ЖЕ промокода
+      //    сериализуются здесь — второй ждёт коммита/отката первого. На этом и
+      //    строится атомарная проверка per_customer_limit ниже (2b).
       if (promoRow) {
         const inc = await tx<{ used_count: number }[]>`
           UPDATE promo_codes
@@ -761,6 +765,25 @@ export async function createOrder(
         `;
         if (inc.length !== 1) {
           throw new PromoExhaustedError();
+        }
+
+        // 2b) Лимит на одного покупателя (per_customer_limit) — АТОМАРНО, закрывает
+        //     гонку N1. Предтранзакционная проверка в validatePromo (по
+        //     customerRedemptions) даёт быстрый отказ, но НЕ защищает от двух
+        //     одновременных чекаутов одного email: оба видят count < limit и оба
+        //     создают заказ. Здесь же мы УЖЕ под блокировкой строки promo_codes
+        //     (UPDATE выше), значит конкурентный чекаут того же кода либо ещё не
+        //     дошёл до этого места, либо уже закоммитил свою promo_redemptions —
+        //     и повторный подсчёт это увидит (READ COMMITTED читает закоммиченное).
+        if (promoRow.perCustomerLimit != null) {
+          const [cnt] = await tx<{ n: string }[]>`
+            SELECT count(*)::text AS n FROM promo_redemptions
+             WHERE promo_code_id = ${promoRow.id}
+               AND customer_email = ${input.customer.email}
+          `;
+          if (Number(cnt!.n) >= promoRow.perCustomerLimit) {
+            throw new PromoCustomerLimitError();
+          }
         }
       }
 
@@ -830,6 +853,13 @@ export async function createOrder(
     if (err instanceof PromoExhaustedError) {
       return { ok: false, code: 'invalid_promo', message: 'Лимит промокода исчерпан.' };
     }
+    if (err instanceof PromoCustomerLimitError) {
+      return {
+        ok: false,
+        code: 'invalid_promo',
+        message: 'Лимит промокода на одного покупателя исчерпан.',
+      };
+    }
     throw err;
   }
 }
@@ -840,6 +870,7 @@ class OutOfStockError extends Error {
   }
 }
 class PromoExhaustedError extends Error {}
+class PromoCustomerLimitError extends Error {}
 
 // =============================================================================
 // Чтения заказов (админка/storefront).
