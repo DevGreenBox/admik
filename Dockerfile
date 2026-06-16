@@ -51,16 +51,35 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 
+# Инструменты инициализации магазина. init-shop.sh запускается ВНУТРИ этого
+# контейнера (docs/09 шаг 4, scripts/deploy.sh, `make init`:
+#   docker compose exec -T app /app/scripts/init-shop.sh), поэтому в рантайм-образе
+# должны быть:
+#   • bash — init-shop.sh/smoke.sh используют bash-возможности (массивы, shopt,
+#     BASH_SOURCE), которых нет в дефолтном ash alpine;
+#   • postgresql-client — psql/pg_isready: ожидание готовности БД и накат
+#     идемпотентных миграций из db/migrations.
+# Без них задокументированный шаг инициализации падает (scripts/db в standalone
+# не попадают, утилит БД в alpine нет). См. docs/02/09 (copy-paste-развёртывание).
+RUN apk add --no-cache bash postgresql-client
+
 # Непривилегированный пользователь для запуска приложения
 RUN addgroup --system --gid 1001 nodejs \
   && adduser --system --uid 1001 nextjs
 
 # Публичные статические файлы
 COPY --from=build --chown=nextjs:nodejs /app/public ./public
-# Standalone-сервер Next.js (включает минимальный node_modules)
+# Standalone-сервер Next.js (включает минимальный node_modules — туда трассируются
+# postgres и @node-rs/argon2, нужные db/seed/owner.mjs при инициализации)
 COPY --from=build --chown=nextjs:nodejs /app/.next/standalone ./
 # Статика Next.js (.next/static обслуживается standalone-сервером)
 COPY --from=build --chown=nextjs:nodejs /app/.next/static ./.next/static
+# Скрипты развёртывания и SQL-миграции/seed — НЕ входят в standalone-трассировку
+# Next.js, поэтому копируются явно (нужны init-shop.sh внутри контейнера app).
+COPY --from=build --chown=nextjs:nodejs /app/scripts ./scripts
+COPY --from=build --chown=nextjs:nodejs /app/db ./db
+# Гарантируем исполняемость скриптов (на случай потери +x при копировании).
+RUN chmod +x ./scripts/*.sh
 
 USER nextjs
 
