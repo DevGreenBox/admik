@@ -34,6 +34,8 @@ export interface PromoValidationContext {
   usedCount?: number;
   /** Использований этим покупателем (по email) — для per_customer_limit. */
   customerRedemptions?: number;
+  /** Суммарное количество единиц в корзине — для min_qty (§5.2, Пакет 5.P-1). */
+  itemsQty?: number;
 }
 
 /** Результат валидации промокода. */
@@ -83,6 +85,11 @@ export function validatePromo(
     return reject('below_min_total');
   }
 
+  // 2a) Минимальное количество единиц (min_qty, §5.2 Пакет 5.P-1).
+  if (promo.minQty != null && (ctx.itemsQty ?? 0) < promo.minQty) {
+    return reject('below_min_total');
+  }
+
   // 3) Лимит «всего» (usedCount < usageLimit; null = безлимит).
   if (promo.usageLimit != null) {
     const used = ctx.usedCount ?? promo.usedCount ?? 0;
@@ -106,6 +113,10 @@ export function validatePromo(
     promo.kind !== 'free_delivery' &&
     promo.kind !== 'bogo'
   ) {
+    return reject('invalid_kind');
+  }
+  // bogo без корректной пара bogoBuyQty/bogoPayQty неприменим (§5.2 Пакет 5.P-1).
+  if (promo.kind === 'bogo' && (promo.bogoBuyQty == null || promo.bogoPayQty == null)) {
     return reject('invalid_kind');
   }
 

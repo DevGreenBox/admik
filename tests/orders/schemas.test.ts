@@ -201,3 +201,80 @@ describe('orders/schemas — промокоды CRUD', () => {
     expect(parsed.comment).toBe('');
   });
 });
+
+describe('orders/schemas — N×M промо-механики (Пакет 5.P-1)', () => {
+  it('kind=bogo без пары bogoBuyQty/bogoPayQty отклоняется', () => {
+    expect(PromoCreateSchema.safeParse({ code: 'B', kind: 'bogo' }).success).toBe(false);
+    expect(
+      PromoCreateSchema.safeParse({ code: 'B', kind: 'bogo', bogoBuyQty: 3 }).success,
+    ).toBe(false);
+  });
+
+  it('новые поля по умолчанию: applyScope=cart, priority=100, stackable=false', () => {
+    const parsed = PromoCreateSchema.parse({ code: 'P', kind: 'fixed', value: '100' });
+    expect(parsed.applyScope).toBe('cart');
+    expect(parsed.priority).toBe(100);
+    expect(parsed.stackable).toBe(false);
+  });
+
+  it('applyScope=category без targets отклоняется', () => {
+    expect(
+      PromoCreateSchema.safeParse({
+        code: 'CAT',
+        kind: 'percent',
+        value: '10',
+        applyScope: 'category',
+      }).success,
+    ).toBe(false);
+  });
+
+  it('applyScope=category с непустым targets принимается', () => {
+    expect(
+      PromoCreateSchema.safeParse({
+        code: 'CAT',
+        kind: 'percent',
+        value: '10',
+        applyScope: 'category',
+        targets: [{ targetType: 'category', categoryId: UUID }],
+      }).success,
+    ).toBe(true);
+  });
+
+  it('applyScope=cart не требует targets', () => {
+    expect(
+      PromoCreateSchema.safeParse({
+        code: 'CART',
+        kind: 'percent',
+        value: '10',
+        applyScope: 'cart',
+      }).success,
+    ).toBe(true);
+  });
+
+  it('target без идентификатора нужного типа отклоняется', () => {
+    expect(
+      PromoCreateSchema.safeParse({
+        code: 'CAT',
+        kind: 'percent',
+        value: '10',
+        applyScope: 'category',
+        targets: [{ targetType: 'category' }],
+      }).success,
+    ).toBe(false);
+  });
+
+  it('priority ≥ 0, minQty ≥ 1 (если задано)', () => {
+    expect(
+      PromoCreateSchema.safeParse({ code: 'X', kind: 'fixed', value: '1', priority: -1 })
+        .success,
+    ).toBe(false);
+    expect(
+      PromoCreateSchema.safeParse({ code: 'X', kind: 'fixed', value: '1', minQty: 0 })
+        .success,
+    ).toBe(false);
+    expect(
+      PromoCreateSchema.safeParse({ code: 'X', kind: 'fixed', value: '1', minQty: 2 })
+        .success,
+    ).toBe(true);
+  });
+});

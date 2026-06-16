@@ -21,7 +21,9 @@ import {
   ORDER_STATUSES,
   PAYMENT_METHODS,
   PAYMENT_STATUSES,
+  PROMO_APPLY_SCOPES,
   PROMO_KINDS,
+  PROMO_TARGET_TYPES,
 } from './types';
 
 // -----------------------------------------------------------------------------
@@ -154,6 +156,48 @@ export type SetDeliveryStatusInput = z.infer<typeof SetDeliveryStatusSchema>;
 // Промокоды — CRUD (Server Actions §4.1, право orders.write).
 // -----------------------------------------------------------------------------
 
+/**
+ * Таргет акции (promo_targets, §5.2.1): ровно один *_id соответствует targetType.
+ * Используется при scope ≠ cart (category/brand/set).
+ */
+export const promoTargetSchema = z
+  .object({
+    targetType: z.enum(PROMO_TARGET_TYPES),
+    categoryId: uuidSchema.optional(),
+    brandId: uuidSchema.optional(),
+    productId: uuidSchema.optional(),
+    variantId: uuidSchema.optional(),
+  })
+  .superRefine((val, ctx) => {
+    const expected: Record<(typeof PROMO_TARGET_TYPES)[number], 'categoryId' | 'brandId' | 'productId' | 'variantId'> =
+      {
+        category: 'categoryId',
+        brand: 'brandId',
+        product: 'productId',
+        variant: 'variantId',
+      };
+    const requiredField = expected[val.targetType];
+    const fields = ['categoryId', 'brandId', 'productId', 'variantId'] as const;
+    for (const field of fields) {
+      if (field === requiredField) {
+        if (!val[field]) {
+          ctx.addIssue({
+            code: 'custom',
+            path: [field],
+            message: `Для target_type='${val.targetType}' требуется ${field}.`,
+          });
+        }
+      } else if (val[field]) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [field],
+          message: `Для target_type='${val.targetType}' поле ${field} должно быть пустым.`,
+        });
+      }
+    }
+  });
+export type PromoTargetInput = z.infer<typeof promoTargetSchema>;
+
 const promoBaseShape = {
   code: promoCodeSchema,
   kind: z.enum(PROMO_KINDS),
@@ -167,6 +211,15 @@ const promoBaseShape = {
   isActive: z.boolean().optional().default(true),
   bogoBuyQty: z.number().int().min(1).nullish(),
   bogoPayQty: z.number().int().min(1).nullish(),
+  // ---- N×M промо-механики (Пакет 5.P-1) ----
+  applyScope: z.enum(PROMO_APPLY_SCOPES).optional().default('cart'),
+  priority: z.number().int().min(0).optional().default(100),
+  stackable: z.boolean().optional().default(false),
+  minQty: z.number().int().min(1).nullish(),
+  giftProductId: uuidSchema.nullish(),
+  giftVariantId: uuidSchema.nullish(),
+  giftQty: z.number().int().min(1).nullish(),
+  targets: z.array(promoTargetSchema).optional().default([]),
   comment: z.string().trim().max(2000).optional().default(''),
 };
 
@@ -174,7 +227,8 @@ const promoBaseShape = {
  * Общая семантическая проверка промокода:
  *  - percent: value в диапазоне 0..100;
  *  - даты: ends_at ≥ starts_at (если обе заданы);
- *  - bogo: pay_qty < buy_qty (если оба заданы).
+ *  - bogo: pay_qty < buy_qty (если оба заданы) И пара обязательна;
+ *  - scope ∈ {category,brand,set}: targets непуст.
  */
 function refinePromo(
   val: {
@@ -184,6 +238,8 @@ function refinePromo(
     endsAt?: Date | null;
     bogoBuyQty?: number | null;
     bogoPayQty?: number | null;
+    applyScope?: string;
+    targets?: unknown[];
   },
   ctx: z.RefinementCtx,
 ): void {
@@ -214,6 +270,37 @@ function refinePromo(
       path: ['bogoPayQty'],
       message: 'Для bogo «плати за M» должно быть меньше «купи N».',
     });
+  }
+  // kind='bogo' ⇒ пара bogoBuyQty/bogoPayQty обязательна (§5.2.3).
+  if (val.kind === 'bogo') {
+    if (typeof val.bogoBuyQty !== 'number') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['bogoBuyQty'],
+        message: 'Для kind=bogo требуется «купи N» (bogoBuyQty).',
+      });
+    }
+    if (typeof val.bogoPayQty !== 'number') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['bogoPayQty'],
+        message: 'Для kind=bogo требуется «плати за M» (bogoPayQty).',
+      });
+    }
+  }
+  // scope ∈ {category,brand,set} ⇒ targets непуст (§5.2.3).
+  if (
+    val.applyScope === 'category' ||
+    val.applyScope === 'brand' ||
+    val.applyScope === 'set'
+  ) {
+    if (!Array.isArray(val.targets) || val.targets.length === 0) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['targets'],
+        message: `Для apply_scope='${val.applyScope}' требуется хотя бы один таргет.`,
+      });
+    }
   }
 }
 

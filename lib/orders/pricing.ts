@@ -218,6 +218,140 @@ export function promoDiscountMinor(
 }
 
 // -----------------------------------------------------------------------------
+// N×M «N по M» (BOGO) — чистый расчёт (docs/11 §5.2, Пакет 5.P-1).
+// -----------------------------------------------------------------------------
+
+/**
+ * Скидка «купи N плати M» в копейках по набору линий (в пределах scope).
+ *
+ * Алгоритм (детерминированный):
+ *  - линии разворачиваются в поштучные цены (qty копий цены за единицу);
+ *  - totalQty = Σqty; freeGroups = floor(totalQty / buyQty);
+ *  - freeUnits = freeGroups × (buyQty − payQty);
+ *  - бесплатны САМЫЕ ДЕШЁВЫЕ freeUnits единиц во всём наборе → их сумма.
+ *
+ * Защита: payQty ≥ buyQty или buyQty < 1 → 0; пустой набор → 0. Целые копейки.
+ */
+export function bogoDiscountMinor(
+  lines: PricedLine[],
+  buyQty: number,
+  payQty: number,
+): number {
+  if (!Number.isInteger(buyQty) || buyQty < 1) return 0;
+  if (!Number.isInteger(payQty) || payQty < 0 || payQty >= buyQty) return 0;
+
+  // Разворачиваем линии в поштучные цены (копейки).
+  const units: number[] = [];
+  for (const line of lines) {
+    if (!Number.isInteger(line.qty) || line.qty < 1) continue;
+    const unitMinor = toMinor(line.unitPrice);
+    for (let i = 0; i < line.qty; i += 1) {
+      units.push(unitMinor);
+    }
+  }
+  if (units.length === 0) return 0;
+
+  const totalQty = units.length;
+  const freeGroups = Math.floor(totalQty / buyQty);
+  if (freeGroups <= 0) return 0;
+
+  const freeUnits = freeGroups * (buyQty - payQty);
+  if (freeUnits <= 0) return 0;
+
+  // Бесплатны самые дешёвые freeUnits единиц во всём наборе.
+  units.sort((a, b) => a - b);
+  let discount = 0;
+  for (let i = 0; i < freeUnits && i < units.length; i += 1) {
+    discount += units[i];
+  }
+  return discount;
+}
+
+// -----------------------------------------------------------------------------
+// Scope-скидка percent/fixed по подмножеству линий (docs/11 §5.2, Пакет 5.P-1).
+// -----------------------------------------------------------------------------
+
+/**
+ * Скидка percent/fixed по сумме УЖЕ отфильтрованных под scope линий (anti-tamper:
+ * принадлежность scope определяет сервер из каталога, не тело запроса).
+ *  - percent: round(scoped × value/100), обрезка maxDiscount;
+ *  - fixed:   min(value, scoped);
+ *  - minQty (опц.): если Σqty линий < minQty → 0.
+ * Итог clamp в [0, scopedItemsMinor]. Целые копейки.
+ */
+export function scopeDiscountMinor(
+  lines: PricedLine[],
+  opts: {
+    kind: 'percent' | 'fixed';
+    value: MoneyString;
+    maxDiscount?: MoneyString | null;
+    minQty?: number | null;
+  },
+): number {
+  const scopedMinor = itemsTotalMinor(lines);
+  if (scopedMinor <= 0) return 0;
+
+  if (opts.minQty != null) {
+    const totalQty = lines.reduce(
+      (acc, l) => acc + (Number.isInteger(l.qty) && l.qty >= 1 ? l.qty : 0),
+      0,
+    );
+    if (totalQty < opts.minQty) return 0;
+  }
+
+  let discount = 0;
+  if (opts.kind === 'percent') {
+    discount = percentOfMinor(scopedMinor, Number(opts.value));
+    if (opts.maxDiscount != null) {
+      discount = Math.min(discount, toMinor(opts.maxDiscount));
+    }
+  } else {
+    discount = Math.min(toMinor(opts.value), scopedMinor);
+  }
+
+  return Math.min(Math.max(0, discount), scopedMinor);
+}
+
+// -----------------------------------------------------------------------------
+// Комбинируемость промо-скидок (docs/11 §5.2, Пакет 5.P-1). Чистая функция.
+// -----------------------------------------------------------------------------
+
+/** Промо-скидка-кандидат для комбинирования (уже посчитана в копейках). */
+export interface CombinableDiscount {
+  code: string;
+  priority: number;
+  stackable: boolean;
+  discountMinor: number;
+}
+
+/**
+ * Комбинирует промо-скидки по MVP-правилу: все stackable + ≤1 не-stackable
+ * (выбор по priority asc, tie-break code asc). Сумма выбранных discountMinor,
+ * clamp в [0, itemsMinor]. Детерминирован (не зависит от порядка входа).
+ */
+export function combineDiscountsMinor(
+  discounts: CombinableDiscount[],
+  itemsMinor: number,
+): { totalMinor: number; appliedCodes: string[] } {
+  const stackable = discounts.filter((d) => d.stackable);
+
+  // Один не-stackable: min priority, tie-break code asc (детерминированно).
+  const exclusive = discounts
+    .filter((d) => !d.stackable)
+    .sort((a, b) => a.priority - b.priority || a.code.localeCompare(b.code))[0];
+
+  const selected = exclusive ? [exclusive, ...stackable] : [...stackable];
+
+  const sum = selected.reduce((acc, d) => acc + Math.max(0, d.discountMinor), 0);
+  const totalMinor = Math.min(Math.max(0, sum), Math.max(0, itemsMinor));
+
+  return {
+    totalMinor,
+    appliedCodes: selected.map((d) => d.code),
+  };
+}
+
+// -----------------------------------------------------------------------------
 // Доставка и порог бесплатной доставки (§3.3). Чистая функция.
 // -----------------------------------------------------------------------------
 

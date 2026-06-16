@@ -24,6 +24,13 @@ function makePromo(over: Partial<PromoCode> = {}): PromoCode {
     isActive: over.isActive ?? true,
     bogoBuyQty: over.bogoBuyQty ?? null,
     bogoPayQty: over.bogoPayQty ?? null,
+    applyScope: over.applyScope ?? 'cart',
+    priority: over.priority ?? 100,
+    stackable: over.stackable ?? false,
+    minQty: over.minQty ?? null,
+    giftProductId: over.giftProductId ?? null,
+    giftVariantId: over.giftVariantId ?? null,
+    giftQty: over.giftQty ?? null,
     comment: over.comment ?? '',
     createdAt: over.createdAt ?? new Date('2026-01-01'),
     updatedAt: over.updatedAt ?? new Date('2026-01-01'),
@@ -131,7 +138,7 @@ describe('promo/validatePromo — отказы', () => {
 });
 
 describe('promo/validatePromo — типы скидок проходят валидацию', () => {
-  for (const kind of ['percent', 'fixed', 'free_delivery', 'bogo'] as const) {
+  for (const kind of ['percent', 'fixed', 'free_delivery'] as const) {
     it(`kind=${kind} → valid`, () => {
       const res = validatePromo(makePromo({ kind, value: kind === 'percent' ? '10' : '100' }), {
         itemsTotal: '1000.00',
@@ -141,4 +148,41 @@ describe('promo/validatePromo — типы скидок проходят вал�
       if (res.valid) expect(res.promo.kind).toBe(kind);
     });
   }
+
+  it('bogo с корректной парой → valid', () => {
+    const res = validatePromo(makePromo({ kind: 'bogo', bogoBuyQty: 3, bogoPayQty: 2 }), {
+      itemsTotal: '1000.00',
+      now: NOW,
+    });
+    expect(res.valid).toBe(true);
+    if (res.valid) expect(res.promo.kind).toBe('bogo');
+  });
+});
+
+describe('promo/validatePromo — N×M (Пакет 5.P-1)', () => {
+  it('bogo без пары bogoBuyQty/bogoPayQty → отказ invalid_kind', () => {
+    const res = validatePromo(makePromo({ kind: 'bogo', bogoBuyQty: null, bogoPayQty: null }), {
+      itemsTotal: '1000.00',
+      now: NOW,
+    });
+    expect(res).toMatchObject({ valid: false, reason: 'invalid_kind' });
+  });
+
+  it('min_qty не достигнут (itemsQty < minQty) → below_min_total', () => {
+    const res = validatePromo(makePromo({ minQty: 3 }), {
+      itemsTotal: '1000.00',
+      itemsQty: 2,
+      now: NOW,
+    });
+    expect(res).toMatchObject({ valid: false, reason: 'below_min_total' });
+  });
+
+  it('min_qty достигнут → valid', () => {
+    const res = validatePromo(makePromo({ minQty: 3 }), {
+      itemsTotal: '1000.00',
+      itemsQty: 3,
+      now: NOW,
+    });
+    expect(res.valid).toBe(true);
+  });
 });

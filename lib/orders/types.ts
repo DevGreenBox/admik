@@ -109,6 +109,24 @@ export const PROMO_KINDS: readonly PromoKind[] = [
   'bogo',
 ] as const;
 
+/** На что распространяется промо-механика (promo_codes.apply_scope, §5.2.1). */
+export type PromoApplyScope = 'cart' | 'category' | 'brand' | 'set';
+export const PROMO_APPLY_SCOPES: readonly PromoApplyScope[] = [
+  'cart',
+  'category',
+  'brand',
+  'set',
+] as const;
+
+/** Тип таргета акции (promo_targets.target_type, §5.2.1). */
+export type PromoTargetType = 'category' | 'brand' | 'product' | 'variant';
+export const PROMO_TARGET_TYPES: readonly PromoTargetType[] = [
+  'category',
+  'brand',
+  'product',
+  'variant',
+] as const;
+
 // -----------------------------------------------------------------------------
 // Сущности.
 // -----------------------------------------------------------------------------
@@ -251,9 +269,35 @@ export interface PromoCode {
   bogoBuyQty: number | null;
   bogoPayQty: number | null;
 
+  // ---- N×M промо-механики (Пакет 5.P-1) ----
+  /** На что распространяется механика (cart/category/brand/set). */
+  applyScope: PromoApplyScope;
+  /** Порядок применения (меньше = раньше); tie-break по code. */
+  priority: number;
+  /** Комбинируемость (false → эксклюзивна). */
+  stackable: boolean;
+  /** Qty-порог (дополняет minOrderTotal); null → без порога. */
+  minQty: number | null;
+  /** Товар-подарок — задел (исполнение отложено). */
+  giftProductId: string | null;
+  giftVariantId: string | null;
+  giftQty: number | null;
+
   comment: string;
   createdAt: Date;
   updatedAt: Date;
+}
+
+/** Таргет акции (promo_targets, §5.2.1) — к чему применяется scope/N×M-группировка. */
+export interface PromoTarget {
+  id: string;
+  promoCodeId: string;
+  targetType: PromoTargetType;
+  categoryId: string | null;
+  brandId: string | null;
+  productId: string | null;
+  variantId: string | null;
+  createdAt: Date;
 }
 
 /** Факт применения промокода (promo_redemptions, §2.6, §3.4). */

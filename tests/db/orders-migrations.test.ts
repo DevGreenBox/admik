@@ -177,6 +177,67 @@ describe('db/migrations — заказы 0012..0016 (юнит)', () => {
 });
 
 // =============================================================================
+// (а2) ЮНИТ — миграция 0024 промо-механик N×M (Этап 5.2, Пакет 5.P-1).
+// =============================================================================
+describe('db/migrations — промо N×M 0024 (юнит)', () => {
+  async function read0024(): Promise<string> {
+    const all = await listMigrations();
+    const m = all.find((x) => x.version === '0024');
+    expect(m, 'миграция 0024 должна существовать').toBeDefined();
+    return readFile(m!.path, 'utf8');
+  }
+
+  it('0024 существует, имя promo_mechanics_nxm', async () => {
+    const all = await listMigrations();
+    const m = all.find((x) => x.version === '0024');
+    expect(m).toBeDefined();
+    expect(m!.name).toBe('promo_mechanics_nxm');
+  });
+
+  it('идемпотентна: schema_migrations + ON CONFLICT + IF NOT EXISTS на CREATE', async () => {
+    const sqlText = await read0024();
+    expect(sqlText).toContain('schema_migrations');
+    expect(sqlText).toContain("'0024'");
+    expect(sqlText.toUpperCase()).toContain('ON CONFLICT DO NOTHING');
+    const upper = stripSqlComments(sqlText).toUpperCase();
+    const creates = upper.match(/CREATE\s+(?:UNIQUE\s+)?(?:TABLE|INDEX)/g) ?? [];
+    const guarded =
+      upper.match(/CREATE\s+(?:UNIQUE\s+)?(?:TABLE|INDEX)\s+IF\s+NOT\s+EXISTS/g) ?? [];
+    expect(guarded.length).toBe(creates.length);
+  });
+
+  it('создаёт promo_targets с FK CASCADE и GRANT для admik_app', async () => {
+    const sqlText = await read0024();
+    const upper = stripSqlComments(sqlText).toUpperCase();
+    expect(upper).toContain('CREATE TABLE IF NOT EXISTS PROMO_TARGETS');
+    expect(sqlText).toMatch(/REFERENCES\s+promo_codes\(id\)\s+ON\s+DELETE\s+CASCADE/);
+    expect(upper).toMatch(/GRANT\s+SELECT,\s+INSERT,\s+UPDATE,\s+DELETE\s+ON\s+PROMO_TARGETS\s+TO\s+ADMIK_APP/);
+  });
+
+  it('добавляет новые колонки promo_codes идемпотентно (ADD COLUMN IF NOT EXISTS)', async () => {
+    const sqlText = await read0024();
+    const upper = stripSqlComments(sqlText).toUpperCase();
+    for (const col of ['APPLY_SCOPE', 'PRIORITY', 'STACKABLE', 'MIN_QTY', 'GIFT_PRODUCT_ID']) {
+      expect(upper, `нет ADD COLUMN IF NOT EXISTS ${col}`).toContain(
+        `ADD COLUMN IF NOT EXISTS ${col}`,
+      );
+    }
+  });
+
+  it('CHECK apply_scope ограничен whitelist и priority ≥ 0', async () => {
+    const sqlText = await read0024();
+    expect(sqlText).toMatch(/apply_scope[\s\S]*CHECK[\s\S]*'cart'[\s\S]*'category'[\s\S]*'brand'[\s\S]*'set'/);
+    expect(sqlText).toMatch(/priority[\s\S]*CHECK[\s\S]*priority\s*>=\s*0/);
+  });
+
+  it('гифт-FK promo_codes → products/variants на месте (задел, ON DELETE SET NULL)', async () => {
+    const sqlText = await read0024();
+    expect(sqlText).toMatch(/REFERENCES\s+products\(id\)\s+ON\s+DELETE\s+SET\s+NULL/);
+    expect(sqlText).toMatch(/REFERENCES\s+product_variants\(id\)\s+ON\s+DELETE\s+SET\s+NULL/);
+  });
+});
+
+// =============================================================================
 // (б) ИНТЕГРАЦИЯ — нужна живая БД. В этой среде PostgreSQL нет → skipIf.
 //     Применяются ВСЕ миграции (0001..0016) под ролью, способной менять DDL.
 // =============================================================================

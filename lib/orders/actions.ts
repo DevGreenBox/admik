@@ -469,6 +469,15 @@ function mapPromoRow(row: Record<string, unknown>): PromoCode {
     isActive: Boolean(row.is_active),
     bogoBuyQty: row.bogo_buy_qty === null || row.bogo_buy_qty === undefined ? null : Number(row.bogo_buy_qty),
     bogoPayQty: row.bogo_pay_qty === null || row.bogo_pay_qty === undefined ? null : Number(row.bogo_pay_qty),
+    applyScope: (row.apply_scope as PromoCode['applyScope']) ?? 'cart',
+    priority: row.priority === null || row.priority === undefined ? 100 : Number(row.priority),
+    stackable: Boolean(row.stackable),
+    minQty: row.min_qty === null || row.min_qty === undefined ? null : Number(row.min_qty),
+    giftProductId:
+      row.gift_product_id === null || row.gift_product_id === undefined ? null : String(row.gift_product_id),
+    giftVariantId:
+      row.gift_variant_id === null || row.gift_variant_id === undefined ? null : String(row.gift_variant_id),
+    giftQty: row.gift_qty === null || row.gift_qty === undefined ? null : Number(row.gift_qty),
     comment: String(row.comment ?? ''),
     createdAt: new Date(row.created_at as string),
     updatedAt: new Date(row.updated_at as string),
