@@ -19,7 +19,7 @@
 #   7. docker compose up -d app — пересоздать app новым образом (Docker ждёт
 #      healthcheck).
 #   8. Health-gate: curl /api/health?deep=1 с ретраями. Провал → ОТКАТ: вернуть
-#      прежний git-ref, пересобрать/поднять старый образ, алерт.
+#      прежний git-ref + ПРЕЖНИЙ ОБРАЗ-СНИМОК без пересборки (пункт a), алерт.
 #   9. Лог результата (версия до/после, длительность) в JSON-совместимом виде.
 #
 # Идемпотентность: повторный запуск безопасен (git pull/up -d/init-shop —
@@ -27,6 +27,8 @@
 #
 # Настройка через env (.env подхватывается автоматически, если рядом):
 #   COMPOSE                 — команда compose (по умолчанию «docker compose»);
+#   APP_IMAGE               — имя образа app (как в docker-compose.yml; дефолт admik-app:current);
+#                             для честного отката снимок тегируется как <name>:rollback;
 #   UPDATE_REF              — git-ref/тег для деплоя (по умолчанию git pull текущей ветки);
 #   UPDATE_SKIP_BACKUP      — true → пропустить бэкап (НЕ рекомендуется; для тестов);
 #   HEALTHCHECK_URL         — базовый URL health (из W3; по умолчанию
@@ -82,6 +84,14 @@ HEALTH_URL_BASE="${HEALTHCHECK_URL:-http://localhost/api/health}"
 HEALTH_RETRIES="${UPDATE_HEALTH_RETRIES:-30}"
 HEALTH_DELAY="${UPDATE_HEALTH_TIMEOUT:-2}"
 SKIP_BACKUP_VALUE="$(printf '%s' "${UPDATE_SKIP_BACKUP:-}" | tr '[:upper:]' '[:lower:]')"
+
+# Образ приложения (имя из docker-compose.yml: image: ${APP_IMAGE:-admik-app:current})
+# и его СНИМОК для честного отката (бэклог Этапа 6, пункт a). Перед сборкой нового
+# образа текущий тегируется как ROLLBACK_IMAGE; при провале откат ВОЗВРАЩАЕТ его
+# без пересборки (быстро и детерминированно), а не пересобирает старый код.
+APP_IMAGE="${APP_IMAGE:-admik-app:current}"
+ROLLBACK_IMAGE="${APP_IMAGE%:*}:rollback"
+HAVE_ROLLBACK_IMAGE=false
 
 # Deep-режим health-gate: добавляем ?deep=1 (учитываем уже существующий query).
 case "${HEALTH_URL_BASE}" in
@@ -162,18 +172,52 @@ health_gate() {
 }
 
 # -----------------------------------------------------------------------------
-# rollback — откат на прежний git-ref + пересборка/подъём старого образа.
+# snapshot_current_image — тегирует текущий (рабочий) образ как ROLLBACK_IMAGE.
+# Снимок делается ДО сборки нового образа, чтобы откат вернул именно прежний
+# артефакт без пересборки. Если docker/образа нет — откат деградирует до
+# пересборки (HAVE_ROLLBACK_IMAGE остаётся false), не прерывая обновление.
+# -----------------------------------------------------------------------------
+snapshot_current_image() {
+  if ! command -v docker >/dev/null 2>&1; then
+    warn "docker CLI не найден — снимок образа для отката недоступен (откат будет пересборкой)."
+    return 0
+  fi
+  if ! docker image inspect "${APP_IMAGE}" >/dev/null 2>&1; then
+    warn "Образ ${APP_IMAGE} не найден (первый деплой?) — откат будет пересборкой."
+    return 0
+  fi
+  if docker tag "${APP_IMAGE}" "${ROLLBACK_IMAGE}"; then
+    HAVE_ROLLBACK_IMAGE=true
+    ok "Снимок текущего образа для отката: ${ROLLBACK_IMAGE}"
+  else
+    warn "Не удалось затегировать ${ROLLBACK_IMAGE} — откат будет пересборкой."
+  fi
+}
+
+# -----------------------------------------------------------------------------
+# rollback — откат на прежний git-ref + ВОЗВРАТ прежнего ОБРАЗА без пересборки
+# (честный откат, пункт a). Фолбэк (нет снимка/docker) — пересборка старого кода.
 # -----------------------------------------------------------------------------
 rollback() {
   local old_ref="$1"
   fail "ОТКАТ на прежнюю версию ${old_ref}"
-  # Вернуть код на зафиксированный коммит.
+  # Вернуть код/конфиги на зафиксированный коммит (compose-файлы, скрипты, миграции).
   if git checkout --quiet "${old_ref}" 2>/dev/null; then
     ok "git checkout ${old_ref}"
   else
     fail "Не удалось git checkout ${old_ref} — откат кода вручную!"
   fi
-  # Пересобрать старый образ и поднять (Docker дождётся healthcheck старого app).
+  # Честный откат: вернуть прежний ОБРАЗ (retag снимка → имя образа) и пересоздать
+  # app без пересборки. Так возвращается ровно тот артефакт, что работал до выката.
+  if [ "${HAVE_ROLLBACK_IMAGE}" = true ] && command -v docker >/dev/null 2>&1; then
+    if docker tag "${ROLLBACK_IMAGE}" "${APP_IMAGE}" \
+       && ${COMPOSE} up -d --no-build --force-recreate app; then
+      ok "Возвращён прежний образ ${APP_IMAGE} (без пересборки)."
+      return 0
+    fi
+    warn "Возврат образа не удался — деградирую до пересборки старого кода."
+  fi
+  # Фолбэк: пересобрать старый образ из кода и поднять (Docker дождётся healthcheck).
   if ${COMPOSE} build app && ${COMPOSE} up -d app; then
     ok "Старый образ app пересобран и поднят."
   else
@@ -222,6 +266,8 @@ fi
 # Шаг 3. Собрать новый образ (старый контейнер ещё работает).
 # =============================================================================
 step "Шаг 3/8. Собираю новый образ app"
+# Снимок текущего образа ДО сборки — артефакт для честного отката (пункт a).
+snapshot_current_image
 if ! ${COMPOSE} build app; then
   fail "Сборка нового образа провалилась — откатываю код."
   rollback "${OLD_REF}"

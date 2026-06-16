@@ -15,6 +15,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    # Детерминированное имя собранного образа. Нужно для ЧЕСТНОГО отката
+    # scripts/update.sh (бэклог Этапа 6, пункт a): перед сборкой нового образа
+    # текущий тегируется как образ-снимок, и при провале откат ВОЗВРАЩАЕТ его
+    # без пересборки. Переопределяется через .env (APP_IMAGE), дефолт ниже.
+    image: ${APP_IMAGE:-admik-app:current}
     env_file:
       - .env
     restart: unless-stopped
