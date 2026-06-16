@@ -51,6 +51,70 @@ services:
       - admik
 
   # ---------------------------------------------------------------------------
+  # Storefront — публичная витрина THE CASE (Next.js standalone, порт 3000)
+  # ---------------------------------------------------------------------------
+  # КАК ЭТО РАБОТАЕТ (docs/13, docs/09 «один VPS, два домена»):
+  #   Витрина — ОТДЕЛЬНЫЙ контейнер на том же VPS. Это headless-потребитель
+  #   публичного Storefront API Admik (/api/storefront/v1/*): своей БД/заказов/
+  #   СДЭК у неё нет. Топология поддоменов:
+  #     • витрина  → ${SHOP_DOMAIN} (+ www)        — этот сервис (storefront:3000);
+  #     • Admik    → ${ADMIN_DOMAIN} (admin.<домен>) — сервис app (админка/API/медиа).
+  #   Маршрутизацию обоих доменов делает Caddy (см. Caddyfile), наружу порт
+  #   витрины НЕ публикуется — только через Caddy по HTTPS.
+  #
+  # ДВА АДРЕСА API (намеренно):
+  #   • ADMIK_API_URL=http://app:3000 — СЕРВЕРНЫЕ запросы витрины (server
+  #     components / route handlers) идут ВНУТРИ docker-сети, не выходя в интернет;
+  #   • NEXT_PUBLIC_ADMIK_API_URL — ПУБЛИЧНЫЙ адрес API (https://${ADMIN_DOMAIN}),
+  #     попадает в клиентский бандл (checkout, автокомплит городов СДЭК). Это
+  #     build-arg: значение «впекается» в сборку Next.js, поэтому пробрасывается
+  #     и в build.args, и в окружение.
+  #
+  # ОБРАЗ/СБОРКА:
+  #   Контекст сборки — каталог витрины ./THE CASE (отдельный репозиторий рядом).
+  #   Его Dockerfile (output: standalone, порт 3000) принимает build-arg
+  #   NEXT_PUBLIC_ADMIK_API_URL. Имя образа переопределяется через .env
+  #   (STOREFRONT_IMAGE) — для честного отката, как у сервиса app.
+  storefront:
+    build:
+      context: ./THE CASE
+      args:
+        NEXT_PUBLIC_ADMIK_API_URL: "${NEXT_PUBLIC_ADMIK_API_URL}"
+    image: ${STOREFRONT_IMAGE:-admik-storefront:current}
+    restart: unless-stopped
+    # Ротация структурных логов витрины (как у app; Этап 6, 6.3).
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    # Витрина бесполезна без живого API Admik — ждём health сервиса app.
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      # Серверные запросы витрины — внутрь docker-сети (наружу не выходят).
+      ADMIK_API_URL: http://app:3000
+      # Публичный адрес сайта витрины (для абсолютных ссылок/SEO/sitemap).
+      NEXT_PUBLIC_SITE_URL: https://${SHOP_DOMAIN}
+      # Публичный адрес API для клиентского бандла (дублирует build-arg —
+      # на случай рантайм-чтения; основное значение «впекается» при сборке).
+      NEXT_PUBLIC_ADMIK_API_URL: ${NEXT_PUBLIC_ADMIK_API_URL}
+      # Ключ витрины (если Admik настроен на STOREFRONT_API_KEYS). Пусто —
+      # доступ по Origin-allowlist / mock. Дефолт пустой, чтобы .env без ключа
+      # не валил подстановку.
+      STOREFRONT_API_KEY: ${STOREFRONT_API_KEY:-}
+    healthcheck:
+      # Витрина «жива», если корневая страница отвечает (Next.js standalone :3000).
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - admik
+
+  # ---------------------------------------------------------------------------
   # PostgreSQL 15 — основная БД магазина
   # ---------------------------------------------------------------------------
   postgres:
@@ -266,9 +330,16 @@ services:
     depends_on:
       app:
         condition: service_healthy
+      storefront:
+        condition: service_healthy
     environment:
-      # Домен и email прокидываются в Caddyfile через {$SHOP_DOMAIN} / {$ACME_EMAIL}
+      # Домены и email прокидываются в Caddyfile через {$...}.
+      #   SHOP_DOMAIN  — apex+www витрины (reverse_proxy storefront:3000);
+      #   ADMIN_DOMAIN — поддомен Admik (админка/API/медиа, reverse_proxy app:3000).
+      # Если ADMIN_DOMAIN не задан — дефолт admin.localhost (одиночный-домен
+      # сценарий сохраняется: блок {$SHOP_DOMAIN} и :80-fallback работают как раньше).
       SHOP_DOMAIN: ${SHOP_DOMAIN}
+      ADMIN_DOMAIN: ${ADMIN_DOMAIN:-admin.localhost}
       ACME_EMAIL: ${ACME_EMAIL}
     ports:
       - "80:80"

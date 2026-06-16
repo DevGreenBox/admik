@@ -27,12 +27,23 @@
 ## 1. Целевая архитектура
 
 ```
-┌─────────────────────────┐      HTTPS (X-Storefront-Key / Origin)      ┌──────────────────────────┐
-│  THE CASE (Netlify SPA)  │  ───────────────────────────────────────▶  │  Admik (VPS, headless)    │
-│  Next.js 15, App Router  │      /api/storefront/v1/*                   │  каталог/заказы/СДЭК/CMS  │
-│  zustand: cart, wishlist │  ◀───────────────────────────────────────  │  + админка владельца      │
-└─────────────────────────┘      JSON (NUMERIC-строки ₽, inStock bool)   └──────────────────────────┘
+            ОДИН VPS (Ubuntu 24.04), один личный домен, схема поддоменов
+┌──────────────────────────────┐   HTTP внутри docker-сети (app:3000)   ┌──────────────────────────┐
+│  THE CASE (контейнер          │  ──────────────────────────────────▶  │  Admik (контейнер app)    │
+│  storefront, Next.js 15)      │      /api/storefront/v1/*              │  каталог/заказы/СДЭК/CMS  │
+│  ${SHOP_DOMAIN} (+www)        │  ◀──────────────────────────────────  │  + админка владельца      │
+│  zustand: cart, wishlist      │   JSON (NUMERIC-строки ₽, inStock)     │  ${ADMIN_DOMAIN}=admin.*  │
+└──────────────────────────────┘                                        └──────────────────────────┘
+                  ▲                                                                   ▲
+                  └─────────────────  Caddy (auto-TLS, :80/:443)  ────────────────────┘
+                       публично: https://${SHOP_DOMAIN}  и  https://${ADMIN_DOMAIN}
 ```
+
+> **Топология деплоя (2026-06-16).** Витрина больше НЕ на Netlify — она поднимается отдельным
+> контейнером `storefront` в том же `docker compose`, что и Admik, на **одном VPS**.
+> Браузер ходит на витрину по `${SHOP_DOMAIN}` и в API/админку/медиа по `${ADMIN_DOMAIN}`
+> (`admin.<домен>`); серверные запросы витрины к API идут ВНУТРИ docker-сети на `http://app:3000`.
+> Подробности развёртывания — `docs/09`. Маршрутизация: `Caddyfile`; сервис — `docker-compose.yml`.
 
 - **Витрина не имеет своей БД/бизнес-логики.** Каталог/цены/скидки/наличие/расчёт корзины/
   доставка/создание заказа — всё на стороне Admik (ADR-008/010). Витрина только рендерит и
@@ -183,18 +194,26 @@ interface CartItem {
 
 ## 6. Конфигурация витрины (env)
 
-Новые переменные THE CASE (плейсхолдеры в `.env.example`, секреты — на стенде):
+Переменные витрины THE CASE. В деплое на одном VPS их задаёт **сервис `storefront` в
+`docker-compose.yml`** (а не отдельный `.env` витрины): серверный адрес API указывает внутрь
+docker-сети, публичный — на поддомен Admik.
 
 ```dotenv
-# Адрес бэкенда Admik (Storefront API)
-ADMIK_API_URL="https://admik.example.com"           # сервер-сайд (server components / route)
-NEXT_PUBLIC_ADMIK_API_URL="https://admik.example.com" # клиент (checkout, автокомплит)
-# Ключ витрины (если Admik настроен на ключи; иначе достаточно Origin-allowlist)
+# Сервер-сайд (server components / route handlers) — ВНУТРИ docker-сети:
+ADMIK_API_URL="http://app:3000"
+# Клиент (checkout, автокомплит городов) — ПУБЛИЧНЫЙ адрес API (build-arg витрины):
+NEXT_PUBLIC_ADMIK_API_URL="https://${ADMIN_DOMAIN}"   # напр. https://admin.myshop.ru
+# Публичный адрес самой витрины (SEO/sitemap/абсолютные ссылки):
+NEXT_PUBLIC_SITE_URL="https://${SHOP_DOMAIN}"
+# Ключ витрины (если Admik настроен на ключи; иначе достаточно Origin-allowlist):
 STOREFRONT_API_KEY="<выдаётся в Admik: STOREFRONT_API_KEYS>"
 ```
 
-На стороне Admik домен витрины добавляется в `STOREFRONT_ALLOWED_ORIGINS` и/или ключ в
-`STOREFRONT_API_KEYS` (`lib/storefront/env.ts`). В dev/mock — без ключей доступ открыт (demo).
+На стороне Admik (`.env`) домен витрины добавляется в `STOREFRONT_ALLOWED_ORIGINS`
+(`https://${SHOP_DOMAIN},https://www.${SHOP_DOMAIN}`) и/или ключ в `STOREFRONT_API_KEYS`
+(`lib/storefront/env.ts`). В dev/mock — без ключей доступ открыт (demo). Полная карта переменных
+деплоя (`ADMIN_DOMAIN`, `S3_PUBLIC_URL` для медиа через Caddy, `STOREFRONT_IMAGE`) — в
+`.env.example` и `docs/09`.
 
 Удаляются из витрины: `DATABASE_URL`, `DIRECT_DATABASE_URL`, `AUTH_*` (если ЛК упрощаем),
 `CDEK_*`, `CDEK_PAY_*`, `SMTP_*` — всё это переезжает в Admik.
