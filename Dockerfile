@@ -38,6 +38,9 @@ RUN if [ -f pnpm-lock.yaml ]; then \
 FROM base AS build
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+# Admik — headless backend без каталога public/. Создаём пустой, чтобы финальный
+# `COPY /app/public ./public` в runner-стадии не падал (public not found).
+RUN mkdir -p public
 # Отключаем телеметрию Next.js при сборке
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN pnpm build
