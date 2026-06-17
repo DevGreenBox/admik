@@ -11,7 +11,11 @@ import type {
 import { PRODUCT_STATUSES, type ProductStatus } from '@/lib/catalog/types';
 import type { ActionResult } from '@/lib/server/action';
 
-import { createProductAction, updateProductAction } from './form-actions';
+import {
+  createProductAction,
+  updateProductAction,
+  archiveProductAction,
+} from './form-actions';
 import { errorMessage, fieldError } from './action-result';
 import { VariantsSection } from './VariantsSection';
 import { AttributesSection } from './AttributesSection';
@@ -35,9 +39,9 @@ import {
 type Section = 'main' | 'variants' | 'attributes' | 'media' | 'seo';
 
 const STATUS_LABEL: Record<ProductStatus, string> = {
-  draft: 'Черновик',
-  active: 'Активен',
-  archived: 'В архиве',
+  draft: 'Черновик — скрыт с сайта',
+  active: 'Активен — виден на сайте',
+  archived: 'В архиве — скрыт с сайта',
 };
 
 function flattenCategories(
@@ -188,6 +192,45 @@ export function ProductForm({
     }
   }
 
+  // Снять товар с продажи (в архив) — товар исчезает с сайта, но сохраняется
+  // в системе (можно вернуть, выбрав статус «Активен»). Существующий экшен
+  // archiveProduct (status='archived'); не удаляет данные/историю заказов.
+  async function onArchive() {
+    if (!isEdit) return;
+    const ok = window.confirm(
+      'Снять товар с продажи? Он исчезнет с сайта, но останется в каталоге — позже можно вернуть, выбрав статус «Активен».',
+    );
+    if (!ok) return;
+    setPending(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const result = await archiveProductAction({ id: product!.id });
+      if (result.ok) {
+        setStatus('archived');
+        setSuccess('Товар снят с продажи (в архиве) — на сайте больше не показывается.');
+        router.refresh();
+      } else {
+        setError(result);
+      }
+    } catch {
+      setError({ ok: false, error: 'internal' });
+    } finally {
+      setPending(false);
+    }
+  }
+
+  // Виден ли товар покупателям прямо сейчас и что мешает публикации (подсказка).
+  const priceNum = Number(String(basePrice).replace(',', '.'));
+  const hasPrice = Number.isFinite(priceNum) && priceNum > 0;
+  const variantCount = product?.variants.length ?? 0;
+  const publishBlockers: string[] = [];
+  if (status !== 'active') publishBlockers.push('выберите статус «Активен — виден на сайте»');
+  if (!hasPrice) publishBlockers.push('укажите цену больше 0');
+  if (isEdit && variantCount === 0)
+    publishBlockers.push('добавьте хотя бы один вариант на вкладке «Варианты» (например, размер)');
+  const isLiveOnSite = publishBlockers.length === 0;
+
   const tabs: Array<{ key: Section; label: string; editOnly?: boolean }> = [
     { key: 'main', label: 'Основное' },
     { key: 'variants', label: 'Варианты', editOnly: true },
@@ -211,6 +254,25 @@ export function ProductForm({
         <div role="status" className="mb-4 rounded border border-green-200 bg-green-50 p-3 text-sm text-green-700">
           {success}
         </div>
+      ) : null}
+
+      {isEdit ? (
+        isLiveOnSite ? (
+          <div className="mb-4 rounded border border-green-200 bg-green-50 p-3 text-sm text-green-800">
+            ✓ Товар <strong>виден покупателям</strong> на сайте в каталоге.
+          </div>
+        ) : (
+          <div className="mb-4 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+            <p>
+              ⚠ Товар <strong>скрыт с сайта</strong>. Чтобы он появился в каталоге на витрине:
+            </p>
+            <ul className="mt-1 list-disc pl-5">
+              {publishBlockers.map((b) => (
+                <li key={b}>{b}</li>
+              ))}
+            </ul>
+          </div>
+        )
       ) : null}
 
       <div role="tablist" aria-label="Секции товара" className="flex flex-wrap gap-1 border-b border-gray-200">
@@ -253,7 +315,7 @@ export function ProductForm({
 
             <div>
               <label htmlFor="p-sku" className="block text-sm font-medium text-gray-700">
-                Артикул (SKU)*
+                Артикул*
               </label>
               <input
                 id="p-sku"
@@ -262,20 +324,26 @@ export function ProductForm({
                 className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
                 required
               />
+              <p className="mt-1 text-xs text-gray-500">
+                Уникальный код товара для учёта, например <code>FORMA-001</code>.
+              </p>
               {fieldErr('sku') ? <p className="mt-1 text-xs text-red-600">{fieldErr('sku')}</p> : null}
             </div>
 
             <div>
               <label htmlFor="p-slug" className="block text-sm font-medium text-gray-700">
-                ЧПУ (slug)
+                Адрес страницы на сайте
               </label>
               <input
                 id="p-slug"
                 value={slug}
                 onChange={(e) => setSlug(e.target.value)}
-                placeholder="оставьте пустым — сгенерируется из названия"
+                placeholder="оставьте пустым — создастся автоматически из названия"
                 className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
               />
+              <p className="mt-1 text-xs text-gray-500">
+                Часть ссылки товара на витрине. Можно не заполнять.
+              </p>
               {fieldErr('slug') ? <p className="mt-1 text-xs text-red-600">{fieldErr('slug')}</p> : null}
             </div>
 
@@ -295,11 +363,14 @@ export function ProductForm({
                   </option>
                 ))}
               </select>
+              <p className="mt-1 text-xs text-gray-500">
+                «Активен» — товар показывается покупателям на сайте. «Черновик» и «В архиве» — скрыт.
+              </p>
             </div>
 
             <div>
               <label htmlFor="p-price" className="block text-sm font-medium text-gray-700">
-                Базовая цена*
+                Цена*
               </label>
               <input
                 id="p-price"
@@ -418,10 +489,10 @@ export function ProductForm({
                   checked={isFeatured}
                   onChange={(e) => setIsFeatured(e.target.checked)}
                 />
-                Хит / Рекомендуемый (is_featured)
+                Рекомендуемый (хит продаж) — бейдж на витрине
               </label>
               <div className="flex items-center gap-2 text-sm text-gray-700">
-                <label htmlFor="p-isnew">Новинка (is_new):</label>
+                <label htmlFor="p-isnew">Бейдж «Новинка»:</label>
                 <select
                   id="p-isnew"
                   value={isNewMode}
@@ -536,6 +607,16 @@ export function ProductForm({
           >
             Отмена
           </button>
+          {isEdit && status !== 'archived' ? (
+            <button
+              type="button"
+              onClick={onArchive}
+              disabled={pending}
+              className="ml-auto rounded-md border border-red-300 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+            >
+              Снять с продажи
+            </button>
+          ) : null}
         </div>
       ) : null}
 
