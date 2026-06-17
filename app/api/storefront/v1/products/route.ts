@@ -6,13 +6,19 @@
  * Отдаёт только status='active' товары. Цены/скидки — готовые из pricing.
  */
 
-import { runStorefront, jsonData, handlePreflight } from '@/lib/storefront/response';
+import { z } from 'zod';
+import { runStorefront, jsonData, jsonError, handlePreflight } from '@/lib/storefront/response';
 import { listProducts } from '@/lib/catalog/repository';
 import type { ProductListFilter } from '@/lib/catalog/repository';
 import { getActiveCategoryIdBySlug } from '@/lib/storefront/queries';
 import { toProductListItemDto } from '@/lib/storefront/dto';
 
 export const dynamic = 'force-dynamic';
+
+// brandId/categoryId уходят в SQL с ::uuid-кастом (listProducts). Это ТОЧНЫЕ
+// id-фильтры (не поиск): не-UUID значение — ошибка клиента → 400, а НЕ 500 на
+// uuid-cast в БД (BUG #6, reliability). Валидируем ДО запроса.
+const uuidParam = z.string().uuid();
 
 function parseBool(v: string | null): boolean | undefined {
   if (v === null) return undefined;
@@ -36,10 +42,21 @@ export async function GET(req: Request): Promise<Response> {
     const offset = Math.max(0, parseIntOr(q.get('offset'), 0));
     const page = Math.floor(offset / limit) + 1;
 
+    // brandId — точный id-фильтр: если задан, обязан быть валидным uuid, иначе
+    // 400 (не доводим мусор до ::uuid-каста в БД → 500). Отсутствие — ok.
+    const brandIdRaw = q.get('brandId');
+    if (brandIdRaw !== null && !uuidParam.safeParse(brandIdRaw).success) {
+      return jsonError('bad_request', 'Параметр brandId должен быть корректным UUID.', cors);
+    }
+
     // Категория может прийти как categoryId (uuid) или как category (slug).
     // Slug удобнее витрине (она знает дерево /categories по slug). Явный
     // categoryId имеет приоритет; иначе резолвим slug → id (нет такой → пусто).
     let categoryId = q.get('categoryId') ?? undefined;
+    // categoryId — тоже точный id-фильтр: задан и не uuid → 400 (как brandId).
+    if (categoryId !== undefined && !uuidParam.safeParse(categoryId).success) {
+      return jsonError('bad_request', 'Параметр categoryId должен быть корректным UUID.', cors);
+    }
     const categorySlug = q.get('category')?.trim();
     if (!categoryId && categorySlug) {
       // Нет такой категории → nil-uuid: валиден для ::uuid-каста, не матчит ничего.
@@ -52,7 +69,7 @@ export async function GET(req: Request): Promise<Response> {
       search: q.get('q') ?? undefined,
       // Витрине отдаём только опубликованные товары.
       status: 'active',
-      brandId: q.get('brandId') ?? undefined,
+      brandId: brandIdRaw ?? undefined,
       categoryId,
       isFeatured: parseBool(q.get('featured')),
       isNew: parseBool(q.get('new')),

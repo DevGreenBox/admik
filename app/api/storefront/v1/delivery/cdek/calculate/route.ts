@@ -53,9 +53,15 @@ export const dynamic = 'force-dynamic';
 
 // weightG/lengthCm/… НЕ описаны в схеме → strip убирает их (anti-tamper): вес
 // резолвит сервер из каталога, не из тела.
+//
+// variantId/productId — uuid (как в orders cartLineSchema): структурно невалидный
+// id = 400 на уровне схемы, чтобы мусор НЕ доходил до ::uuid-каста в БД
+// (resolveCartLine) и не ронял расчёт в 500 (BUG #7, reliability). Best-effort
+// (skip) сохраняется для валидных, но НЕсуществующих id — их resolveCartLine
+// вернёт !ok, и позиция считается без габаритов (дефолт магазина).
 const itemSchema = z.object({
-  variantId: z.string().optional(),
-  productId: z.string().optional(),
+  variantId: z.string().uuid().optional(),
+  productId: z.string().uuid().optional(),
   qty: z.number().int().min(1).max(1000),
 });
 

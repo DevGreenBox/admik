@@ -87,3 +87,79 @@ describe('storefront/delivery/cdek/calculate — allowedTariffs enforcement', ()
     expect(r.data?.tariffCode).toBe(999);
   });
 });
+
+/**
+ * BUG #7 (reliability): не-UUID variantId/productId в items не должен ронять
+ * расчёт в 500. До фикса схема позиции принимала z.string() без uuid-проверки →
+ * мусорный id доходил до resolveCartLine → SELECT ... WHERE id = '${мусор}' с
+ * ::uuid-кастом в БД → Postgres invalid_text_representation → 500.
+ *
+ * Семантика после фикса: items уже валидируются Zod (anti-tamper). Добавляем
+ * uuid-валидацию variantId/productId в схему позиции → структурно невалидный id
+ * = 400 bad_request на уровне схемы, НЕ доходит до ::uuid-каста. Best-effort
+ * (skip) остаётся для валидных, но НЕсуществующих id (resolveCartLine → !ok).
+ *
+ * resolveCartLine мокаем, чтобы тест не требовал БД и чтобы НЕ-обращение к нему
+ * на мусоре доказывало, что валидация отсекла ввод ДО запроса.
+ */
+describe('storefront/delivery/cdek/calculate — uuid-валидация позиций (BUG #7)', () => {
+  beforeEach(() => setEnv());
+  afterEach(() => {
+    process.env = { ...ORIGINAL };
+    vi.resetModules();
+    vi.doUnmock('@/lib/orders/repository');
+  });
+
+  it('variantId=garbage → НЕ 500 (400 bad_request, не доходит до resolveCartLine)', async () => {
+    const resolveCartLine = vi.fn(async () => {
+      throw new Error('resolveCartLine не должен вызываться на невалидном uuid');
+    });
+    vi.doMock('@/lib/orders/repository', () => ({ resolveCartLine }));
+
+    const { POST } = await loadCalc();
+    const res = await POST(
+      authedPost('http://x/', {
+        to: { city_code: 44 },
+        items: [{ variantId: 'garbage', qty: 1 }],
+      }),
+    );
+    expect(res.status).not.toBe(500);
+    expect(res.status).toBe(400);
+    const json = (await res.json()) as { error?: { code?: string } };
+    expect(json.error?.code).toBe('bad_request');
+    expect(resolveCartLine).not.toHaveBeenCalled();
+  });
+
+  it('productId=garbage → НЕ 500 (400 bad_request)', async () => {
+    const resolveCartLine = vi.fn(async () => {
+      throw new Error('resolveCartLine не должен вызываться на невалидном uuid');
+    });
+    vi.doMock('@/lib/orders/repository', () => ({ resolveCartLine }));
+
+    const { POST } = await loadCalc();
+    const res = await POST(
+      authedPost('http://x/', {
+        to: { city_code: 44 },
+        items: [{ productId: 'not-a-uuid', qty: 1 }],
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(resolveCartLine).not.toHaveBeenCalled();
+  });
+
+  it('валидный, но НЕсуществующий uuid → best-effort skip (200, не 500)', async () => {
+    // resolveCartLine отдаёт «не найдено» → позиция считается без габаритов.
+    const resolveCartLine = vi.fn(async () => ({ ok: false, reason: 'variant_not_found' as const }));
+    vi.doMock('@/lib/orders/repository', () => ({ resolveCartLine }));
+
+    const { POST } = await loadCalc();
+    const res = await POST(
+      authedPost('http://x/', {
+        to: { city_code: 44 },
+        items: [{ variantId: '22222222-2222-4222-8222-222222222222', qty: 2 }],
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(resolveCartLine).toHaveBeenCalledTimes(1);
+  });
+});
