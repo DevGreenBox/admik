@@ -21,6 +21,9 @@ const config = [
       'next-env.d.ts',
       'dist/**',
       'build/**',
+      // THE CASE — самостоятельный проект витрины (свой tsconfig/eslint,
+      // gitignored, деплоится отдельно). В линт/typecheck Admik не входит.
+      'THE CASE/**',
     ],
   },
   // База: Next 16 core-web-vitals + TypeScript
