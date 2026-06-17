@@ -11,8 +11,8 @@ import { NextResponse } from 'next/server';
 import { isModuleEnabled } from '@/lib/config/modules';
 import type { ModuleName } from '@/lib/config/modules';
 import {
-  checkLoginRate,
-  registerLoginFailure,
+  checkStorefrontRate,
+  registerStorefrontHit,
 } from '@/lib/auth/rate-limit';
 import { authorizeStorefront, extractApiKey } from './auth';
 import {
@@ -187,16 +187,18 @@ export async function runStorefront(
     );
   }
 
-  // 3) Rate-limit (переиспользуем lib/auth/rate-limit).
+  // 3) Rate-limit — ОТДЕЛЬНЫЙ щедрый лимит витрины (НЕ порог логина 10/15мин,
+  //    иначе серверная витрина под одним ключом мгновенно ловит 429 и каталог
+  //    на сайте пустеет). См. STOREFRONT_RATE_LIMIT.
   const key = rateKey(req);
-  const rate = await checkLoginRate(key);
+  const rate = await checkStorefrontRate(key);
   if (!rate.allowed) {
     return jsonError('rate_limited', 'Слишком много запросов.', cors, {
       'Retry-After': String(rate.retryAfterSec ?? 60),
     });
   }
   // Каждый запрос — +1 к счётчику окна (fixed-window лимит на витрину/ip).
-  await registerLoginFailure(key);
+  await registerStorefrontHit(key);
 
   return handler({ cors, origin: auth.ok ? auth.origin : undefined });
 }

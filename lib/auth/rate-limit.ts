@@ -231,6 +231,7 @@ function getDefaultLimiter(): Promise<RateLimiter> {
 /** Сбрасывает кешированный дефолтный лимитер (используется в тестах). */
 export function resetDefaultLimiter(): void {
   defaultLimiter = undefined;
+  storefrontLimiter = undefined;
   mockWarned = false;
 }
 
@@ -240,6 +241,47 @@ export async function checkLoginRate(key: string): Promise<RateCheckResult> {
 
 export async function registerLoginFailure(key: string): Promise<void> {
   return (await getDefaultLimiter()).registerLoginFailure(key);
+}
+
+// ---------------------------------------------------------------------------
+// Storefront API rate-limit — ОТДЕЛЬНЫЙ, щедрый лимит.
+// ---------------------------------------------------------------------------
+// Публичный read-API витрины НЕЛЬЗЯ ограничивать порогом логина (10/15мин):
+// серверная витрина (SSR) делает по 2+ запроса на каждую страницу под ОДНИМ
+// ключом → мгновенно ловит 429, и каталог на сайте становится пустым. Здесь —
+// высокий порог в коротком окне (защита от явного абуза, но не мешает витрине).
+export const STOREFRONT_RATE_LIMIT = {
+  maxAttempts: 600,
+  windowSec: 60,
+} as const;
+
+let storefrontLimiter: Promise<RateLimiter> | undefined;
+
+function getStorefrontLimiter(): Promise<RateLimiter> {
+  if (storefrontLimiter) return storefrontLimiter;
+  storefrontLimiter = (async (): Promise<RateLimiter> => {
+    const opts = {
+      maxAttempts: STOREFRONT_RATE_LIMIT.maxAttempts,
+      windowSec: STOREFRONT_RATE_LIMIT.windowSec,
+    };
+    const { REDIS_URL } = getEnv();
+    if (REDIS_URL) {
+      const { default: IORedis } = await import('ioredis');
+      const redis = new IORedis(REDIS_URL, { lazyConnect: true });
+      return createRateLimiter({ backend: new RedisRateBackend(redis), ...opts });
+    }
+    warnMockOnce();
+    return createRateLimiter({ backend: new MemoryRateBackend(), ...opts });
+  })();
+  return storefrontLimiter;
+}
+
+export async function checkStorefrontRate(key: string): Promise<RateCheckResult> {
+  return (await getStorefrontLimiter()).checkLoginRate(key);
+}
+
+export async function registerStorefrontHit(key: string): Promise<void> {
+  return (await getStorefrontLimiter()).registerLoginFailure(key);
 }
 
 export async function resetLoginFailures(key: string): Promise<void> {
