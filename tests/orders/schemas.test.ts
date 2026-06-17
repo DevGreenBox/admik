@@ -332,3 +332,63 @@ describe('orders/schemas — N×M промо-механики (Пакет 5.P-1)
     ).toBe(true);
   });
 });
+
+describe('orders/schemas — free_delivery + scope (баг #10)', () => {
+  // free_delivery влияет ТОЛЬКО на доставку, а доставка считается по всей корзине,
+  // а не по подмножеству товаров. Привязать «бесплатную доставку» к категории/
+  // бренду/набору нельзя без понятной семантики — поэтому такой промокод запрещён
+  // на этапе валидации (его просто нельзя создать). См. refinePromo.
+  it('free_delivery + applyScope=category отклоняется (даже с targets)', () => {
+    const res = PromoCreateSchema.safeParse({
+      code: 'FDCAT',
+      kind: 'free_delivery',
+      applyScope: 'category',
+      targets: [{ targetType: 'category', categoryId: UUID }],
+    });
+    expect(res.success).toBe(false);
+  });
+
+  it('free_delivery + applyScope=brand отклоняется', () => {
+    const res = PromoCreateSchema.safeParse({
+      code: 'FDBRAND',
+      kind: 'free_delivery',
+      applyScope: 'brand',
+      targets: [{ targetType: 'brand', brandId: UUID }],
+    });
+    expect(res.success).toBe(false);
+  });
+
+  it('free_delivery + applyScope=set отклоняется', () => {
+    const res = PromoCreateSchema.safeParse({
+      code: 'FDSET',
+      kind: 'free_delivery',
+      applyScope: 'set',
+      targets: [{ targetType: 'product', productId: UUID }],
+    });
+    expect(res.success).toBe(false);
+  });
+
+  it('free_delivery + applyScope=cart остаётся валидным', () => {
+    const res = PromoCreateSchema.safeParse({
+      code: 'FDCART',
+      kind: 'free_delivery',
+      applyScope: 'cart',
+    });
+    expect(res.success).toBe(true);
+  });
+
+  it('free_delivery по умолчанию (applyScope=cart) валиден', () => {
+    const res = PromoCreateSchema.safeParse({ code: 'FD', kind: 'free_delivery' });
+    expect(res.success).toBe(true);
+  });
+
+  it('PromoUpdateSchema: free_delivery + applyScope=brand отклоняется', () => {
+    const res = PromoUpdateSchema.safeParse({
+      id: UUID,
+      kind: 'free_delivery',
+      applyScope: 'brand',
+      targets: [{ targetType: 'brand', brandId: UUID }],
+    });
+    expect(res.success).toBe(false);
+  });
+});

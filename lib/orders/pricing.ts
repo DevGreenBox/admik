@@ -531,11 +531,20 @@ export function combineDiscountsMinor(
  * Стоимость доставки в копейках с учётом порога и промокода free_delivery.
  * Порог сравнивается с суммой ПОСЛЕ скидки промокода (itemsMinor − discountMinor).
  * Возвращает разбивку: итоговая стоимость + признаки бесплатности.
+ *
+ * scopeHasMatch (баг #10, защита легаси-данных): для scoped промокода
+ * free_delivery (applyScope ≠ cart) бесплатная доставка применяется ТОЛЬКО если
+ * в корзине реально есть товар в scope. Признак вычисляет вызывающий код
+ * (calculateQuote по lineInScope) и передаёт сюда. По умолчанию (флаг не передан)
+ * или для applyScope='cart' поведение прежнее — free_delivery всегда обнуляет
+ * доставку. Создать scoped free_delivery нельзя (refinePromo запрещает), флаг —
+ * страховка для уже существующих в БД легаси-записей.
  */
 export function resolveDelivery(
   delivery: DeliveryInput,
   netItemsMinor: number,
   promo: AppliedPromo | null | undefined,
+  scopeHasMatch?: boolean,
 ): { costMinor: number; free: boolean; freeThresholdMet: boolean } {
   const baseCostMinor = toMinor(delivery.cost);
 
@@ -545,7 +554,13 @@ export function resolveDelivery(
   const freeThresholdMet =
     Number.isFinite(thresholdMinor) && netItemsMinor >= thresholdMinor;
 
-  const promoFreeDelivery = promo?.kind === 'free_delivery';
+  // free_delivery: для applyScope='cart' (по умолчанию) — всегда; для scoped —
+  // только если в scope есть подходящий товар (scopeHasMatch). Флаг не передан →
+  // считаем true (обратная совместимость с вызовами без scope).
+  const scope = promo?.applyScope ?? 'cart';
+  const promoFreeDelivery =
+    promo?.kind === 'free_delivery' &&
+    (scope === 'cart' || scopeHasMatch !== false);
   const free = freeThresholdMet || promoFreeDelivery;
 
   return {
@@ -586,9 +601,18 @@ export function calculateQuote(input: QuoteInput): QuoteResult {
   //    (аддитивность); bogo и scope≠cart считаются по подмножеству линий target.
   const discountMinor = promoScopeDiscountMinor(promo, lines, scopeTargets, itemsMinor);
 
-  // 3) Доставка (порог сравнивается с суммой после скидки).
+  // 3) Доставка (порог сравнивается с суммой после скидки). Для scoped
+  //    free_delivery (баг #10) считаем, есть ли в корзине товар в scope —
+  //    бесплатная доставка применяется только тогда (защита легаси-данных;
+  //    создать scoped free_delivery нельзя, см. refinePromo).
   const netItemsMinor = itemsMinor - discountMinor;
-  const del = resolveDelivery(delivery, netItemsMinor, promo);
+  let scopeHasMatch: boolean | undefined;
+  if (promo?.kind === 'free_delivery' && (promo.applyScope ?? 'cart') !== 'cart') {
+    scopeHasMatch = lines.some((l) =>
+      lineInScope(l, promo.applyScope ?? 'cart', scopeTargets),
+    );
+  }
+  const del = resolveDelivery(delivery, netItemsMinor, promo, scopeHasMatch);
 
   // 4) Итог.
   const grandMinor = itemsMinor - discountMinor + del.costMinor;
@@ -596,7 +620,14 @@ export function calculateQuote(input: QuoteInput): QuoteResult {
     throw new Error('Ошибка расчёта: итог заказа отрицателен.');
   }
 
-  const promoApplied = Boolean(promo) && (discountMinor > 0 || promo?.kind === 'free_delivery');
+  // free_delivery «применён» только если он реально обнулил доставку: для cart —
+  // всегда (если она не была бесплатной по порогу и так — всё равно его эффект),
+  // для scoped — только при совпадении товара в scope (scopeHasMatch). Иначе
+  // (scoped без товара в scope) промокод не оказал эффекта → applied=false.
+  const freeDeliveryApplied =
+    promo?.kind === 'free_delivery' &&
+    ((promo.applyScope ?? 'cart') === 'cart' || scopeHasMatch === true);
+  const promoApplied = Boolean(promo) && (discountMinor > 0 || freeDeliveryApplied);
 
   return {
     lines: quoteLines,

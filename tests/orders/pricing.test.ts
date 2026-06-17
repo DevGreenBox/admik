@@ -2,12 +2,14 @@ import { describe, expect, it } from 'vitest';
 
 import {
   calculateQuote,
+  emptyScopeTargets,
   itemsTotalMinor,
   lineTotalMinor,
   promoDiscountMinor,
   resolveDelivery,
   type AppliedPromo,
   type PricedLine,
+  type PromoScopeTargets,
   type QuoteInput,
 } from '@/lib/orders/pricing';
 
@@ -23,6 +25,10 @@ function line(over: Partial<PricedLine> = {}): PricedLine {
     unitPrice: over.unitPrice ?? '100.00',
     compareAt: over.compareAt ?? null,
     qty: over.qty ?? 1,
+    ...(over.productId !== undefined ? { productId: over.productId } : {}),
+    ...(over.variantId !== undefined ? { variantId: over.variantId } : {}),
+    ...(over.categoryIds !== undefined ? { categoryIds: over.categoryIds } : {}),
+    ...(over.brandId !== undefined ? { brandId: over.brandId } : {}),
   };
 }
 
@@ -34,6 +40,8 @@ function promo(over: Partial<AppliedPromo> = {}): AppliedPromo {
     maxDiscount: over.maxDiscount ?? null,
     bogoBuyQty: over.bogoBuyQty ?? null,
     bogoPayQty: over.bogoPayQty ?? null,
+    ...(over.applyScope !== undefined ? { applyScope: over.applyScope } : {}),
+    ...(over.minQty !== undefined ? { minQty: over.minQty } : {}),
   };
 }
 
@@ -135,6 +143,92 @@ describe('pricing — доставка и порог бесплатной (§3.3
     expect(r.freeThresholdMet).toBe(false);
     expect(r.free).toBe(true);
     expect(r.costMinor).toBe(0);
+  });
+
+  // Баг #10 (защита для легаси-данных): scoped free_delivery (applyScope≠cart) —
+  // бесплатная доставка ТОЛЬКО если в scope реально есть товары. Признак «есть
+  // товар в scope» вычисляет вызывающий код (calculateQuote по lineInScope) и
+  // передаёт 4-м аргументом. По умолчанию (флаг не передан / промокод не scoped)
+  // поведение прежнее.
+  it('scoped free_delivery без товара в scope → НЕ бесплатно (флаг false)', () => {
+    const r = resolveDelivery(
+      { cost: '350.00', freeThreshold: 0 },
+      100000,
+      promo({ kind: 'free_delivery', applyScope: 'category' }),
+      false, // в scope нет ни одной линии
+    );
+    expect(r.free).toBe(false);
+    expect(r.costMinor).toBe(35000);
+  });
+
+  it('scoped free_delivery c товаром в scope → бесплатно (флаг true)', () => {
+    const r = resolveDelivery(
+      { cost: '350.00', freeThreshold: 0 },
+      100000,
+      promo({ kind: 'free_delivery', applyScope: 'category' }),
+      true, // в scope есть подходящая линия
+    );
+    expect(r.free).toBe(true);
+    expect(r.costMinor).toBe(0);
+  });
+
+  it('cart free_delivery: флаг scope не влияет — всегда бесплатно', () => {
+    const r = resolveDelivery(
+      { cost: '350.00', freeThreshold: 0 },
+      100000,
+      promo({ kind: 'free_delivery', applyScope: 'cart' }),
+      false,
+    );
+    expect(r.free).toBe(true);
+    expect(r.costMinor).toBe(0);
+  });
+});
+
+describe('pricing — calculateQuote: scoped free_delivery (баг #10, защита легаси)', () => {
+  const CAT = 'cat-1';
+
+  function scopeTargets(categoryIds: string[]): PromoScopeTargets {
+    const t = emptyScopeTargets();
+    for (const c of categoryIds) t.categoryIds.add(c);
+    return t;
+  }
+
+  it('scoped free_delivery, в корзине НЕТ товара scope → доставка платная', () => {
+    const q = calculateQuote({
+      lines: [
+        line({ unitPrice: '500.00', qty: 1, categoryIds: ['other-cat'] }),
+      ],
+      promo: promo({ kind: 'free_delivery', applyScope: 'category' }),
+      delivery: { cost: '350.00', freeThreshold: 0 },
+      scopeTargets: scopeTargets([CAT]),
+    });
+    expect(q.deliveryCost).toBe('350.00');
+    expect(q.delivery.free).toBe(false);
+    expect(q.grandTotal).toBe('850.00'); // 500 + 350
+  });
+
+  it('scoped free_delivery, в корзине ЕСТЬ товар scope → доставка бесплатна', () => {
+    const q = calculateQuote({
+      lines: [
+        line({ unitPrice: '500.00', qty: 1, categoryIds: [CAT] }),
+      ],
+      promo: promo({ kind: 'free_delivery', applyScope: 'category' }),
+      delivery: { cost: '350.00', freeThreshold: 0 },
+      scopeTargets: scopeTargets([CAT]),
+    });
+    expect(q.deliveryCost).toBe('0.00');
+    expect(q.delivery.free).toBe(true);
+    expect(q.grandTotal).toBe('500.00');
+  });
+
+  it('cart free_delivery без scopeTargets → прежнее поведение (бесплатно)', () => {
+    const q = calculateQuote({
+      lines: [line({ unitPrice: '500.00', qty: 1 })],
+      promo: promo({ kind: 'free_delivery', applyScope: 'cart' }),
+      delivery: { cost: '350.00', freeThreshold: 0 },
+    });
+    expect(q.deliveryCost).toBe('0.00');
+    expect(q.delivery.free).toBe(true);
   });
 });
 

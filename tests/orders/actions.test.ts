@@ -784,6 +784,83 @@ describe('partial-update промокода: дефолты не затираю�
     expect(deletedTargets()).toBe(true); // scope=cart → цели чистим, это валидно
     expect(insertedTargets()).toBe(false);
   });
+
+  // ===========================================================================
+  // БАГ #3 (data-integrity): частичный апдейт value у percent-промокода обходит
+  // проверку 0..100. refinePromo проверяет диапазон ТОЛЬКО когда в payload есть и
+  // kind, и value. При {id, value:'150'} (kind не передан, в БД kind='percent')
+  // значение >100% попадало в БД → скидка >100%. Фикс — в handler по
+  // ЭФФЕКТИВНОМУ kind (data.kind ?? before.kind) + ЭФФЕКТИВНОМУ value.
+  // ===========================================================================
+
+  it('#3: частичный value=150 при kind=percent в БД → validation (UPDATE не выполняется)', async () => {
+    sqlMock.mockImplementationOnce(() =>
+      Promise.resolve([{ id: UUID, code: 'OLD', apply_scope: 'cart', kind: 'percent', value: '10' }]),
+    );
+
+    const res = await updatePromoCode({ id: UUID, value: '150' });
+
+    expect(res.ok).toBe(false);
+    if (res.ok) throw new Error('ожидался отказ');
+    expect(res.error).toBe('validation');
+    expect(res.message).toContain('0..100');
+    expect(findUpdateArgs(), 'UPDATE не должен выполниться').toBeUndefined();
+  });
+
+  it('#3: смена kind→fixed с value=150 → ок (fixed без верхней границы)', async () => {
+    sqlMock.mockImplementationOnce(() =>
+      Promise.resolve([{ id: UUID, code: 'OLD', apply_scope: 'cart', kind: 'percent', value: '10' }]),
+    );
+
+    const res = await updatePromoCode({ id: UUID, kind: 'fixed', value: '150' });
+
+    expect(res.ok).toBe(true);
+    const args = findUpdateArgs();
+    expect(args).toBeDefined();
+    expect(args![2]).toBe('150'); // value прошёл как есть
+  });
+
+  it('#3: частичный value=100 при kind=percent в БД → ок (граница включительно)', async () => {
+    sqlMock.mockImplementationOnce(() =>
+      Promise.resolve([{ id: UUID, code: 'OLD', apply_scope: 'cart', kind: 'percent', value: '10' }]),
+    );
+
+    const res = await updatePromoCode({ id: UUID, value: '100' });
+
+    expect(res.ok).toBe(true);
+    const args = findUpdateArgs();
+    expect(args).toBeDefined();
+    expect(args![2]).toBe('100');
+  });
+
+  it('#3: явная смена kind→percent с value=120 → validation', async () => {
+    // Здесь в payload есть И kind, И value → refinePromo ловит percent>100 уже на
+    // Zod-уровне (до handler). Пайплайн отдаёт error:'validation' (message Zod-issue
+    // не выносит в res.message). UPDATE не выполняется.
+    sqlMock.mockImplementationOnce(() =>
+      Promise.resolve([{ id: UUID, code: 'OLD', apply_scope: 'cart', kind: 'fixed', value: '50' }]),
+    );
+
+    const res = await updatePromoCode({ id: UUID, kind: 'percent', value: '120' });
+
+    expect(res.ok).toBe(false);
+    if (res.ok) throw new Error('ожидался отказ');
+    expect(res.error).toBe('validation');
+    expect(findUpdateArgs()).toBeUndefined();
+  });
+
+  it('#3: смена kind percent→fixed без value (берём value из БД) → ок, проверка percent не срабатывает', async () => {
+    // В БД value='150', kind='percent'. Меняем только kind→fixed. Эффективный
+    // kind=fixed → проверка percent не применяется, апдейт проходит.
+    sqlMock.mockImplementationOnce(() =>
+      Promise.resolve([{ id: UUID, code: 'OLD', apply_scope: 'cart', kind: 'percent', value: '150' }]),
+    );
+
+    const res = await updatePromoCode({ id: UUID, kind: 'fixed' });
+
+    expect(res.ok).toBe(true);
+    expect(findUpdateArgs()).toBeDefined();
+  });
 });
 
 // =============================================================================

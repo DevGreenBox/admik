@@ -653,6 +653,23 @@ export const updatePromoCode = defineAction({
     if (!before[0]) {
       throw new OrderError('not_found', 'Промокод не найден.');
     }
+    // Баг #3 (data-integrity): refinePromo проверяет percent 0..100 ТОЛЬКО когда в
+    // payload есть и kind, и value. При частичном апдейте ({id, value:'150'} без
+    // kind, в БД kind='percent') проверка обходилась → скидка >100% попадала в БД.
+    // Считаем ЭФФЕКТИВНЫЕ kind/value (из запроса или текущие из БД) и валидируем ту
+    // же границу, что refinePromo (percent: value ≤ 100; нижняя граница уже на Zod —
+    // moneySchema запрещает минус). Делаем это ДО UPDATE, чтобы запись не выполнялась.
+    const effectiveKind = (data.kind ?? before[0].kind) as string;
+    const effectiveValue = data.value ?? (before[0].value as string | null | undefined);
+    if (effectiveKind === 'percent' && effectiveValue != null) {
+      const pct = Number(effectiveValue);
+      if (Number.isNaN(pct) || pct > 100) {
+        throw new OrderError(
+          'validation',
+          'Для percent value должно быть в диапазоне 0..100.',
+        );
+      }
+    }
     // Управляем таргетами ТОЛЬКО когда они реально затрагиваются запросом
     // (баг #18): scope передан явно (в т.ч. 'cart' — тогда чистим) ИЛИ передан
     // массив targets. При partial-update БЕЗ упоминания scope/targets — таргеты

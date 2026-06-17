@@ -368,6 +368,23 @@ function refinePromo(
       });
     }
   }
+  // free_delivery влияет ТОЛЬКО на доставку, а доставка считается по всей корзине,
+  // а не по подмножеству товаров. Привязать «бесплатную доставку» к категории/
+  // бренду/набору без двусмысленной семантики нельзя — поэтому такой промокод
+  // запрещён (баг #10): бесплатная доставка возможна только при apply_scope='cart'.
+  // pricing дополнительно страхует легаси-данные (scope учитывается для доставки).
+  if (
+    val.kind === 'free_delivery' &&
+    val.applyScope !== undefined &&
+    val.applyScope !== 'cart'
+  ) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['applyScope'],
+      message:
+        "Бесплатная доставка (kind='free_delivery') возможна только для apply_scope='cart'.",
+    });
+  }
 }
 
 export const PromoCreateSchema = z.object(promoBaseShape).superRefine(refinePromo);
