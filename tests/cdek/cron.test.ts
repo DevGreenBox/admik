@@ -28,6 +28,16 @@ import { getCdekConfig } from '@/lib/cdek/config';
 const cfgEnabled = getCdekConfig({ NODE_ENV: 'test', CDEK_CREATE_ENABLED: 'true' });
 const cfgDisabled = getCdekConfig({ NODE_ENV: 'test', CDEK_CREATE_ENABLED: 'false' });
 
+/**
+ * withLock-заглушка «лок получен»: выполняет критическую секцию (advisory-lock
+ * проверяется отдельно в tests/cdek/cron-lock.test.ts — здесь интересна сама
+ * обработка кандидатов). Возвращает { acquired:true, result }.
+ */
+const passLock = async <T>(_key: string, fn: () => Promise<T>) => ({
+  acquired: true as const,
+  result: await fn(),
+});
+
 function pending(n: number): PendingOrderCandidate[] {
   return Array.from({ length: n }, (_, i) => ({ id: `ord-${i}`, number: `TC-${i}` }));
 }
@@ -55,9 +65,10 @@ describe('runCreatePending', () => {
       config: cfgEnabled,
       findCandidates: vi.fn(async () => pending(3)),
       createShipment: vi.fn(async (orderId: string) => ({ cdekUuid: `mock-${orderId}` })),
+      withLock: passLock,
     };
     const stats = await runCreatePending(deps);
-    expect(stats).toEqual({ created: 3, failed: 0, skipped: 0 });
+    expect(stats).toEqual({ created: 3, failed: 0, skipped: 0, lockSkipped: false });
     expect(deps.createShipment).toHaveBeenCalledTimes(3);
   });
 
@@ -67,9 +78,10 @@ describe('runCreatePending', () => {
       config: cfgDisabled,
       findCandidates: vi.fn(async () => pending(2)),
       createShipment,
+      withLock: passLock,
     };
     const stats = await runCreatePending(deps);
-    expect(stats).toEqual({ created: 0, failed: 0, skipped: 2 });
+    expect(stats).toEqual({ created: 0, failed: 0, skipped: 2, lockSkipped: false });
     expect(createShipment).not.toHaveBeenCalled();
   });
 
@@ -81,9 +93,10 @@ describe('runCreatePending', () => {
         if (orderId === 'ord-1') throw new Error('cdek boom');
         return { cdekUuid: `mock-${orderId}` };
       }),
+      withLock: passLock,
     };
     const stats = await runCreatePending(deps);
-    expect(stats).toEqual({ created: 2, failed: 1, skipped: 0 });
+    expect(stats).toEqual({ created: 2, failed: 1, skipped: 0, lockSkipped: false });
   });
 
   it('отправление без cdekUuid считается skipped, не падает', async () => {
@@ -91,9 +104,10 @@ describe('runCreatePending', () => {
       config: cfgEnabled,
       findCandidates: vi.fn(async () => pending(2)),
       createShipment: vi.fn(async () => ({ cdekUuid: null })),
+      withLock: passLock,
     };
     const stats = await runCreatePending(deps);
-    expect(stats).toEqual({ created: 0, failed: 0, skipped: 2 });
+    expect(stats).toEqual({ created: 0, failed: 0, skipped: 2, lockSkipped: false });
   });
 
   it('идемпотентность: пустой список кандидатов → нулевая статистика, без вызовов', async () => {
@@ -102,9 +116,10 @@ describe('runCreatePending', () => {
       config: cfgEnabled,
       findCandidates: vi.fn(async () => []),
       createShipment,
+      withLock: passLock,
     };
     const stats = await runCreatePending(deps);
-    expect(stats).toEqual({ created: 0, failed: 0, skipped: 0 });
+    expect(stats).toEqual({ created: 0, failed: 0, skipped: 0, lockSkipped: false });
     expect(createShipment).not.toHaveBeenCalled();
   });
 });

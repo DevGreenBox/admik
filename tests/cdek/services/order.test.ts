@@ -38,10 +38,19 @@ vi.mock('@/lib/orders/repository', () => ({
   getOrderByNumber: vi.fn(async () => null),
 }));
 
-// sql — заглушка (UPDATE orders денормализация). vi.mock hoisted → строим внутри.
+// sql — заглушка (UPDATE orders денормализация + per-order advisory-lock внутри
+// sql.begin). vi.mock hoisted → строим внутри. tx распознаёт
+// pg_try_advisory_xact_lock и возвращает [{ locked:true }] (лок получен), чтобы
+// критическая секция createShipment выполнялась; прочие запросы → [].
 vi.mock('@/lib/db/client', () => {
+  const tx = vi.fn(async (strings: TemplateStringsArray) => {
+    const text = Array.isArray(strings) ? strings.join('') : String(strings);
+    return text.includes('pg_try_advisory_xact_lock') ? [{ locked: true }] : [];
+  });
   const fn = vi.fn(async () => []);
-  return { sql: Object.assign(fn, { begin: vi.fn(async (cb: (tx: unknown) => unknown) => cb(fn)) }) };
+  return {
+    sql: Object.assign(fn, { begin: vi.fn(async (cb: (t: unknown) => unknown) => cb(tx)) }),
+  };
 });
 
 import {

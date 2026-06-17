@@ -17,6 +17,7 @@
  */
 
 import { sql } from '@/lib/db/client';
+import type { TransactionSql } from 'postgres';
 import type { CdekManager } from '../manager';
 import { getCdekManager } from '../manager';
 import { CdekError } from '../errors';
@@ -329,16 +330,76 @@ export class OrderService {
    *   • pickup / неоплачен → ошибка precondition;
    *   • mock → фейковый uuid/трек; real → POST /v2/orders.
    * Сохраняет cdek_shipments + денормализует orders.cdek_uuid/cdek_track.
+   *
+   * АНТИ-ГОНКА (data-integrity). Создание отправления — неатомарный read-then-act:
+   * read getShipmentByOrderId → удалённый side-effect POST /v2/orders (real) →
+   * только потом INSERT cdek_shipments. UNIQUE uq_cdek_shipments_order защищает
+   * лишь локальный INSERT, но НЕ удалённый POST. При гонке (двойной тик cron /
+   * ручное создание из админки параллельно с cron) оба вызова видели existing=
+   * null, оба POST-или в СДЭК → ДВЕ реальные накладные; второй INSERT падал на
+   * unique, оставляя осиротевшую дублирующую накладную в СДЭК.
+   *
+   * Фикс: ВСЯ критическая секция (re-check существования → выбор источника →
+   * (real) удалённый POST → запись cdek_shipments + денормализация orders) идёт
+   * внутри ОДНОЙ транзакции под per-order транзакционным advisory-lock
+   * pg_try_advisory_xact_lock(hashtext('cdek-create-shipment:'||orderId)). Лок
+   * держится до конца транзакции, поэтому удалённый POST для одного заказа делает
+   * ТОЛЬКО ОДИН воркер; проигравший try-lock завершается без удалённого вызова
+   * (CdekError contention). Перепроверка getShipmentByOrderId ПОД ЛОКОМ ловит
+   * случай, когда конкурент успел создать отправление между pre-check и захватом
+   * лока — тогда возвращаем существующее (идемпотентность), без второго POST.
    */
   async createShipment(
     orderId: string,
     opts: { force?: boolean } = {},
   ): Promise<CdekShipment> {
-    const existing = await getShipmentByOrderId(orderId);
-    if (existing?.cdekUuid && !opts.force) {
-      return existing; // идемпотентность: уже создано
+    // Быстрый pre-check вне лока: если отправление уже есть — не открываем
+    // транзакцию/не берём лок (дешёвый happy-path идемпотентности).
+    const pre = await getShipmentByOrderId(orderId);
+    if (pre?.cdekUuid && !opts.force) {
+      return pre; // идемпотентность: уже создано
     }
 
+    return await sql.begin<CdekShipment>(async (tx: TransactionSql) => {
+      // Транзакционный advisory-lock по заказу: только один воркер входит в
+      // критическую секцию для данного orderId. Ключ — hashtext(стабильная строка).
+      const lockRows = await tx<Array<{ locked: boolean }>>`
+        SELECT pg_try_advisory_xact_lock(
+          hashtext(${'cdek-create-shipment:' + orderId})
+        ) AS locked
+      `;
+      const acquired = lockRows[0]?.locked === true;
+      if (!acquired) {
+        // Другой воркер уже создаёт отправление для этого заказа — не дублируем
+        // удалённый POST. Понятная ошибка contention (cron посчитает failed,
+        // следующий тик подхватит, если первый воркер не довёл до конца).
+        throw new CdekError(
+          'cdek_create_in_progress',
+          `Создание отправления для заказа ${orderId} уже выполняется другим процессом.`,
+        );
+      }
+
+      // Перепроверка ПОД ЛОКОМ: конкурент мог создать отправление между pre-check
+      // и захватом лока → возвращаем существующее (без второго удалённого POST).
+      const existing = await getShipmentByOrderId(orderId);
+      if (existing?.cdekUuid && !opts.force) {
+        return existing;
+      }
+
+      return await this.createShipmentLocked(orderId, existing);
+    });
+  }
+
+  /**
+   * Критическая секция создания отправления (вызывается ПОД per-order advisory-
+   * lock из createShipment). Загружает заказ, проверяет precondition, выбирает
+   * mock/real, пишет cdek_shipments и денормализует orders. На ошибке бампит
+   * retry_count (как и раньше) и пробрасывает исключение наружу.
+   */
+  private async createShipmentLocked(
+    orderId: string,
+    existing: CdekShipment | null,
+  ): Promise<CdekShipment> {
     const loaded: OrderWithItems | null = await getOrderById(orderId);
     if (!loaded) {
       throw new CdekError('cdek_order_not_found', `Заказ ${orderId} не найден.`);

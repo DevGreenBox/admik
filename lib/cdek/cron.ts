@@ -22,6 +22,7 @@
  */
 
 import { sql } from '@/lib/db/client';
+import type { TransactionSql } from 'postgres';
 import { getCdekConfig, type CdekConfig } from './config';
 import { OrderService } from './services/order';
 import { TrackingService } from './services/tracking';
@@ -62,6 +63,45 @@ export interface CreatePendingStats {
   created: number;
   failed: number;
   skipped: number;
+  /**
+   * true, если прогон НЕ выполнился, потому что advisory-lock уже держит другой
+   * (параллельный/перекрывшийся) прогон. Прогон при этом — безопасный no-op.
+   */
+  lockSkipped: boolean;
+}
+
+/**
+ * Результат попытки взять advisory-lock и выполнить критическую секцию.
+ * acquired=false → секция НЕ выполнялась (лок занят другим процессом).
+ */
+export type WithLockResult<T> = { acquired: true; result: T } | { acquired: false };
+
+/**
+ * Берёт транзакционный advisory-lock (pg_try_advisory_xact_lock) по стабильному
+ * ключу и выполняет fn ПОД ЛОКОМ в той же транзакции. Лок держится до конца
+ * транзакции (xact-lock), поэтому критическая секция гарантированно одна на
+ * процесс/кластер. Не получили лок → { acquired: false } без выполнения fn.
+ */
+export type WithLock = <T>(key: string, fn: () => Promise<T>) => Promise<WithLockResult<T>>;
+
+/**
+ * Дефолтная реализация withLock через sql.begin + pg_try_advisory_xact_lock.
+ * hashtext(key) → int4-ключ для advisory-lock (детерминированный на ключ).
+ */
+export async function withAdvisoryLock<T>(
+  key: string,
+  fn: () => Promise<T>,
+): Promise<WithLockResult<T>> {
+  return await sql.begin<WithLockResult<T>>(async (tx: TransactionSql) => {
+    const rows = await tx<Array<{ locked: boolean }>>`
+      SELECT pg_try_advisory_xact_lock(hashtext(${key})) AS locked
+    `;
+    if (rows[0]?.locked !== true) {
+      return { acquired: false };
+    }
+    const result = await fn();
+    return { acquired: true, result };
+  });
 }
 
 export interface RefreshActiveStats {
@@ -175,6 +215,11 @@ export interface CreatePendingDeps {
   findCandidates: (limit?: number) => Promise<PendingOrderCandidate[]>;
   /** Создание отправления по заказу (идемпотентно, см. OrderService). */
   createShipment: (orderId: string) => Promise<{ cdekUuid: string | null }>;
+  /**
+   * Сериализатор прогона: берёт advisory-lock по ключу и выполняет критическую
+   * секцию под ним. По умолчанию — withAdvisoryLock (sql + pg_try_advisory_xact_lock).
+   */
+  withLock: WithLock;
 }
 
 export interface RefreshActiveDeps {
@@ -199,6 +244,7 @@ function defaultCreatePendingDeps(): CreatePendingDeps {
       const sh = await orderService.createShipment(orderId);
       return { cdekUuid: sh.cdekUuid };
     },
+    withLock: withAdvisoryLock,
   };
 }
 
@@ -238,42 +284,68 @@ function defaultNotifyStuckDeps(): NotifyStuckDeps {
 // Воркеры.
 // =============================================================================
 
+/** Стабильный ключ advisory-lock для сериализации прогонов create-pending. */
+export const CREATE_PENDING_LOCK_KEY = 'cdek-create-pending';
+
 /**
  * create-pending (каждые 5 мин): создаёт отправления для оплаченных заказов без
  * СДЭК. No-op при CDEK_CREATE_ENABLED=false (kill-switch). Ошибка по одному
  * заказу инкрементит failed, но не валит прогон. Идемпотентность обеспечивает
  * OrderService.createShipment (пропуск заказа с уже выставленным cdek_uuid →
  * учитывается как skipped).
+ *
+ * АНТИ-ГОНКА (data-integrity). Внешний шедулер может сработать дважды или
+ * 5-минутный тик может перекрыться (медленный прогон). Без сериализации два
+ * прогона выбирают одни и те же кандидаты (findPendingOrders НЕ помечает их) и
+ * оба POST-ят в СДЭК → дубль накладной. Фикс: ВЕСЬ прогон выполняется под
+ * транзакционным advisory-lock (pg_try_advisory_xact_lock(hashtext(
+ * 'cdek-create-pending'))). Не получили лок (другой прогон уже идёт) → выходим
+ * как lockSkipped=true, НЕ читая кандидатов и НЕ делая удалённых вызовов. Лок
+ * держится до конца транзакции, значит критическая секция гарантированно одна.
+ * Дополнительно per-order лок в OrderService.createShipment страхует от гонки с
+ * ручным созданием из админки.
  */
 export async function runCreatePending(
   deps: CreatePendingDeps = defaultCreatePendingDeps(),
 ): Promise<CreatePendingStats> {
-  const stats: CreatePendingStats = { created: 0, failed: 0, skipped: 0 };
-
   if (!deps.config.createEnabled) {
-    // Kill-switch: считаем кандидатов пропущенными (прогон безопасен и идемпотентен).
+    // Kill-switch: лок не берём (удалённых вызовов не будет). Считаем кандидатов
+    // пропущенными (прогон безопасен и идемпотентен).
     const candidates = await deps.findCandidates(CREATE_PENDING_LIMIT);
-    stats.skipped = candidates.length;
-    return stats;
+    return { created: 0, failed: 0, skipped: candidates.length, lockSkipped: false };
   }
 
-  const candidates = await deps.findCandidates(CREATE_PENDING_LIMIT);
-  for (const cand of candidates) {
-    try {
-      const sh = await deps.createShipment(cand.id);
-      if (sh.cdekUuid) {
-        stats.created += 1;
-      } else {
-        // Отправление создано без uuid (например ошибка СДЭК записана в error) —
-        // считаем пропущенным, не падаем.
-        stats.skipped += 1;
+  // Сериализация прогона: критическая секция — под advisory-lock.
+  const locked = await deps.withLock(CREATE_PENDING_LOCK_KEY, async () => {
+    const stats: CreatePendingStats = {
+      created: 0,
+      failed: 0,
+      skipped: 0,
+      lockSkipped: false,
+    };
+    const candidates = await deps.findCandidates(CREATE_PENDING_LIMIT);
+    for (const cand of candidates) {
+      try {
+        const sh = await deps.createShipment(cand.id);
+        if (sh.cdekUuid) {
+          stats.created += 1;
+        } else {
+          // Отправление создано без uuid (например ошибка СДЭК записана в error) —
+          // считаем пропущенным, не падаем.
+          stats.skipped += 1;
+        }
+      } catch {
+        stats.failed += 1;
       }
-    } catch {
-      stats.failed += 1;
     }
-  }
+    return stats;
+  });
 
-  return stats;
+  if (!locked.acquired) {
+    // Параллельный/перекрывшийся прогон уже держит лок — этот прогон — no-op.
+    return { created: 0, failed: 0, skipped: 0, lockSkipped: true };
+  }
+  return locked.result;
 }
 
 /**
