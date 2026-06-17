@@ -66,6 +66,13 @@ describe('ProductCreateSchema', () => {
     }
   });
 
+  it('slug необязателен — пустое поле «Адрес» не блокирует создание (регресс)', () => {
+    // Раньше slug был обязателен → создание товара с пустым адресом падало
+    // валидацией (в т.ч. для русских названий). Хендлер генерирует slug из name.
+    const res = ProductCreateSchema.safeParse({ sku: 'SKU-1', name: 'Куртка' });
+    expect(res.success).toBe(true);
+  });
+
   it('отрицательная цена отклонена', () => {
     const res = ProductCreateSchema.safeParse({
       sku: 'SKU-1',
@@ -229,6 +236,13 @@ describe('CategoryCreateSchema / CategoryMoveSchema', () => {
       expect(res.data.isActive).toBe(true);
       expect(res.data.sort).toBe(0);
     }
+  });
+  it('slug необязателен — русское название без адреса проходит (регресс)', () => {
+    // Баг: slug был обязателен → «Создать категорию» с пустым адресом падало
+    // «Проверьте корректность полей формы», в т.ч. для «Одежда». Хендлер
+    // генерирует slug из name (slugify транслитерирует кириллицу).
+    const res = CategoryCreateSchema.safeParse({ name: 'Одежда' });
+    expect(res.success).toBe(true);
   });
   it('move принимает null-родителя (корень)', () => {
     expect(CategoryMoveSchema.safeParse({ id: UUID, parentId: null }).success).toBe(true);

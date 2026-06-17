@@ -110,7 +110,10 @@ export const seoEntityFields = {
 
 export const CategoryCreateSchema = z.object({
   parentId: uuidSchema.nullish(),
-  slug: slugSchema,
+  // Необязателен: если пуст — createCategory генерирует из name (slugify,
+  // транслитерация кириллицы). Раньше был обязателен → создание категории с
+  // пустым полем «Адрес» падало валидацией, в т.ч. для русских названий.
+  slug: slugSchema.optional(),
   name: z.string().trim().min(1).max(255),
   description: z.string().max(5000).optional().default(''),
   sort: z.number().int().min(0).optional().default(0),
@@ -143,7 +146,9 @@ export const CategoryDeleteSchema = z.object({ id: uuidSchema });
 export const ProductCreateSchema = z
   .object({
     sku: skuSchema,
-    slug: slugSchema,
+    // Необязателен: если пуст — createProduct генерирует из name (slugify,
+    // транслитерация кириллицы), как у брендов. Раньше был обязателен.
+    slug: slugSchema.optional(),
     name: z.string().trim().min(1).max(255),
     description: z.string().max(50000).optional().default(''),
     status: z.enum(PRODUCT_STATUSES).optional().default('draft'),
