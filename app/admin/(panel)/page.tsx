@@ -3,6 +3,8 @@ import Link from 'next/link';
 import { requireUser } from '@/lib/auth/session';
 import { can } from '@/lib/auth/rbac';
 import { sql } from '@/lib/db/client';
+import { getDashboardSeries } from '@/lib/analytics/repository';
+import { MiniBarChart } from './_components/MiniBarChart';
 
 /**
  * Дашборд: приветствие + реальные счётчики каталога/заказов + быстрые ссылки на
@@ -36,13 +38,15 @@ function MetricCard({ title, value }: { title: string; value: number }) {
 export default async function DashboardPage() {
   const user = await requireUser();
 
-  const [products, categories, ordersTotal, ordersToday] = await Promise.all([
+  const [products, categories, ordersTotal, ordersToday, series] = await Promise.all([
     safeCount(sql<{ n: string }[]>`SELECT count(*)::text AS n FROM products`),
     safeCount(sql<{ n: string }[]>`SELECT count(*)::text AS n FROM categories`),
     safeCount(sql<{ n: string }[]>`SELECT count(*)::text AS n FROM orders`),
     safeCount(
       sql<{ n: string }[]>`SELECT count(*)::text AS n FROM orders WHERE created_at >= current_date`,
     ),
+    // Ряды для графиков (заказы/посещения за 14 дней); null при отсутствии БД.
+    getDashboardSeries(14).catch(() => null),
   ]);
 
   // Быстрые ссылки — только те, на что есть право (owner видит всё).
@@ -71,6 +75,23 @@ export default async function DashboardPage() {
         {ordersToday !== null ? <MetricCard title="Заказов сегодня" value={ordersToday} /> : null}
         {ordersTotal !== null ? <MetricCard title="Заказов всего" value={ordersTotal} /> : null}
       </section>
+
+      {series ? (
+        <section aria-label="Графики за 14 дней" className="mt-8 grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <MiniBarChart
+            title="Заказы за 14 дней"
+            points={series.orders}
+            unit="заказов"
+            barClassName="fill-gray-800"
+          />
+          <MiniBarChart
+            title="Посещения сайта за 14 дней"
+            points={series.views}
+            unit="просмотров"
+            barClassName="fill-blue-500"
+          />
+        </section>
+      ) : null}
 
       {links.length > 0 ? (
         <section aria-label="Быстрые действия" className="mt-8">
