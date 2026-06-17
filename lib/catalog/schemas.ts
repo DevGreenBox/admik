@@ -198,6 +198,21 @@ export type ProductUpdateInput = z.infer<typeof ProductUpdateSchema>;
 
 export const ProductIdSchema = z.object({ id: uuidSchema });
 
+/**
+ * Массовая смена статуса товаров (массовые действия в списке).
+ * ids — от 1 до 200 уникальных uuid (защита от слишком крупных UPDATE);
+ * status — литерал из PRODUCT_STATUSES (CHECK-ограничение БД).
+ */
+export const BulkSetProductStatusSchema = z.object({
+  ids: z.array(uuidSchema).min(1).max(200),
+  status: z.enum(PRODUCT_STATUSES),
+});
+export type BulkSetProductStatusInput = z.infer<typeof BulkSetProductStatusSchema>;
+
+/** Дублирование товара: id исходного товара. */
+export const DuplicateProductSchema = z.object({ id: uuidSchema });
+export type DuplicateProductInput = z.infer<typeof DuplicateProductSchema>;
+
 // -----------------------------------------------------------------------------
 // Варианты (§4.4).
 // -----------------------------------------------------------------------------

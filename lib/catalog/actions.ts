@@ -15,6 +15,8 @@ import {
   ProductCreateSchema,
   ProductUpdateSchema,
   ProductIdSchema,
+  BulkSetProductStatusSchema,
+  DuplicateProductSchema,
   VariantCreateSchema,
   VariantUpdateSchema,
   VariantIdSchema,
@@ -425,6 +427,169 @@ export const archiveProduct = defineAction({
         entityType: 'product',
         entityId: data.id,
         after: { status: 'archived' },
+      },
+    };
+  },
+});
+
+export const bulkSetProductStatus = defineAction({
+  permission: 'catalog.write',
+  input: BulkSetProductStatusSchema,
+  handler: async (data, _ctx) => {
+    assertCatalogEnabled();
+    // Один UPDATE по ANY(ids) — без цикла; status параметризован (CHECK в БД).
+    const rows = await sql<{ id: string }[]>`
+      UPDATE products SET status = ${data.status}, updated_at = now()
+      WHERE id = ANY(${data.ids}::uuid[])
+      RETURNING id
+    `;
+    return {
+      result: { count: rows.length },
+      revalidate: [CATALOG_LIST_PATH, SITEMAP_PATH],
+      audit: {
+        action: 'catalog.product.bulk_status',
+        entityType: 'product',
+        after: { ids: data.ids.length, status: data.status },
+      },
+    };
+  },
+});
+
+/**
+ * Дублирование товара (массовые действия / карточка товара).
+ *
+ * Создаёт КОПИЮ товара со статусом 'draft' и уникальными sku/slug. Копируются
+ * скалярные поля карточки, ВАРИАНТЫ (product_variants), привязки категорий
+ * (product_categories) и атрибуты УРОВНЯ ТОВАРА (product_attributes,
+ * variant_id IS NULL).
+ *
+ * НЕ копируются:
+ *  - инвентарь (inventory): остаток у копии — нулевой/отсутствует, чтобы не
+ *    «размножать» реальные количества по складам (копия — новый товар к продаже);
+ *  - медиа (product_media): файлы лежат в хранилище под ключами исходного товара;
+ *    копировать пришлось бы физически дублировать объекты в S3/MinIO — это вне
+ *    задачи дублирования карточки (медиа добавляются в копию вручную).
+ *  - атрибуты уровня варианта: переносятся вместе со своими вариантами было бы
+ *    нужно перемапить variant_id; для уровня товара (variant_id IS NULL) это не
+ *    требуется, поэтому копируем только товарные привязки.
+ */
+export const duplicateProduct = defineAction({
+  permission: 'catalog.write',
+  input: DuplicateProductSchema,
+  handler: async (data, _ctx) => {
+    assertCatalogEnabled();
+
+    const srcRows = await sql<
+      {
+        id: string;
+        sku: string;
+        name: string;
+        description: string | null;
+        base_price: string | null;
+        compare_at_price: string | null;
+        is_featured: boolean | null;
+        is_new: boolean | null;
+        brand_id: string | null;
+        seo_title: string | null;
+        seo_description: string | null;
+        weight_g: number | null;
+        length_cm: number | null;
+        width_cm: number | null;
+        height_cm: number | null;
+      }[]
+    >`
+      SELECT id, sku, slug, name, description, base_price, compare_at_price,
+             is_featured, is_new, brand_id, seo_title, seo_description,
+             weight_g, length_cm, width_cm, height_cm
+      FROM products WHERE id = ${data.id} LIMIT 1
+    `;
+    const src = srcRows[0];
+    if (!src) {
+      throw new CatalogError('not_found', 'Товар не найден.');
+    }
+
+    const copyName = `${String(src.name)} (копия)`;
+    const baseSlug = slugify(`${String(src.name)}-copy`);
+    const baseSku = `${String(src.sku)}-copy`;
+
+    // sku и slug — оба уникальны; ретраим через общий суффикс попытки, чтобы
+    // обе колонки шли в ногу (insertWithUniqueSlug-подход, но по двум полям).
+    let attempt = 0;
+    const maxAttempts = 6;
+    let created: { id: string } | undefined;
+    while (attempt < maxAttempts) {
+      const slug = uniquifySlug(baseSlug, attempt);
+      const sku = attempt <= 0 ? baseSku : `${baseSku}-${attempt + 1}`;
+      try {
+        const ins = await sql<{ id: string }[]>`
+          INSERT INTO products (sku, slug, name, description, status, base_price,
+                                compare_at_price, is_featured, is_new, brand_id,
+                                seo_title, seo_description,
+                                weight_g, length_cm, width_cm, height_cm)
+          VALUES (
+            ${sku}, ${slug}, ${copyName}, ${src.description ?? ''},
+            'draft', ${src.base_price ?? '0'},
+            ${src.compare_at_price ?? null}, ${src.is_featured ?? false},
+            ${src.is_new ?? null}, ${src.brand_id ?? null},
+            ${src.seo_title ?? null}, ${src.seo_description ?? null},
+            ${src.weight_g ?? null}, ${src.length_cm ?? null},
+            ${src.width_cm ?? null}, ${src.height_cm ?? null}
+          )
+          RETURNING id
+        `;
+        created = ins[0]!;
+        break;
+      } catch (err) {
+        if (isUniqueViolation(err) && attempt < maxAttempts - 1) {
+          attempt++;
+          continue;
+        }
+        throw err;
+      }
+    }
+    if (!created) {
+      throw new CatalogError('slug_conflict', 'Не удалось подобрать уникальные артикул/адрес для копии.');
+    }
+    const newId = created.id;
+
+    // Привязки категорий (product_categories) — сохраняем is_primary.
+    await sql`
+      INSERT INTO product_categories (product_id, category_id, is_primary)
+      SELECT ${newId}, category_id, is_primary
+      FROM product_categories WHERE product_id = ${data.id}
+    `;
+
+    // Варианты (product_variants) — копируем поля без id/timestamps.
+    await sql`
+      INSERT INTO product_variants
+        (product_id, sku, name, price_override, price_delta, compare_at_price,
+         is_active, sort, weight_g, length_cm, width_cm, height_cm)
+      SELECT ${newId}, sku || '-copy', name, price_override, price_delta,
+             compare_at_price, is_active, sort,
+             weight_g, length_cm, width_cm, height_cm
+      FROM product_variants WHERE product_id = ${data.id}
+    `;
+
+    // Атрибуты УРОВНЯ ТОВАРА (variant_id IS NULL) — без перемапа вариантов.
+    await sql`
+      INSERT INTO product_attributes
+        (product_id, variant_id, attribute_id, value_id, value_text)
+      SELECT ${newId}, NULL, attribute_id, value_id, value_text
+      FROM product_attributes
+      WHERE product_id = ${data.id} AND variant_id IS NULL
+    `;
+
+    // Пересбор презентационного кеша атрибутов копии (ADR-007, cache.ts).
+    await rebuildProductAttributesCache(newId);
+
+    return {
+      result: { id: newId },
+      revalidate: [CATALOG_LIST_PATH, productPath(newId)],
+      audit: {
+        action: 'catalog.product.duplicate',
+        entityType: 'product',
+        entityId: newId,
+        after: { sourceId: data.id, sku: baseSku, name: copyName },
       },
     };
   },

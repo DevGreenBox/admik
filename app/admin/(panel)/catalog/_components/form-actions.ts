@@ -4,6 +4,8 @@ import {
   createProduct,
   updateProduct,
   archiveProduct,
+  bulkSetProductStatus,
+  duplicateProduct,
   createVariant,
   updateVariant,
   deleteVariant,
@@ -45,6 +47,16 @@ export async function updateProductAction(input: unknown): Promise<ActionResult<
 }
 export async function archiveProductAction(input: unknown): Promise<ActionResult<{ id: string }>> {
   return archiveProduct(input);
+}
+export async function bulkSetProductStatusAction(
+  input: unknown,
+): Promise<ActionResult<{ count: number }>> {
+  return bulkSetProductStatus(input);
+}
+export async function duplicateProductAction(
+  input: unknown,
+): Promise<ActionResult<{ id: string }>> {
+  return duplicateProduct(input);
 }
 
 // --- Варианты ---------------------------------------------------------------

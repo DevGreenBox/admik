@@ -14,12 +14,7 @@ import { Forbidden } from '../_components/Forbidden';
 import { PageHeader } from '../_components/PageHeader';
 import { guardCatalog } from './_components/guard';
 import { ProductFilters } from './_components/ProductFilters';
-import { PriceCell } from './_components/PriceCell';
-import {
-  StatusBadge,
-  NewBadge,
-  FeaturedBadge,
-} from './_components/Badges';
+import { ProductBulkTable } from './_components/ProductBulkTable';
 
 /**
  * Список товаров каталога (docs/05 §5.2, П4.1).
@@ -137,96 +132,8 @@ export default async function CatalogPage({
         <ProductFilters brands={brands} categoryTree={categoryTree} />
       </div>
 
-      <div className="mt-6 overflow-x-auto rounded-lg border border-gray-200">
-        <table className="min-w-full divide-y divide-gray-200 text-sm">
-          <thead className="bg-gray-50 text-left text-gray-500">
-            <tr>
-              <th scope="col" className="px-4 py-2 font-medium">Фото</th>
-              <th scope="col" className="px-4 py-2 font-medium">Название</th>
-              <th scope="col" className="px-4 py-2 font-medium">Артикул</th>
-              <th scope="col" className="px-4 py-2 font-medium">Бренд</th>
-              <th scope="col" className="px-4 py-2 font-medium">Цена</th>
-              <th scope="col" className="px-4 py-2 font-medium">Статус</th>
-              <th scope="col" className="px-4 py-2 font-medium">Флаги</th>
-              <th scope="col" className="px-4 py-2 font-medium">Остаток</th>
-              <th scope="col" className="px-4 py-2 font-medium text-right">Действия</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {rows.length === 0 ? (
-              <tr>
-                <td colSpan={9} className="px-4 py-6 text-center text-gray-400">
-                  Товары не найдены. Измените фильтры или создайте товар.
-                </td>
-              </tr>
-            ) : (
-              rows.map((row) => (
-                <tr key={row.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-2">
-                    {row.primaryMediaUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={row.primaryMediaUrl}
-                        alt=""
-                        className="h-10 w-10 rounded object-cover"
-                      />
-                    ) : (
-                      <div
-                        className="flex h-10 w-10 items-center justify-center rounded bg-gray-100 text-xs text-gray-400"
-                        aria-hidden="true"
-                      >
-                        —
-                      </div>
-                    )}
-                  </td>
-                  <td className="px-4 py-2">
-                    <Link
-                      href={`/admin/catalog/products/${row.id}`}
-                      className="font-medium text-blue-700 hover:underline"
-                    >
-                      {row.name}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-2 text-gray-600">
-                    <code className="text-xs">{row.sku}</code>
-                  </td>
-                  <td className="px-4 py-2 text-gray-600">
-                    {row.brand?.name ?? '—'}
-                  </td>
-                  <td className="px-4 py-2">
-                    <PriceCell
-                      price={row.basePrice}
-                      compareAt={row.compareAtPrice}
-                      discountPct={row.discountPct}
-                      currency={currency}
-                    />
-                  </td>
-                  <td className="px-4 py-2">
-                    <StatusBadge status={row.status} />
-                  </td>
-                  <td className="px-4 py-2">
-                    <div className="flex flex-wrap gap-1">
-                      {row.effectiveIsNew ? <NewBadge /> : null}
-                      {row.isFeatured ? <FeaturedBadge /> : null}
-                      {!row.effectiveIsNew && !row.isFeatured ? (
-                        <span className="text-gray-400">—</span>
-                      ) : null}
-                    </div>
-                  </td>
-                  <td className="px-4 py-2 text-gray-700">{row.totalStock}</td>
-                  <td className="px-4 py-2 text-right">
-                    <Link
-                      href={`/admin/catalog/products/${row.id}`}
-                      className="inline-block rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100"
-                    >
-                      Редактировать
-                    </Link>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+      <div className="mt-6">
+        <ProductBulkTable rows={rows} currency={currency} />
       </div>
 
       {totalPages > 1 ? (
