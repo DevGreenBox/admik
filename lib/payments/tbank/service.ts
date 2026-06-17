@@ -232,8 +232,27 @@ export class PaymentService {
   }
 }
 
-/** RedirectDueDate в формате Т-Банка (YYYY-MM-DDThh:mm:ss+03:00) через N минут. */
-function redirectDueDate(minutes: number): string {
-  const d = new Date(Date.now() + minutes * 60_000);
-  return d.toISOString();
+/**
+ * RedirectDueDate в формате Т-Банка (docs/15 §4.1): 'YYYY-MM-DDTHH:MM:SS+03:00'
+ * через N минут от текущего момента.
+ *
+ * Т-API /v2/Init требует ИМЕННО этот вид — БЕЗ миллисекунд и БЕЗ суффикса 'Z'
+ * (toISOString() даёт '...SS.mmmZ' → Init отклоняется по валидации формата даты).
+ *
+ * Смещение МСК фиксированное +03:00: РФ не переходит на летнее время с 2014 г.,
+ * Москва постоянно UTC+3. Берём UTC-инстант, сдвигаем на +3ч и читаем компоненты
+ * через getUTC* (не зависит от TZ сервера — он может быть в UTC), затем явно
+ * приписываем '+03:00'. Отдельной TZ-конфигурации в проекте нет (см. config.ts).
+ *
+ * baseMs (опц.) — для детерминированных тестов; по умолчанию Date.now().
+ */
+const MSK_OFFSET_MIN = 180; // +03:00, фиксированное (без перехода на лето)
+
+export function redirectDueDate(minutes: number, baseMs: number = Date.now()): string {
+  // Сдвигаем UTC-инстант на МСК-смещение, чтобы getUTC* отдали стенные часы МСК.
+  const msk = new Date(baseMs + minutes * 60_000 + MSK_OFFSET_MIN * 60_000);
+  const p = (n: number, w = 2): string => String(n).padStart(w, '0');
+  const date = `${p(msk.getUTCFullYear(), 4)}-${p(msk.getUTCMonth() + 1)}-${p(msk.getUTCDate())}`;
+  const time = `${p(msk.getUTCHours())}:${p(msk.getUTCMinutes())}:${p(msk.getUTCSeconds())}`;
+  return `${date}T${time}+03:00`;
 }
