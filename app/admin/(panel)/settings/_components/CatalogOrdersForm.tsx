@@ -93,7 +93,7 @@ export function CatalogOrdersForm({
           {fe('delivery.freeDeliveryThreshold') ? (
             <p className="mt-1 text-xs text-red-600">{fe('delivery.freeDeliveryThreshold')}</p>
           ) : null}
-          <p className="mt-1 text-xs text-gray-500">0 — порог выключен. Хранится в копейках.</p>
+          <p className="mt-1 text-xs text-gray-500">Сумма заказа, с которой доставка бесплатна. 0 — бесплатной доставки нет.</p>
         </div>
         <div>
           <label htmlFor="co-prefix" className="block text-sm font-medium text-gray-700">

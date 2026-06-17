@@ -116,7 +116,7 @@ export function ModulesForm({
             <div>
               <div className="text-sm font-medium text-gray-800">{label}</div>
               <div className="text-xs text-gray-500">
-                env: {envSet.has(name) ? 'включён' : 'выключен'}
+                по умолчанию: {envSet.has(name) ? 'включён' : 'выключен'}
               </div>
             </div>
             <select
@@ -125,7 +125,7 @@ export function ModulesForm({
               onChange={(e) => setState((s) => ({ ...s, [name]: e.target.value as TriState }))}
               className="rounded border border-gray-300 px-3 py-2 text-sm"
             >
-              <option value="inherit">Наследовать env</option>
+              <option value="inherit">Как по умолчанию</option>
               <option value="on">Включить</option>
               <option value="off">Выключить</option>
             </select>

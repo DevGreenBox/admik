@@ -70,9 +70,10 @@ export function CurrencyUnitsForm({
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div>
-          <label htmlFor="c-code" className="block text-sm font-medium text-gray-700">Код валюты (ISO 4217)</label>
+          <label htmlFor="c-code" className="block text-sm font-medium text-gray-700">Код валюты</label>
           <input id="c-code" value={code} onChange={(e) => setCode(e.target.value.toUpperCase())}
             maxLength={3} placeholder="RUB" className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" />
+          <p className="mt-1 text-xs text-gray-500">3 латинские буквы: RUB — рубль, USD — доллар, EUR — евро.</p>
           {fe('currency.code') ? <p className="mt-1 text-xs text-red-600">{fe('currency.code')}</p> : null}
         </div>
         <div>
@@ -81,12 +82,13 @@ export function CurrencyUnitsForm({
             placeholder="₽" className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" />
         </div>
         <div>
-          <label htmlFor="c-locale" className="block text-sm font-medium text-gray-700">Локаль форматирования</label>
+          <label htmlFor="c-locale" className="block text-sm font-medium text-gray-700">Формат чисел</label>
           <input id="c-locale" value={locale} onChange={(e) => setLocale(e.target.value)}
             placeholder="ru-RU" className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" />
+          <p className="mt-1 text-xs text-gray-500">Как разделять разряды и дробную часть. <code>ru-RU</code> — как принято в России.</p>
         </div>
         <div>
-          <label htmlFor="c-frac" className="block text-sm font-medium text-gray-700">Знаков после точки</label>
+          <label htmlFor="c-frac" className="block text-sm font-medium text-gray-700">Знаков после запятой</label>
           <input id="c-frac" type="number" min={0} max={4} value={fractionDigits}
             onChange={(e) => setFractionDigits(e.target.value)}
             className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" />
