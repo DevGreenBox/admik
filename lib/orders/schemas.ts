@@ -45,8 +45,19 @@ export const moneySchema = z
     'сумма: неотрицательное число с не более чем 2 знаками после точки',
   );
 
-/** Количество единиц позиции: целое ≥ 1. */
-export const quantitySchema = z.number().int().min(1);
+/**
+ * Количество единиц позиции: целое 1..10000.
+ *
+ * Верхняя граница (.max) — защита корректности (Fix 2): lineTotalMinor =
+ * toMinor(unitPrice) × qty считается в number; при огромном qty (напр. 1e9)
+ * произведение могло бы превысить Number.MAX_SAFE_INTEGER и потерять точность.
+ * 10000 единиц одной позиции — заведомо выше любого реального заказа ИМ и при
+ * этом удерживает арифметику в безопасном целочисленном диапазоне.
+ */
+export const quantitySchema = z.number().int().min(1).max(10000);
+
+/** Максимум различных позиций в корзине/заказе (защита от DoS-нагрузки и переполнений). */
+export const MAX_CART_ITEMS = 200;
 
 /** Промокод (citext в БД): непустой, без пробелов по краям, до 64 символов. */
 export const promoCodeSchema = z.string().trim().min(1).max(64);
@@ -99,7 +110,10 @@ export const cartLineSchema = z
 // -----------------------------------------------------------------------------
 
 export const CartQuoteSchema = z.object({
-  items: z.array(cartLineSchema).min(1, 'Корзина пуста.'),
+  items: z
+    .array(cartLineSchema)
+    .min(1, 'Корзина пуста.')
+    .max(MAX_CART_ITEMS, `Слишком много позиций (максимум ${MAX_CART_ITEMS}).`),
   promoCode: promoCodeSchema.optional(),
   delivery: deliverySelectionSchema.optional(),
 });
@@ -110,7 +124,10 @@ export type CartQuoteInput = z.infer<typeof CartQuoteSchema>;
 // -----------------------------------------------------------------------------
 
 export const CreateOrderSchema = z.object({
-  items: z.array(cartLineSchema).min(1, 'Корзина пуста.'),
+  items: z
+    .array(cartLineSchema)
+    .min(1, 'Корзина пуста.')
+    .max(MAX_CART_ITEMS, `Слишком много позиций (максимум ${MAX_CART_ITEMS}).`),
   customer: customerContactSchema,
   delivery: deliverySelectionSchema,
   paymentMethod: z.enum(PAYMENT_METHODS),

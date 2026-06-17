@@ -41,6 +41,12 @@ describe('orders/schemas — примитивы', () => {
     expect(quantitySchema.safeParse(1.5).success).toBe(false);
   });
 
+  it('quantitySchema имеет верхнюю границу (.max 10000) — защита от потери точности', () => {
+    expect(quantitySchema.safeParse(10000).success).toBe(true);
+    expect(quantitySchema.safeParse(10001).success).toBe(false);
+    expect(quantitySchema.safeParse(1_000_000_000).success).toBe(false);
+  });
+
   it('cartLineSchema требует variantId или productId', () => {
     expect(cartLineSchema.safeParse({ variantId: UUID, qty: 2 }).success).toBe(true);
     expect(cartLineSchema.safeParse({ productId: UUID, qty: 1 }).success).toBe(true);
@@ -65,6 +71,13 @@ describe('orders/schemas — CartQuoteSchema (POST /cart/quote)', () => {
 
   it('отклоняет пустую корзину', () => {
     expect(CartQuoteSchema.safeParse({ items: [] }).success).toBe(false);
+  });
+
+  it('items-массив имеет верхнюю границу (.max 200)', () => {
+    const make = (n: number) =>
+      Array.from({ length: n }, () => ({ variantId: UUID, qty: 1 }));
+    expect(CartQuoteSchema.safeParse({ items: make(200) }).success).toBe(true);
+    expect(CartQuoteSchema.safeParse({ items: make(201) }).success).toBe(false);
   });
 
   it('доставка в ПВЗ требует pvzCode', () => {
@@ -109,6 +122,19 @@ describe('orders/schemas — CreateOrderSchema (POST /orders)', () => {
   it('принимает опц. idempotencyKey', () => {
     const res = CreateOrderSchema.safeParse({ ...base, idempotencyKey: 'idem-123' });
     expect(res.success).toBe(true);
+  });
+
+  it('items-массив имеет верхнюю границу (.max 200)', () => {
+    const make = (n: number) =>
+      Array.from({ length: n }, () => ({ variantId: UUID, qty: 1 }));
+    expect(CreateOrderSchema.safeParse({ ...base, items: make(200) }).success).toBe(true);
+    expect(CreateOrderSchema.safeParse({ ...base, items: make(201) }).success).toBe(false);
+  });
+
+  it('qty выше верхней границы (>10000) отклоняется', () => {
+    expect(
+      CreateOrderSchema.safeParse({ ...base, items: [{ variantId: UUID, qty: 10001 }] }).success,
+    ).toBe(false);
   });
 });
 

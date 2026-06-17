@@ -313,12 +313,27 @@ export function effectiveUnitPriceMinor(opts: {
 // Расчёт позиции и суммы товаров.
 // -----------------------------------------------------------------------------
 
-/** Сумма позиции в копейках = unitPrice × qty (целочисленно). */
+/**
+ * Сумма позиции в копейках = unitPrice × qty (целочисленно).
+ *
+ * Защита точности (Fix 2): произведение копеек на qty считается в number; если
+ * оно превышает Number.MAX_SAFE_INTEGER, целочисленная арифметика перестаёт быть
+ * точной (тихая потеря последних разрядов суммы). Верхняя граница qty в схемах
+ * (quantitySchema .max(10000)) делает это практически недостижимым, но здесь —
+ * последний рубеж: при переполнении бросаем явную ошибку, а не пишем «битую» сумму.
+ */
 export function lineTotalMinor(line: PricedLine): number {
   if (!Number.isInteger(line.qty) || line.qty < 1) {
     throw new Error(`Некорректное количество позиции "${line.sku}": ${line.qty}.`);
   }
-  return toMinor(line.unitPrice) * line.qty;
+  const total = toMinor(line.unitPrice) * line.qty;
+  if (total > Number.MAX_SAFE_INTEGER) {
+    throw new Error(
+      `Переполнение суммы позиции "${line.sku}": цена × количество (${line.qty}) ` +
+        'превышает безопасный диапазон вычислений.',
+    );
+  }
+  return total;
 }
 
 /** Сумма всех позиций в копейках. */

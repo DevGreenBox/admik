@@ -55,6 +55,18 @@ describe('pricing — суммы позиций', () => {
     expect(() => lineTotalMinor(line({ qty: 0 }))).toThrow();
     expect(() => lineTotalMinor(line({ qty: 1.5 }))).toThrow();
   });
+
+  it('бросает при переполнении MAX_SAFE_INTEGER (защита точности, Fix 2)', () => {
+    // unitPrice 1e12 руб = 1e14 коп; × qty 1000 = 1e17 > MAX_SAFE_INTEGER (~9e15).
+    expect(() =>
+      lineTotalMinor(line({ unitPrice: '999999999999.99', qty: 1000 })),
+    ).toThrow();
+  });
+
+  it('не бросает на разумных значениях у верхней границы qty', () => {
+    // qty 10000 (макс схемы) × 1000.00 руб = 1e9 коп — в безопасном диапазоне.
+    expect(lineTotalMinor(line({ unitPrice: '1000.00', qty: 10000 }))).toBe(1_000_000_000);
+  });
 });
 
 describe('pricing — скидка промокода (§3.2)', () => {

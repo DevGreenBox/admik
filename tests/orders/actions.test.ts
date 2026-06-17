@@ -28,9 +28,37 @@ const H = vi.hoisted(() => {
   const state = {
     currentUser: null as AuthUser | null,
     getOrderByIdQueue: [] as unknown[],
+    /**
+     * Очередь результатов для запросов ВНУТРИ транзакции (tx`...`). Каждый вызов
+     * tagged-template tx снимает один элемент. По умолчанию (пусто) → []. Нужна
+     * для проверки guarded-UPDATE (Fix 1: UPDATE ... WHERE status=from RETURNING id
+     * → affected rows контролируем сюда) и отката промокода (Fix 4).
+     */
+    txResultQueue: [] as unknown[][],
+    /** Лог SQL-запросов внутри транзакции (строки шаблонов) — для проверок Fix 1/4. */
+    txCalls: [] as string[][],
   };
+  // sql.begin как управляемый спай: по умолчанию выполняет колбэк с tx-моком.
+  // tx`...` снимает результат из txResultQueue, а если очередь пуста — возвращает
+  // ОДНУ строку [{ id }] по умолчанию. Это нужно, чтобы guarded UPDATE (Fix 1:
+  // `... RETURNING id`) по умолчанию считался успешным (affected rows = 1) и
+  // happy-path тесты переходов проходили. Для проверки КОНФЛИКТА тест кладёт в
+  // txResultQueue пустой массив [] (0 строк) как результат первого UPDATE.
+  const DEFAULT_TX_ROW = [{ id: 'tx-row-id' }];
+  const sqlBeginMock = vi.fn(async (cb: (tx: unknown) => Promise<unknown>) => {
+    const tx = (strings: TemplateStringsArray, ..._args: unknown[]) => {
+      // Записываем шаблон (склейку статических кусков) — позволяет утверждать
+      // наличие «AND status =» / «promo_redemptions» / «used_count» в запросе.
+      state.txCalls.push(Array.from(strings ?? []));
+      const next = state.txResultQueue.length > 0 ? state.txResultQueue.shift()! : DEFAULT_TX_ROW;
+      return Promise.resolve(next);
+    };
+    (tx as unknown as { json: unknown }).json = (v: unknown) => v;
+    return cb(tx);
+  });
   return {
     state,
+    sqlBeginMock,
     writeAuditSpy: vi.fn(async (..._args: unknown[]) => {}),
     getCurrentUserMock: vi.fn(async () => state.currentUser),
     getOrderByIdMock: vi.fn(async (..._args: unknown[]) => state.getOrderByIdQueue.shift() ?? null),
@@ -45,6 +73,7 @@ const H = vi.hoisted(() => {
 });
 
 const {
+  sqlBeginMock,
   writeAuditSpy,
   getCurrentUserMock,
   getOrderByIdMock,
@@ -77,13 +106,11 @@ vi.mock('next/headers', () => ({
   headers: async () => ({ get: () => null }),
 }));
 
-// sql: tagged-template, возвращающий [] по умолчанию; sql.begin(cb) выполняет cb с tx.
+// sql: tagged-template, возвращающий [] по умолчанию; sql.begin — управляемый
+// спай H.sqlBeginMock (выполняет колбэк с tx-моком, снимающим txResultQueue).
 function makeSqlMock() {
-  const tx = (..._args: unknown[]) => Promise.resolve([] as unknown[]);
   const sqlFn = (..._args: unknown[]) => Promise.resolve([] as unknown[]);
-  (sqlFn as unknown as { begin: unknown }).begin = vi.fn(
-    async (cb: (tx: unknown) => Promise<unknown>) => cb(tx),
-  );
+  (sqlFn as unknown as { begin: unknown }).begin = H.sqlBeginMock;
   (sqlFn as unknown as { json: unknown }).json = (v: unknown) => v;
   return sqlFn;
 }
@@ -149,6 +176,9 @@ function orderDetail(over: Record<string, unknown> = {}) {
 beforeEach(() => {
   H.state.currentUser = makeUser(['orders.read', 'orders.write']);
   H.state.getOrderByIdQueue = [];
+  H.state.txResultQueue = [];
+  H.state.txCalls = [];
+  sqlBeginMock.mockClear();
   writeAuditSpy.mockClear();
   getOrderByIdMock.mockClear();
   releaseReservationMock.mockClear();
@@ -209,24 +239,34 @@ describe('guard прав', () => {
 // =============================================================================
 
 describe('валидация перехода статуса', () => {
-  it('недопустимый переход new→shipped → internal (OrderError), история не пишется', async () => {
+  it('недопустимый переход new→shipped → validation + message (OrderError), история не пишется', async () => {
+    // OrderError extends PublicActionError → пайплайн отдаёт error:'validation' + текст.
     H.state.getOrderByIdQueue = [orderDetail({ status: 'new' })];
     const res = await changeOrderStatus({ id: UUID, to: 'shipped' });
-    expect(res).toEqual({ ok: false, error: 'internal' });
+    expect(res.ok).toBe(false);
+    if (res.ok) throw new Error('ожидался отказ');
+    expect(res.error).toBe('validation');
+    expect(res.message).toContain('Недопустимый переход');
     expect(releaseReservationMock).not.toHaveBeenCalled();
     expect(commitReservationMock).not.toHaveBeenCalled();
   });
 
-  it('недопустимый переход оплаты pending→refunded → internal', async () => {
+  it('недопустимый переход оплаты pending→refunded → validation + message', async () => {
     H.state.getOrderByIdQueue = [orderDetail({ paymentStatus: 'pending' })];
     const res = await setPaymentStatus({ id: UUID, to: 'refunded' });
-    expect(res).toEqual({ ok: false, error: 'internal' });
+    expect(res.ok).toBe(false);
+    if (res.ok) throw new Error('ожидался отказ');
+    expect(res.error).toBe('validation');
+    expect(res.message).toContain('Недопустимый переход статуса оплаты');
   });
 
-  it('недопустимый переход доставки pending→delivered → internal', async () => {
+  it('недопустимый переход доставки pending→delivered → validation + message', async () => {
     H.state.getOrderByIdQueue = [orderDetail({ deliveryStatus: 'pending' })];
     const res = await setDeliveryStatus({ id: UUID, to: 'delivered' });
-    expect(res).toEqual({ ok: false, error: 'internal' });
+    expect(res.ok).toBe(false);
+    if (res.ok) throw new Error('ожидался отказ');
+    expect(res.error).toBe('validation');
+    expect(res.message).toContain('Недопустимый переход статуса доставки');
   });
 
   it('допустимый переход доставки pending→registered → ok', async () => {
@@ -236,6 +276,53 @@ describe('валидация перехода статуса', () => {
     ];
     const res = await setDeliveryStatus({ id: UUID, to: 'registered' });
     expect(res.ok).toBe(true);
+  });
+});
+
+// =============================================================================
+// ДОМЕННЫЕ ОШИБКИ ДОНОСЯТ message ДО UI (OrderError extends PublicActionError).
+// =============================================================================
+
+describe('доменные ошибки → validation + message (не «internal»)', () => {
+  it('getOrder: заказ не найден → validation + «Заказ не найден.»', async () => {
+    // Пустая очередь getOrderById → null → OrderError('not_found').
+    H.state.getOrderByIdQueue = [];
+    const res = await getOrder({ id: UUID });
+    expect(res.ok).toBe(false);
+    if (res.ok) throw new Error('ожидался отказ');
+    expect(res.error).toBe('validation');
+    expect(res.message).toBe('Заказ не найден.');
+  });
+
+  it('changeOrderStatus: заказ не найден → validation + «Заказ не найден.»', async () => {
+    H.state.getOrderByIdQueue = [];
+    const res = await changeOrderStatus({ id: UUID, to: 'paid' });
+    expect(res.ok).toBe(false);
+    if (res.ok) throw new Error('ожидался отказ');
+    expect(res.error).toBe('validation');
+    expect(res.message).toBe('Заказ не найден.');
+  });
+
+  it('createPromoCode: дубликат кода (PG 23505) → validation + «уже существует»', async () => {
+    // sql.begin бросает ошибку с code='23505' → isUniqueViolation → OrderError('duplicate_code').
+    const dupErr = Object.assign(new Error('duplicate key'), { code: '23505' });
+    sqlBeginMock.mockImplementationOnce(async () => {
+      throw dupErr;
+    });
+    const res = await createPromoCode({ code: 'SALE', kind: 'fixed', value: '100' });
+    expect(res.ok).toBe(false);
+    if (res.ok) throw new Error('ожидался отказ');
+    expect(res.error).toBe('validation');
+    expect(res.message).toContain('уже существует');
+  });
+
+  it('deletePromoCode: промокод не найден → validation + «Промокод не найден.»', async () => {
+    // sql`DELETE ... RETURNING id` → [] (мок по умолчанию) → OrderError('not_found').
+    const res = await deletePromoCode({ id: UUID });
+    expect(res.ok).toBe(false);
+    if (res.ok) throw new Error('ожидался отказ');
+    expect(res.error).toBe('validation');
+    expect(res.message).toBe('Промокод не найден.');
   });
 });
 
@@ -279,6 +366,172 @@ describe('резерв остатков при переходах', () => {
     const res = await refundOrder({ id: UUID });
     expect(res.ok).toBe(true);
     expect(releaseReservationMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+// =============================================================================
+// GUARDED UPDATE / TOCTOU-ГОНКА СТАТУСА (Fix 1, §2.8).
+//
+// Юнит-уровень: проверяем, что (а) UPDATE статуса несёт guard `AND status = from`,
+// (б) при affected rows ≠ 1 (конкурентный переход) action отдаёт конфликт и НЕ
+// пишет историю/побочные эффекты. Полная конкурентность (2 параллельных перехода
+// на живой БД) валидируется интеграционным тестом в repository.test.ts (нужна БД).
+// =============================================================================
+
+describe('guarded UPDATE статуса (TOCTOU)', () => {
+  /** Был ли среди tx-запросов guarded UPDATE по нужной колонке (`AND <col> =`). */
+  function hasGuard(col: string): boolean {
+    return H.state.txCalls.some((tpl) => tpl.join('|').includes(`AND ${col} =`));
+  }
+  /** Был ли INSERT в order_status_history среди tx-запросов. */
+  function wroteHistory(): boolean {
+    return H.state.txCalls.some((tpl) => tpl.join('|').includes('order_status_history'));
+  }
+
+  it('order: UPDATE несёт guard «AND status =» (happy-path new→paid)', async () => {
+    H.state.getOrderByIdQueue = [orderDetail({ status: 'new' }), orderDetail({ status: 'paid' })];
+    const res = await changeOrderStatus({ id: UUID, to: 'paid' });
+    expect(res.ok).toBe(true);
+    expect(hasGuard('status')).toBe(true);
+    expect(wroteHistory()).toBe(true);
+  });
+
+  it('order: конкурентный переход (guarded UPDATE 0 строк) → conflict, история НЕ пишется', async () => {
+    // Первый tx-запрос (guarded UPDATE) вернёт [] → affected rows = 0 → конфликт.
+    H.state.getOrderByIdQueue = [orderDetail({ status: 'new' })];
+    H.state.txResultQueue = [[]];
+    const res = await changeOrderStatus({ id: UUID, to: 'paid' });
+    expect(res.ok).toBe(false);
+    if (res.ok) throw new Error('ожидался отказ');
+    expect(res.error).toBe('validation'); // OrderError('conflict') → PublicActionError
+    expect(res.message).toContain('изменился параллельно');
+    expect(wroteHistory()).toBe(false);
+    expect(releaseReservationMock).not.toHaveBeenCalled();
+    expect(commitReservationMock).not.toHaveBeenCalled();
+    expect(writeAuditSpy).not.toHaveBeenCalled();
+  });
+
+  it('payment: UPDATE несёт guard «AND payment_status =» (happy-path pending→paid)', async () => {
+    H.state.getOrderByIdQueue = [
+      orderDetail({ paymentStatus: 'pending' }),
+      orderDetail({ paymentStatus: 'paid' }),
+    ];
+    const res = await setPaymentStatus({ id: UUID, to: 'paid' });
+    expect(res.ok).toBe(true);
+    expect(hasGuard('payment_status')).toBe(true);
+    expect(wroteHistory()).toBe(true);
+  });
+
+  it('payment: конкурентный переход (0 строк) → conflict, история НЕ пишется', async () => {
+    H.state.getOrderByIdQueue = [orderDetail({ paymentStatus: 'pending' })];
+    H.state.txResultQueue = [[]];
+    const res = await setPaymentStatus({ id: UUID, to: 'paid' });
+    expect(res.ok).toBe(false);
+    if (res.ok) throw new Error('ожидался отказ');
+    expect(res.error).toBe('validation');
+    expect(res.message).toContain('изменился параллельно');
+    expect(wroteHistory()).toBe(false);
+  });
+
+  it('delivery: UPDATE несёт guard «AND delivery_status =» (happy-path pending→registered)', async () => {
+    H.state.getOrderByIdQueue = [
+      orderDetail({ deliveryStatus: 'pending' }),
+      orderDetail({ deliveryStatus: 'registered' }),
+    ];
+    const res = await setDeliveryStatus({ id: UUID, to: 'registered' });
+    expect(res.ok).toBe(true);
+    expect(hasGuard('delivery_status')).toBe(true);
+    expect(wroteHistory()).toBe(true);
+  });
+
+  it('delivery: конкурентный переход (0 строк) → conflict, история НЕ пишется', async () => {
+    H.state.getOrderByIdQueue = [orderDetail({ deliveryStatus: 'pending' })];
+    H.state.txResultQueue = [[]];
+    const res = await setDeliveryStatus({ id: UUID, to: 'registered' });
+    expect(res.ok).toBe(false);
+    if (res.ok) throw new Error('ожидался отказ');
+    expect(res.error).toBe('validation');
+    expect(res.message).toContain('изменился параллельно');
+    expect(wroteHistory()).toBe(false);
+  });
+});
+
+// =============================================================================
+// ОТКАТ ПРОМОКОДА ПРИ ОТМЕНЕ/ВОЗВРАТЕ (Fix 4, §5.2).
+// =============================================================================
+
+describe('откат used_count/promo_redemptions при cancel/refund', () => {
+  const PROMO_ID = '22222222-2222-4222-8222-222222222222';
+
+  /** Все статические куски tx-запросов одной плоской строкой (для поиска DELETE/UPDATE). */
+  function txText(): string {
+    return H.state.txCalls.map((tpl) => tpl.join('|')).join('||');
+  }
+
+  it('cancel с promoCodeId: DELETE promo_redemptions + UPDATE used_count (редемпшн удалён)', async () => {
+    H.state.getOrderByIdQueue = [
+      orderDetail({ status: 'paid', promoCodeId: PROMO_ID }),
+      orderDetail({ status: 'cancelled', promoCodeId: PROMO_ID }),
+    ];
+    // Порядок tx-запросов: guarded UPDATE orders → DELETE promo_redemptions → UPDATE promo_codes → INSERT history.
+    // Дефолт DEFAULT_TX_ROW (1 строка) подойдёт для всех (guarded UPDATE ok; DELETE «удалил» 1).
+    const res = await cancelOrder({ id: UUID });
+    expect(res.ok).toBe(true);
+    const text = txText();
+    expect(text).toContain('DELETE FROM promo_redemptions');
+    expect(text).toContain('used_count = GREATEST');
+  });
+
+  it('refund с promoCodeId: тоже откатывает (DELETE + GREATEST used_count − N)', async () => {
+    H.state.getOrderByIdQueue = [
+      orderDetail({ status: 'delivered', paymentStatus: 'paid', promoCodeId: PROMO_ID }),
+      orderDetail({ status: 'refunded', paymentStatus: 'refunded', promoCodeId: PROMO_ID }),
+    ];
+    const res = await refundOrder({ id: UUID });
+    expect(res.ok).toBe(true);
+    const text = txText();
+    expect(text).toContain('DELETE FROM promo_redemptions');
+    expect(text).toContain('used_count = GREATEST');
+  });
+
+  it('cancel без promoCodeId: откат НЕ выполняется (нет DELETE/used_count)', async () => {
+    H.state.getOrderByIdQueue = [
+      orderDetail({ status: 'paid', promoCodeId: null }),
+      orderDetail({ status: 'cancelled', promoCodeId: null }),
+    ];
+    const res = await cancelOrder({ id: UUID });
+    expect(res.ok).toBe(true);
+    const text = txText();
+    expect(text).not.toContain('promo_redemptions');
+    expect(text).not.toContain('used_count');
+  });
+
+  it('cancel: повторный откат идемпотентен — DELETE вернул 0 строк → used_count НЕ трогаем', async () => {
+    H.state.getOrderByIdQueue = [
+      orderDetail({ status: 'paid', promoCodeId: PROMO_ID }),
+      orderDetail({ status: 'cancelled', promoCodeId: PROMO_ID }),
+    ];
+    // tx-результаты по порядку: [1] guarded UPDATE orders → ok (1 строка),
+    // [2] DELETE promo_redemptions → [] (редемпшн уже откачен ранее).
+    // Тогда UPDATE used_count выполняться НЕ должен.
+    H.state.txResultQueue = [[{ id: 'tx-row-id' }], []];
+    const res = await cancelOrder({ id: UUID });
+    expect(res.ok).toBe(true);
+    const text = txText();
+    expect(text).toContain('DELETE FROM promo_redemptions');
+    expect(text).not.toContain('used_count');
+  });
+
+  it('shipped (commit) с promoCodeId: откат НЕ выполняется (только cancel/refund откатывают)', async () => {
+    H.state.getOrderByIdQueue = [
+      orderDetail({ status: 'packed', promoCodeId: PROMO_ID }),
+      orderDetail({ status: 'shipped', promoCodeId: PROMO_ID }),
+    ];
+    const res = await changeOrderStatus({ id: UUID, to: 'shipped' });
+    expect(res.ok).toBe(true);
+    const text = txText();
+    expect(text).not.toContain('promo_redemptions');
+    expect(text).not.toContain('used_count');
   });
 });
 
@@ -391,13 +644,16 @@ describe('createManualOrder', () => {
     expect(entry).toMatchObject({ action: 'order.create.manual', entityType: 'order' });
   });
 
-  it('createOrder вернул out_of_stock → internal (OrderError)', async () => {
+  it('createOrder вернул out_of_stock → validation + message (OrderError доносит текст)', async () => {
     createOrderMock.mockResolvedValueOnce({
       ok: false,
       code: 'out_of_stock',
       message: 'нет остатка',
     } as never);
     const res = await createManualOrder(manualInput);
-    expect(res).toEqual({ ok: false, error: 'internal' });
+    expect(res.ok).toBe(false);
+    if (res.ok) throw new Error('ожидался отказ');
+    expect(res.error).toBe('validation');
+    expect(res.message).toBe('нет остатка');
   });
 });

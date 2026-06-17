@@ -524,4 +524,45 @@ describe.skipIf(!INTEGRATION_DB_URL)('orders/repository (интеграция, �
     expect(Number(inv!.quantity)).toBe(8);
     expect(Number(inv!.reserved)).toBe(0);
   });
+
+  // ---------------------------------------------------------------------------
+  // Guarded-UPDATE статуса (Fix 1, TOCTOU) — контракт слоя данных на ЖИВОЙ БД.
+  //
+  // applyOrderStatusTransition (actions.ts) опирается на guarded UPDATE
+  // `UPDATE orders SET status WHERE id AND status = from RETURNING id`: переход
+  // применяется только если статус не сменился конкурентно. Здесь проверяем САМ
+  // этот SQL-инвариант (а не пайплайн action): из двух параллельных переходов из
+  // одного `from` ровно один меняет строку (RETURNING 1), второй — 0 строк.
+  // ---------------------------------------------------------------------------
+  it('guarded UPDATE статуса: из двух параллельных переходов new→paid проходит ровно один (TOCTOU)', async () => {
+    const productId = await makeProduct({ basePrice: '100.00', quantity: 10 });
+    const r = await repo.createOrder({
+      items: [{ productId, qty: 1 }],
+      customer: customer(),
+      delivery: { type: 'courier' },
+      paymentMethod: 'cod',
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    created.orderIds.push(r.order.id);
+    const orderId = r.order.id;
+
+    // Два конкурентных guarded UPDATE из одного и того же `from='new'`.
+    const guardedUpdate = () =>
+      sql<{ id: string }[]>`
+        UPDATE orders
+           SET status = 'paid', updated_at = now()
+         WHERE id = ${orderId} AND status = 'new'
+        RETURNING id
+      `;
+    const [a, b] = await Promise.all([guardedUpdate(), guardedUpdate()]);
+    const winners = [a, b].filter((rows) => rows.length === 1);
+    // Ровно один перевёл статус; второй увидел уже изменённый статус → 0 строк.
+    expect(winners).toHaveLength(1);
+
+    const [row] = await sql<{ status: string }[]>`
+      SELECT status FROM orders WHERE id = ${orderId}
+    `;
+    expect(row!.status).toBe('paid');
+  });
 });

@@ -105,13 +105,25 @@ function stockEffectFor(to: Order['status']): StockEffect {
 }
 
 /**
- * Применяет переход статуса заказа атомарно (§2.8 A, §6):
- *   1) загружает заказ + позиции (FOR-чтение перед изменением);
+ * Применяет переход статуса заказа атомарно и БЕЗ TOCTOU-гонки (§2.8 A, §6):
+ *   1) загружает заказ + позиции (кандидат `from` и снимок позиций для резерва);
  *   2) валидирует переход canTransition('order', from, to) — иначе OrderError;
- *   3) при cancelled/refunded → releaseReservation по каждой позиции;
- *      при shipped → commitReservation (списание);
- *   4) UPDATE orders.status (+ синхронизация payment_status для refunded);
- *   5) INSERT order_status_history (from→to, actor, comment).
+ *   3) ТРАНЗАКЦИЯ:
+ *      a) GUARDED UPDATE orders ... WHERE id=:id AND status=:from RETURNING id —
+ *         переход проходит ТОЛЬКО если статус всё ещё равен прочитанному `from`.
+ *         Если affected rows ≠ 1 → конкурентный переход уже сменил статус →
+ *         OrderError('conflict') и ROLLBACK (без побочных эффектов/истории).
+ *         Это закрывает гонку: два параллельных перехода из одного `from`
+ *         сериализуются на блокировке строки orders (UPDATE), и второй увидит
+ *         уже изменённый статус → 0 строк → конфликт;
+ *      b) резерв/списание по позициям (release/commit) — ТОЛЬКО при успешном
+ *         guarded UPDATE (в той же транзакции, откат вместе);
+ *      c) откат промокода для cancelled/refunded (Fix 4, см. revertPromoUsage);
+ *      d) INSERT order_status_history (from→to, actor, comment).
+ *
+ * NB: полноценная конкурентность проверяется интеграционным тестом с реальной БД
+ * (repository.test.ts, skipIf без DATABASE_URL); здесь юнит-логика guarded-UPDATE
+ * проверяется по affected rows (мок tx).
  *
  * Возвращает before/after для аудита и обновлённый заказ.
  */
@@ -136,10 +148,35 @@ async function applyOrderStatusTransition(args: {
   }
 
   const effect = stockEffectFor(args.to);
+  const promoCodeId = current.order.promoCodeId;
+  const revertPromo = args.to === 'cancelled' || args.to === 'refunded';
 
   await sql.begin(async (tx: TransactionSql) => {
-    // Резерв/списание по каждой позиции (best-effort: при refund резерв уже мог
-    // быть списан отгрузкой — release вернёт false и не упадёт).
+    // (a) GUARDED UPDATE: переход применяется ТОЛЬКО если статус не сменился
+    // конкурентным запросом (WHERE ... AND status = from). 0 строк → конфликт.
+    const updated = args.syncPaymentRefunded
+      ? await tx<{ id: string }[]>`
+          UPDATE orders
+             SET status = ${args.to}, payment_status = 'refunded', updated_at = now()
+           WHERE id = ${args.id} AND status = ${from}
+          RETURNING id
+        `
+      : await tx<{ id: string }[]>`
+          UPDATE orders
+             SET status = ${args.to}, updated_at = now()
+           WHERE id = ${args.id} AND status = ${from}
+          RETURNING id
+        `;
+    if (updated.length !== 1) {
+      throw new OrderError(
+        'conflict',
+        `Статус заказа изменился параллельно: переход из "${from}" более неактуален.`,
+      );
+    }
+
+    // (b) Резерв/списание по каждой позиции — только после успешного перехода
+    // (best-effort: при refund резерв уже мог быть списан отгрузкой — release
+    // вернёт false и не упадёт; commit обязан списать → иначе ROLLBACK).
     if (effect !== 'none') {
       for (const item of current.items) {
         if (!item.productId) continue; // снимок без ссылки — нечего двигать
@@ -162,20 +199,13 @@ async function applyOrderStatusTransition(args: {
       }
     }
 
-    if (args.syncPaymentRefunded) {
-      await tx`
-        UPDATE orders
-           SET status = ${args.to}, payment_status = 'refunded', updated_at = now()
-         WHERE id = ${args.id}
-      `;
-    } else {
-      await tx`
-        UPDATE orders
-           SET status = ${args.to}, updated_at = now()
-         WHERE id = ${args.id}
-      `;
+    // (c) Откат применения промокода при отмене/возврате (Fix 4) — в той же
+    // транзакции, идемпотентно (только если редемпшн ещё существует).
+    if (revertPromo && promoCodeId) {
+      await revertPromoUsage(tx, args.id, promoCodeId);
     }
 
+    // (d) История статуса.
     await tx`
       INSERT INTO order_status_history
         (order_id, kind, from_status, to_status, actor_user_id, comment)
@@ -189,6 +219,32 @@ async function applyOrderStatusTransition(args: {
     throw new OrderError('not_found', 'Заказ не найден после обновления.');
   }
   return { before: current.order, after };
+}
+
+/**
+ * Откатывает применение промокода при отмене/возврате заказа (Fix 4, §5.2).
+ * ВЫЗЫВАТЬ В ТРАНЗАКЦИИ. Идемпотентно: used_count уменьшается ровно столько раз,
+ * сколько реально удалено строк promo_redemptions данного заказа (DELETE ...
+ * RETURNING). Повторная отмена/возврат уже без редемпшна → удалено 0 строк →
+ * used_count не трогаем. GREATEST(...,0) — страховка от ухода счётчика в минус.
+ */
+async function revertPromoUsage(
+  tx: TransactionSql,
+  orderId: string,
+  promoCodeId: string,
+): Promise<void> {
+  const deleted = await tx<{ id: string }[]>`
+    DELETE FROM promo_redemptions
+     WHERE order_id = ${orderId} AND promo_code_id = ${promoCodeId}
+    RETURNING id
+  `;
+  if (deleted.length > 0) {
+    await tx`
+      UPDATE promo_codes
+         SET used_count = GREATEST(used_count - ${deleted.length}, 0), updated_at = now()
+       WHERE id = ${promoCodeId}
+    `;
+  }
 }
 
 /** Сериализуемый снимок заказа для возврата из action. */
@@ -322,19 +378,29 @@ export const setPaymentStatus = defineAction({
     }
 
     await sql.begin(async (tx: TransactionSql) => {
+      // GUARDED UPDATE (Fix 1, TOCTOU): переход применяется только если
+      // payment_status всё ещё равен прочитанному `from`; иначе конкурентный
+      // переход уже сменил статус → 0 строк → конфликт, ROLLBACK (нет истории).
       // paid проставляет paid_at (§2.8 B); прочие переходы не трогают paid_at.
-      if (data.to === 'paid') {
-        await tx`
-          UPDATE orders
-             SET payment_status = ${data.to}, paid_at = now(), updated_at = now()
-           WHERE id = ${data.id}
-        `;
-      } else {
-        await tx`
-          UPDATE orders
-             SET payment_status = ${data.to}, updated_at = now()
-           WHERE id = ${data.id}
-        `;
+      const updated =
+        data.to === 'paid'
+          ? await tx<{ id: string }[]>`
+              UPDATE orders
+                 SET payment_status = ${data.to}, paid_at = now(), updated_at = now()
+               WHERE id = ${data.id} AND payment_status = ${from}
+              RETURNING id
+            `
+          : await tx<{ id: string }[]>`
+              UPDATE orders
+                 SET payment_status = ${data.to}, updated_at = now()
+               WHERE id = ${data.id} AND payment_status = ${from}
+              RETURNING id
+            `;
+      if (updated.length !== 1) {
+        throw new OrderError(
+          'conflict',
+          `Статус оплаты изменился параллельно: переход из "${from}" более неактуален.`,
+        );
       }
       await tx`
         INSERT INTO order_status_history
@@ -381,11 +447,20 @@ export const setDeliveryStatus = defineAction({
     }
 
     await sql.begin(async (tx: TransactionSql) => {
-      await tx`
+      // GUARDED UPDATE (Fix 1, TOCTOU): применяется только если delivery_status
+      // всё ещё равен прочитанному `from`; иначе конфликт → ROLLBACK (нет истории).
+      const updated = await tx<{ id: string }[]>`
         UPDATE orders
            SET delivery_status = ${data.to}, updated_at = now()
-         WHERE id = ${data.id}
+         WHERE id = ${data.id} AND delivery_status = ${from}
+        RETURNING id
       `;
+      if (updated.length !== 1) {
+        throw new OrderError(
+          'conflict',
+          `Статус доставки изменился параллельно: переход из "${from}" более неактуален.`,
+        );
+      }
       await tx`
         INSERT INTO order_status_history
           (order_id, kind, from_status, to_status, actor_user_id, comment)
