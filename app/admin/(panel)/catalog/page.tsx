@@ -11,6 +11,7 @@ import {
 import { PRODUCT_STATUSES, type ProductStatus } from '@/lib/catalog/types';
 
 import { Forbidden } from '../_components/Forbidden';
+import { PageHeader } from '../_components/PageHeader';
 import { guardCatalog } from './_components/guard';
 import { ProductFilters } from './_components/ProductFilters';
 import { PriceCell } from './_components/PriceCell';
@@ -108,22 +109,21 @@ export default async function CatalogPage({
 
   return (
     <div>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold text-gray-900">Каталог — товары</h1>
-          <p className="mt-1 text-sm text-gray-600">
-            Найдено товаров: {total}. Цены в {currency}.
-          </p>
-        </div>
-        <Link
-          href="/admin/catalog/products/new"
-          className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700"
-        >
-          Создать товар
-        </Link>
-      </div>
+      <PageHeader
+        title="Каталог — товары"
+        subtitle={`Найдено товаров: ${total}. Цены в ${currency}.`}
+        breadcrumbs={[{ label: 'Каталог' }]}
+        action={
+          <Link
+            href="/admin/catalog/products/new"
+            className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700"
+          >
+            + Создать товар
+          </Link>
+        }
+      />
 
-      <nav className="mt-4 flex flex-wrap gap-2 text-sm" aria-label="Разделы каталога">
+      <nav className="flex flex-wrap gap-2 text-sm" aria-label="Разделы каталога">
         <Link href="/admin/catalog/categories" className="text-blue-700 hover:underline">
           Категории
         </Link>
@@ -149,12 +149,13 @@ export default async function CatalogPage({
               <th scope="col" className="px-4 py-2 font-medium">Статус</th>
               <th scope="col" className="px-4 py-2 font-medium">Флаги</th>
               <th scope="col" className="px-4 py-2 font-medium">Остаток</th>
+              <th scope="col" className="px-4 py-2 font-medium text-right">Действия</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-4 py-6 text-center text-gray-400">
+                <td colSpan={9} className="px-4 py-6 text-center text-gray-400">
                   Товары не найдены. Измените фильтры или создайте товар.
                 </td>
               </tr>
@@ -213,6 +214,14 @@ export default async function CatalogPage({
                     </div>
                   </td>
                   <td className="px-4 py-2 text-gray-700">{row.totalStock}</td>
+                  <td className="px-4 py-2 text-right">
+                    <Link
+                      href={`/admin/catalog/products/${row.id}`}
+                      className="inline-block rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100"
+                    >
+                      Редактировать
+                    </Link>
+                  </td>
                 </tr>
               ))
             )}

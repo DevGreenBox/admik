@@ -1,4 +1,3 @@
-import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
 import {
@@ -10,6 +9,7 @@ import {
 import { can } from '@/lib/auth/rbac';
 
 import { Forbidden } from '../../../_components/Forbidden';
+import { PageHeader } from '../../../_components/PageHeader';
 import { guardCatalog } from '../../_components/guard';
 import { ProductForm } from '../../_components/ProductForm';
 
@@ -52,18 +52,16 @@ export default async function ProductDetailPage({
 
   return (
     <div>
-      <nav className="text-sm text-gray-500" aria-label="Хлебные крошки">
-        <Link href="/admin/catalog" className="text-blue-700 hover:underline">
-          Каталог
-        </Link>{' '}
-        / {product.name}
-      </nav>
-      <div className="mt-2 flex flex-wrap items-center gap-3">
-        <h1 className="text-2xl font-semibold text-gray-900">{product.name}</h1>
-        <code className="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-700">
-          {product.sku}
-        </code>
-      </div>
+      <PageHeader
+        title={product.name}
+        subtitle={`Артикул: ${product.sku}`}
+        breadcrumbs={[
+          { label: 'Каталог', href: '/admin/catalog' },
+          { label: product.name },
+        ]}
+        backHref="/admin/catalog"
+        backLabel="К списку товаров"
+      />
 
       {!canWrite ? (
         <p className="mt-2 rounded border border-amber-200 bg-amber-50 p-2 text-sm text-amber-800">

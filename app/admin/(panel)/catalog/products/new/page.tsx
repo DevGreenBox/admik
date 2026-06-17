@@ -1,8 +1,7 @@
-import Link from 'next/link';
-
 import { listBrands, getCategoryTree, listAttributes } from '@/lib/catalog/repository';
 
 import { Forbidden } from '../../../_components/Forbidden';
+import { PageHeader } from '../../../_components/PageHeader';
 import { guardCatalog } from '../../_components/guard';
 import { ProductForm } from '../../_components/ProductForm';
 
@@ -31,17 +30,13 @@ export default async function NewProductPage() {
 
   return (
     <div>
-      <nav className="text-sm text-gray-500" aria-label="Хлебные крошки">
-        <Link href="/admin/catalog" className="text-blue-700 hover:underline">
-          Каталог
-        </Link>{' '}
-        / Новый товар
-      </nav>
-      <h1 className="mt-2 text-2xl font-semibold text-gray-900">Новый товар</h1>
-      <p className="mt-1 text-sm text-gray-600">
-        Заполните основные поля и создайте товар. Варианты, характеристики, медиа
-        и остатки станут доступны после создания.
-      </p>
+      <PageHeader
+        title="Новый товар"
+        subtitle="Заполните основные поля и создайте товар. Варианты, характеристики, медиа и остатки станут доступны после создания."
+        breadcrumbs={[{ label: 'Каталог', href: '/admin/catalog' }, { label: 'Новый товар' }]}
+        backHref="/admin/catalog"
+        backLabel="К списку товаров"
+      />
 
       <div className="mt-6">
         <ProductForm

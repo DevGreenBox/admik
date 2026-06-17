@@ -1,6 +1,5 @@
-import Link from 'next/link';
-
 import { Forbidden } from '../../../_components/Forbidden';
+import { PageHeader } from '../../../_components/PageHeader';
 import { guardCatalog } from '../../_components/guard';
 import { BrandForm } from '../../_components/BrandForm';
 
@@ -23,16 +22,17 @@ export default async function NewBrandPage() {
 
   return (
     <div>
-      <nav className="text-sm text-gray-500" aria-label="Хлебные крошки">
-        <Link href="/admin/catalog/brands" className="text-blue-700 hover:underline">
-          Бренды
-        </Link>{' '}
-        / Новый бренд
-      </nav>
-      <h1 className="mt-2 text-2xl font-semibold text-gray-900">Новый бренд</h1>
-      <p className="mt-1 text-sm text-gray-600">
-        После создания станет доступна загрузка логотипа.
-      </p>
+      <PageHeader
+        title="Новый бренд"
+        subtitle="После создания станет доступна загрузка логотипа."
+        breadcrumbs={[
+          { label: 'Каталог', href: '/admin/catalog' },
+          { label: 'Бренды', href: '/admin/catalog/brands' },
+          { label: 'Новый бренд' },
+        ]}
+        backHref="/admin/catalog/brands"
+        backLabel="К списку брендов"
+      />
 
       <div className="mt-6">
         <BrandForm brand={null} />

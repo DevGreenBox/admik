@@ -1,8 +1,7 @@
-import Link from 'next/link';
-
 import { getCategoryTree } from '@/lib/catalog/repository';
 
 import { Forbidden } from '../../_components/Forbidden';
+import { PageHeader } from '../../_components/PageHeader';
 import { guardCatalog } from '../_components/guard';
 import { CategoryManager } from '../_components/CategoryManager';
 
@@ -28,17 +27,13 @@ export default async function CategoriesPage() {
 
   return (
     <div>
-      <nav className="text-sm text-gray-500" aria-label="Хлебные крошки">
-        <Link href="/admin/catalog" className="text-blue-700 hover:underline">
-          Каталог
-        </Link>{' '}
-        / Категории
-      </nav>
-      <h1 className="mt-2 text-2xl font-semibold text-gray-900">Категории</h1>
-      <p className="mt-1 text-sm text-gray-600">
-        Дерево категорий: создание, переименование, перемещение и удаление.
-        Категорию с подкатегориями удалить нельзя — сначала перенесите/удалите детей.
-      </p>
+      <PageHeader
+        title="Категории"
+        subtitle="Группы, по которым товары раскладываются в каталоге на сайте. Категорию с подкатегориями удалить нельзя — сначала перенесите или удалите вложенные."
+        breadcrumbs={[{ label: 'Каталог', href: '/admin/catalog' }, { label: 'Категории' }]}
+        backHref="/admin/catalog"
+        backLabel="К каталогу"
+      />
 
       <div className="mt-6">
         <CategoryManager tree={tree} />
