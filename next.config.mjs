@@ -2,10 +2,13 @@
 const nextConfig = {
   output: 'standalone',
   reactStrictMode: true,
-  // Не бандлить драйвер БД в серверные чанки — держать внешним пакетом, чтобы он
-  // трассировался в standalone/node_modules. Иначе db/seed/owner.mjs (отдельный
-  // ESM-скрипт init-shop) не находит пакет 'postgres' в рантайм-образе.
-  serverExternalPackages: ['postgres'],
+  // Не бандлить в серверные чанки нативные пакеты — держать внешними, чтобы их
+  // require'ил рантайм из node_modules, а не сломанная копия из бандла:
+  //  • postgres — иначе db/seed/owner.mjs (ESM-скрипт init-shop) не находит пакет;
+  //  • sharp — нативный libvips (@img/sharp-libvips-*) грузится через dlopen и НЕ
+  //    трассируется в standalone Next.js; бандл-копия падает ERR_DLOPEN libvips-cpp.
+  //    Рантайм-образ докладывает корректный sharp под платформу (Dockerfile, стадия `sharp`).
+  serverExternalPackages: ['postgres', 'sharp'],
 };
 
 export default nextConfig;

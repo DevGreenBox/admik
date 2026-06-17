@@ -46,6 +46,23 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN pnpm build
 
 # -----------------------------------------------------------------------------
+# Этап sharp — чистая установка sharp под ЦЕЛЕВУЮ платформу (musl/x64)
+# -----------------------------------------------------------------------------
+# Зачем отдельная стадия: standalone-трассировка Next.js (nft) НЕ тянет нативный
+# libvips (@img/sharp-libvips-linuxmusl-x64), который sharp грузит через dlopen —
+# в итоге обработка изображений в рантайме падает (ERR_DLOPEN libvips-cpp.so.*),
+# и весь модуль lib/storage/image (а с ним экшены каталога) не загружается.
+# Чистый `npm install` под платформу кладёт совместимые @img/* с нужной ABI libvips.
+# Версию берём из package.json приложения (синхронно, без хардкода).
+FROM node:20-alpine AS sharp
+WORKDIR /sharp
+COPY package.json /tmp/app-package.json
+RUN SHARP_VER=$(node -p "require('/tmp/app-package.json').dependencies.sharp") \
+ && npm init -y >/dev/null 2>&1 \
+ && npm install --no-audit --no-fund --include=optional \
+      --os=linux --libc=musl --cpu=x64 "sharp@${SHARP_VER}"
+
+# -----------------------------------------------------------------------------
 # Этап runner — финальный минимальный образ
 # -----------------------------------------------------------------------------
 FROM node:20-alpine AS runner
@@ -83,6 +100,12 @@ COPY --from=build --chown=nextjs:nodejs /app/.next/static ./.next/static
 # 'postgres' в node_modules надёжно (даже как serverExternalPackages) — копируем
 # реальные файлы пакета из pnpm-стора (postgres.js zero-deps). Версия — из лок-файла.
 COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/postgres@*/node_modules/postgres ./node_modules/postgres
+# sharp + нативный libvips (@img/*): кладём корректную установку под платформу из
+# стадии `sharp` ПОВЕРХ сломанной копии из standalone (см. стадию `sharp` выше и
+# serverExternalPackages:['sharp'] в next.config). Иначе обработка изображений и
+# экспорт lib/storage/image падают на ERR_DLOPEN libvips-cpp.so.*.
+COPY --from=sharp --chown=nextjs:nodejs /sharp/node_modules/sharp ./node_modules/sharp
+COPY --from=sharp --chown=nextjs:nodejs /sharp/node_modules/@img ./node_modules/@img
 # Скрипты развёртывания и SQL-миграции/seed — НЕ входят в standalone-трассировку
 # Next.js, поэтому копируются явно (нужны init-shop.sh внутри контейнера app).
 COPY --from=build --chown=nextjs:nodejs /app/scripts ./scripts
