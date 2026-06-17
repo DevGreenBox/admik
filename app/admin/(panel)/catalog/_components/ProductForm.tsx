@@ -144,7 +144,9 @@ export function ProductForm({
       return Number.isFinite(n) ? Math.trunc(n) : null;
     };
     const payload = {
-      sku: sku.trim(),
+      // Пустой артикул/адрес → undefined (а не ''), иначе .optional()-схема
+      // отклонит пустую строку («Too small»); сервер сгенерирует их сам.
+      sku: sku.trim() || undefined,
       slug: slug.trim() || undefined,
       name: name.trim(),
       description,
