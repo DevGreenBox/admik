@@ -37,50 +37,97 @@ export default async function SettingsPage() {
     parseSettingValue('module_overrides', rawOverrides?.value) ?? {};
   const envEnabled = getEnabledModules();
 
+  // Разделы настроек. Якоря в боковой колонке → СЕО больше не «спрятан» внизу
+  // (Prevki.md): он виден в навигации сразу, наравне с остальными разделами.
+  const sections = [
+    { id: 'branding', title: 'Брендинг' },
+    { id: 'currency', title: 'Валюта и единицы измерения' },
+    { id: 'contacts', title: 'Реквизиты и контакты' },
+    { id: 'catalog', title: 'Каталог, доставка, заказы' },
+    { id: 'modules', title: 'Модули' },
+    { id: 'seo', title: 'SEO и поиск' },
+  ];
+
   return (
-    <div className="max-w-4xl">
+    <div className="max-w-6xl">
       <PageHeader
         title="Настройки магазина"
         subtitle="Название, валюта, контакты, доставка и другие параметры магазина."
         breadcrumbs={[{ label: 'Настройки' }]}
       />
 
-      <Section title="Брендинг">
-        <BrandingForm branding={eff.branding} />
-      </Section>
+      <div className="mt-6 grid grid-cols-1 gap-8 lg:grid-cols-[220px_1fr]">
+        {/* Боковая колонка-оглавление (sticky на десктопе). */}
+        <nav aria-label="Разделы настроек" className="lg:sticky lg:top-6 lg:self-start">
+          <ul className="flex flex-wrap gap-2 lg:flex-col lg:gap-1">
+            {sections.map((s) => (
+              <li key={s.id}>
+                <a
+                  href={`#${s.id}`}
+                  className="block rounded-md px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                >
+                  {s.title}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </nav>
 
-      <Section title="Валюта и единицы измерения">
-        <CurrencyUnitsForm currency={eff.currency} units={eff.units} />
-      </Section>
+        {/* Контент разделов. */}
+        <div className="min-w-0">
+          <Section id="branding" title="Брендинг">
+            <BrandingForm branding={eff.branding} />
+          </Section>
 
-      <Section title="Реквизиты и контакты">
-        <LegalContactsForm legalEntity={eff.legalEntity} contacts={eff.contacts} />
-      </Section>
+          <Section id="currency" title="Валюта и единицы измерения">
+            <CurrencyUnitsForm currency={eff.currency} units={eff.units} />
+          </Section>
 
-      <Section title="Каталог, доставка, заказы">
-        <CatalogOrdersForm catalog={eff.catalog} delivery={eff.delivery} orders={eff.orders} />
-      </Section>
+          <Section id="contacts" title="Реквизиты и контакты">
+            <LegalContactsForm legalEntity={eff.legalEntity} contacts={eff.contacts} />
+          </Section>
 
-      <Section title="Модули">
-        <ModulesForm overrides={overrides} envEnabled={envEnabled} />
-      </Section>
+          <Section id="catalog" title="Каталог, доставка, заказы">
+            <CatalogOrdersForm catalog={eff.catalog} delivery={eff.delivery} orders={eff.orders} />
+          </Section>
 
-      <Section title="SEO">
-        <p className="text-sm text-gray-600">
-          Домен, шаблон заголовка, sitemap/robots и дефолты SEO — в отдельном
-          разделе.{' '}
-          <a href="/admin/settings/seo" className="font-medium text-gray-900 underline">
-            Открыть SEO-настройки →
-          </a>
-        </p>
-      </Section>
+          <Section id="modules" title="Модули">
+            <ModulesForm overrides={overrides} envEnabled={envEnabled} />
+          </Section>
+
+          <Section id="seo" title="SEO и поиск">
+            <p className="text-sm text-gray-600">
+              Заголовки страниц, описания для поисковиков, адрес сайта, карта сайта
+              (sitemap) и robots — в отдельном разделе.
+            </p>
+            <a
+              href="/admin/settings/seo"
+              className="mt-3 inline-flex items-center rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700"
+            >
+              Открыть SEO-настройки →
+            </a>
+          </Section>
+        </div>
+      </div>
     </div>
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({
+  id,
+  title,
+  children,
+}: {
+  id: string;
+  title: string;
+  children: React.ReactNode;
+}) {
   return (
-    <section className="mt-8 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+    <section
+      id={id}
+      // scroll-mt — чтобы якорь не уезжал под шапку при переходе из оглавления.
+      className="mt-8 scroll-mt-6 rounded-lg border border-gray-200 bg-white p-6 shadow-sm first:mt-0"
+    >
       <h2 className="mb-4 text-lg font-semibold text-gray-900">{title}</h2>
       {children}
     </section>
