@@ -607,20 +607,26 @@ export const createVariant = defineAction({
   input: VariantCreateSchema,
   handler: async (data, _ctx) => {
     assertCatalogEnabled();
-    const rows = await sql<{ id: string }[]>`
-      INSERT INTO product_variants
-        (product_id, sku, name, price_override, price_delta, compare_at_price, is_active, sort,
-         weight_g, length_cm, width_cm, height_cm)
-      VALUES (
-        ${data.productId}, ${data.sku}, ${data.name ?? ''},
-        ${data.priceOverride ?? null}, ${data.priceDelta ?? '0'},
-        ${data.compareAtPrice ?? null}, ${data.isActive ?? true}, ${data.sort ?? 0},
-        ${data.weightG ?? null}, ${data.lengthCm ?? null},
-        ${data.widthCm ?? null}, ${data.heightCm ?? null}
-      )
-      RETURNING id
-    `;
-    const variantId = rows[0]!.id;
+    // Артикул варианта: если не задан — генерируем уникальный из названия/размера
+    // (insertWithUniqueSlug ретраит любой unique-конфликт, включая sku).
+    const skuBase = data.sku || slugify(data.name ?? '') || 'variant';
+    const row = await insertWithUniqueSlug(skuBase, async (sku) => {
+      const rows = await sql<{ id: string }[]>`
+        INSERT INTO product_variants
+          (product_id, sku, name, price_override, price_delta, compare_at_price, is_active, sort,
+           weight_g, length_cm, width_cm, height_cm)
+        VALUES (
+          ${data.productId}, ${sku}, ${data.name ?? ''},
+          ${data.priceOverride ?? null}, ${data.priceDelta ?? '0'},
+          ${data.compareAtPrice ?? null}, ${data.isActive ?? true}, ${data.sort ?? 0},
+          ${data.weightG ?? null}, ${data.lengthCm ?? null},
+          ${data.widthCm ?? null}, ${data.heightCm ?? null}
+        )
+        RETURNING id
+      `;
+      return rows[0]!;
+    });
+    const variantId = row.id;
     // Инициализируем остаток варианта нулём (§4.4).
     await sql`
       INSERT INTO inventory (product_id, variant_id, warehouse_code, quantity)

@@ -47,7 +47,8 @@ export function VariantsSection({ product }: { product: ProductDetail }) {
     setError(null);
     const result = await createVariantAction({
       productId: product.id,
-      sku: newSku.trim(),
+      // Пустой артикул → undefined: сервер сгенерирует уникальный из названия.
+      sku: newSku.trim() || undefined,
       name: newName.trim(),
       priceOverride: newOverride.trim() ? newOverride.trim() : null,
       priceDelta: newDelta.trim() || '0',
@@ -98,10 +99,10 @@ export function VariantsSection({ product }: { product: ProductDetail }) {
         <table className="min-w-full divide-y divide-gray-200 text-sm">
           <thead className="bg-gray-50 text-left text-gray-500">
             <tr>
+              <th scope="col" className="px-3 py-2 font-medium">Размер / название</th>
               <th scope="col" className="px-3 py-2 font-medium">Артикул</th>
-              <th scope="col" className="px-3 py-2 font-medium">Название</th>
-              <th scope="col" className="px-3 py-2 font-medium">Цена (override)</th>
-              <th scope="col" className="px-3 py-2 font-medium">Надбавка</th>
+              <th scope="col" className="px-3 py-2 font-medium">Своя цена</th>
+              <th scope="col" className="px-3 py-2 font-medium">Доплата</th>
               <th scope="col" className="px-3 py-2 font-medium">Вес/габариты</th>
               <th scope="col" className="px-3 py-2 font-medium">Активен</th>
               <th scope="col" className="px-3 py-2 font-medium">Действия</th>
@@ -117,8 +118,8 @@ export function VariantsSection({ product }: { product: ProductDetail }) {
             ) : (
               product.variants.map((v) => (
                 <tr key={v.id}>
-                  <td className="px-3 py-2"><code className="text-xs">{v.sku}</code></td>
                   <td className="px-3 py-2 text-gray-700">{v.name || '—'}</td>
+                  <td className="px-3 py-2"><code className="text-xs">{v.sku}</code></td>
                   <td className="px-3 py-2 text-gray-700">{v.priceOverride ?? '—'}</td>
                   <td className="px-3 py-2 text-gray-700">{v.priceDelta}</td>
                   <td className="px-3 py-2 text-xs text-gray-500">
@@ -154,26 +155,32 @@ export function VariantsSection({ product }: { product: ProductDetail }) {
 
       <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
         <h3 className="text-sm font-semibold text-gray-800">Добавить вариант</h3>
+        <p className="mt-1 text-xs text-gray-500">
+          Вариант — это размер/цвет товара (напр. «48» или «M»). Укажите название и,
+          при необходимости, свою цену. Остаток варианта задаётся в таблице ниже.
+        </p>
         <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-4">
           <div>
-            <label htmlFor="v-sku" className="block text-xs font-medium text-gray-600">Артикул*</label>
-            <input id="v-sku" value={newSku} onChange={(e) => setNewSku(e.target.value)}
-              className="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-sm" />
-          </div>
-          <div>
-            <label htmlFor="v-name" className="block text-xs font-medium text-gray-600">Название</label>
+            <label htmlFor="v-name" className="block text-xs font-medium text-gray-600">Размер / название*</label>
             <input id="v-name" value={newName} onChange={(e) => setNewName(e.target.value)}
-              placeholder="напр. Красный / M"
+              placeholder="напр. 48, M, Красный"
               className="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-sm" />
           </div>
           <div>
-            <label htmlFor="v-override" className="block text-xs font-medium text-gray-600">Цена (override)</label>
+            <label htmlFor="v-override" className="block text-xs font-medium text-gray-600">Своя цена</label>
             <input id="v-override" inputMode="decimal" value={newOverride} onChange={(e) => setNewOverride(e.target.value)}
+              placeholder="пусто — как у товара"
               className="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-sm" />
           </div>
           <div>
-            <label htmlFor="v-delta" className="block text-xs font-medium text-gray-600">Надбавка</label>
+            <label htmlFor="v-delta" className="block text-xs font-medium text-gray-600">Доплата к цене</label>
             <input id="v-delta" inputMode="decimal" value={newDelta} onChange={(e) => setNewDelta(e.target.value)}
+              className="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-sm" />
+          </div>
+          <div>
+            <label htmlFor="v-sku" className="block text-xs font-medium text-gray-600">Артикул</label>
+            <input id="v-sku" value={newSku} onChange={(e) => setNewSku(e.target.value)}
+              placeholder="можно не заполнять"
               className="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-sm" />
           </div>
         </div>
@@ -205,7 +212,7 @@ export function VariantsSection({ product }: { product: ProductDetail }) {
         <button
           type="button"
           onClick={addVariant}
-          disabled={pending || !newSku.trim()}
+          disabled={pending || !newName.trim()}
           className="mt-3 rounded bg-gray-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-gray-700 disabled:opacity-50"
         >
           {pending ? 'Добавление…' : 'Добавить вариант'}

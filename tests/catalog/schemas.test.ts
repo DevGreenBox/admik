@@ -271,6 +271,13 @@ describe('VariantCreateSchema', () => {
       VariantCreateSchema.safeParse({ productId: UUID, sku: 'V-1' }).success,
     ).toBe(true);
   });
+  it('артикул варианта необязателен — достаточно товара и названия (упрощение)', () => {
+    // Раньше sku варианта был обязателен; теперь генерируется автоматически,
+    // владельцу достаточно ввести размер/название варианта.
+    expect(
+      VariantCreateSchema.safeParse({ productId: UUID, name: '48' }).success,
+    ).toBe(true);
+  });
 });
 
 describe('AttributeCreateSchema', () => {

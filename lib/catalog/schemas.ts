@@ -221,7 +221,9 @@ export type DuplicateProductInput = z.infer<typeof DuplicateProductSchema>;
 
 export const VariantCreateSchema = z.object({
   productId: uuidSchema,
-  sku: skuSchema,
+  // Артикул варианта необязателен: если пуст — createVariant генерирует
+  // уникальный из названия/размера (владельцу достаточно ввести размер).
+  sku: skuSchema.optional(),
   name: z.string().trim().max(255).optional().default(''),
   priceOverride: moneySchema.nullish(),
   priceDelta: moneySchema.optional().default('0'),
