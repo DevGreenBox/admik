@@ -100,12 +100,18 @@ COPY --from=build --chown=nextjs:nodejs /app/.next/static ./.next/static
 # 'postgres' в node_modules надёжно (даже как serverExternalPackages) — копируем
 # реальные файлы пакета из pnpm-стора (postgres.js zero-deps). Версия — из лок-файла.
 COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/postgres@*/node_modules/postgres ./node_modules/postgres
-# sharp + нативный libvips (@img/*): кладём корректную установку под платформу из
-# стадии `sharp` ПОВЕРХ сломанной копии из standalone (см. стадию `sharp` выше и
-# serverExternalPackages:['sharp'] в next.config). Иначе обработка изображений и
-# экспорт lib/storage/image падают на ERR_DLOPEN libvips-cpp.so.*.
-COPY --from=sharp --chown=nextjs:nodejs /sharp/node_modules/sharp ./node_modules/sharp
-COPY --from=sharp --chown=nextjs:nodejs /sharp/node_modules/@img ./node_modules/@img
+# sharp + нативный libvips: standalone-трассировка Next.js приносит pnpm-копию sharp
+# с НЕсовместимым libvips (8.17.3 от 0.34.5 вместо 8.18.3 от 0.35.1) и без @img на
+# верхнем уровне → ERR_DLOPEN при обработке изображений, из-за чего весь модуль
+# lib/storage/image (и экшены каталога) не загружается.
+# Решение: (1) удаляем сломанную pnpm-копию sharp из standalone, чтобы она не
+# затеняла нашу; (2) кладём САМОДОСТАТОЧНУЮ плоскую установку под платформу (стадия
+# `sharp`: sharp + @img + color/detect-libc/semver — все реальные файлы) в отдельный
+# каталог; (3) подключаем его через NODE_PATH. serverExternalPackages:['sharp']
+# (next.config) гарантирует, что рантайм делает голый require('sharp') → NODE_PATH.
+RUN rm -rf ./node_modules/sharp ./node_modules/.pnpm/sharp@* ./node_modules/.pnpm/@img+*
+COPY --from=sharp --chown=nextjs:nodejs /sharp/node_modules ./sharp-runtime/node_modules
+ENV NODE_PATH=/app/sharp-runtime/node_modules
 # Скрипты развёртывания и SQL-миграции/seed — НЕ входят в standalone-трассировку
 # Next.js, поэтому копируются явно (нужны init-shop.sh внутри контейнера app).
 COPY --from=build --chown=nextjs:nodejs /app/scripts ./scripts
