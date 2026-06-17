@@ -80,6 +80,25 @@ export interface RequestMeta {
 }
 
 /**
+ * Доменная ошибка с ПУБЛИЧНЫМ сообщением для пользователя.
+ *
+ * Обычные исключения handler'а маппятся в `error:'internal'` без текста (детали
+ * не утекают наружу). Но некоторые бизнес-отказы должны показываться владельцу
+ * понятной фразой («Пользователь с таким email уже существует», «Владельца
+ * нельзя отключать»). Handler бросает этот класс — пайплайн маппит его в
+ * `{ ok:false, error:'validation', message }`, и форма показывает `message`
+ * (через action-result.errorMessage). Сообщение должно быть безопасным для UI
+ * (без секретов/внутренних деталей).
+ */
+export class PublicActionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PublicActionError';
+    Object.setPrototypeOf(this, PublicActionError.prototype);
+  }
+}
+
+/**
  * Внешние зависимости пайплайна. Дефолты ссылаются на реальные серверные
  * модули; в юнит-тестах подменяются на моки (см. tests/server/action.test.ts).
  */
@@ -236,6 +255,12 @@ export function defineAction<I, O>(
       // (7) успех.
       return { ok: true, data: output.result };
     } catch (error) {
+      // Доменный отказ с публичным сообщением → отдаём текст пользователю.
+      // Это НЕ «внутренняя» ошибка: бизнес-правило сознательно отклонило ввод
+      // (дубликат email, защита владельца и т.п.), сообщение безопасно для UI.
+      if (error instanceof PublicActionError) {
+        return { ok: false, error: 'validation', message: error.message };
+      }
       // Любая неожиданная ошибка → 'internal'; детали только в лог сервера.
       // Структурный JSON-лог (наблюдаемость, §6.3): permission/action — контекст,
       // текст ошибки — без секретов (санитизатор логгера вырежет чувствительное).
