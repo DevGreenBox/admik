@@ -159,6 +159,7 @@ export const moduleOverridesSchema = z
     orders: z.boolean().optional(),
     cdek: z.boolean().optional(),
     cms: z.boolean().optional(),
+    payments: z.boolean().optional(),
   })
   .strip();
 

@@ -140,6 +140,43 @@ const envSchema = z.object({
     .enum(['true', 'false', '1', '0'])
     .default('true')
     .transform((v) => v === 'true' || v === '1'),
+
+  // ---------------------------------------------------------------------------
+  // Т-БАНК ИНТЕРНЕТ-ЭКВАЙРИНГ (Этап 7, docs/15 §3). ВСЕ переменные опциональны:
+  // при пустых TBANK_TERMINAL_KEY/TBANK_PASSWORD модуль работает в MOCK-режиме
+  // (см. lib/payments/tbank/config.ts isTbankMock) — demo/CI без боевого терминала.
+  // ---------------------------------------------------------------------------
+  // Базовый URL T-API. Боевой: https://securepay.tinkoff.ru/v2,
+  // тестовый (sandbox): https://rest-api-test.tinkoff.ru/v2.
+  TBANK_BASE_URL: z.string().url().default('https://securepay.tinkoff.ru/v2'),
+  // Идентификатор терминала / пароль терминала (подпись Token). ПУСТО → mock.
+  TBANK_TERMINAL_KEY: z.string().optional(),
+  TBANK_PASSWORD: z.string().optional(),
+  // Стадийность: O — одностадийная (списание сразу), T — двухстадийная (hold→Confirm).
+  TBANK_PAY_TYPE: z.enum(['O', 'T']).default('O'),
+  // Формировать ли чек 54-ФЗ (только если к терминалу подключена онлайн-касса).
+  TBANK_RECEIPT_ENABLED: z
+    .enum(['true', 'false', '1', '0'])
+    .default('false')
+    .transform((v) => v === 'true' || v === '1'),
+  // СНО магазина для чека (osn|usn_income|usn_income_outcome|esn|patent).
+  TBANK_TAXATION: z.string().optional(),
+  // Ставка НДС позиции по умолчанию (none|vat0|vat10|vat20|…).
+  TBANK_DEFAULT_TAX: z.string().default('none'),
+  // Абсолютный URL нашего webhook (Init.NotificationURL); иначе берётся из ЛК.
+  TBANK_NOTIFICATION_URL: optionalUrl,
+  // Редиректы витрины при успехе/отказе оплаты.
+  TBANK_SUCCESS_URL: optionalUrl,
+  TBANK_FAIL_URL: optionalUrl,
+  // Доп. IP/CIDR whitelist webhook (csv); главная защита — Token. Пусто допустимо.
+  TBANK_WEBHOOK_IPS: z.string().optional(),
+  // Доверять прокси-заголовку IP (за Caddy).
+  TBANK_WEBHOOK_TRUST_PROXY: z
+    .enum(['true', 'false', '1', '0'])
+    .default('false')
+    .transform((v) => v === 'true' || v === '1'),
+  // Срок жизни ссылки/QR оплаты (минуты) → Init.RedirectDueDate.
+  TBANK_REDIRECT_DUE_MIN: z.coerce.number().int().min(1).default(60),
 });
 
 export type Env = z.infer<typeof envSchema>;

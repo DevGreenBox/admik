@@ -144,14 +144,12 @@ describe('config/settings — getEffectiveModules', () => {
     expect(getEffectiveModules(env).sort()).toEqual(getEnabledModules(env).sort());
   });
 
-  it('override {catalog:false,orders:false,cdek:false,cms:false} при env=all → пусто', () => {
+  it('override всех модулей в false при env=all → пусто', () => {
     const env = { ADMIK_MODULES: undefined };
-    const mods = getEffectiveModules(env, {
-      catalog: false,
-      orders: false,
-      cdek: false,
-      cms: false,
-    });
+    // Выключаем КАЖДЫЙ модуль платформы (производно от ALL_MODULES — тест не
+    // ломается при добавлении нового модуля, напр. payments).
+    const allFalse = Object.fromEntries(ALL_MODULES.map((m) => [m, false]));
+    const mods = getEffectiveModules(env, allFalse);
     expect(mods).toEqual([]);
   });
 

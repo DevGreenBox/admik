@@ -8,7 +8,7 @@
  * Пример: ADMIK_MODULES=catalog,orders,cdek
  */
 
-export type ModuleName = 'catalog' | 'orders' | 'cdek' | 'cms';
+export type ModuleName = 'catalog' | 'orders' | 'cdek' | 'cms' | 'payments';
 
 /** Все известные платформе модули. */
 export const ALL_MODULES: readonly ModuleName[] = [
@@ -16,6 +16,7 @@ export const ALL_MODULES: readonly ModuleName[] = [
   'orders',
   'cdek',
   'cms',
+  'payments',
 ] as const;
 
 function isModuleName(value: string): value is ModuleName {
