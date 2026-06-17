@@ -754,6 +754,36 @@ describe('partial-update промокода: дефолты не затираю�
     expect(a[14]).toBe(false); // isActive=false передан явно (позиция COALESCE is_active)
     expect(a[30]).toBe('летняя акция'); // comment передан явно (позиция COALESCE comment)
   });
+
+  it('#1-регресс: targets:[] у scoped-промокода (scope не передан) → отказ, таргеты НЕ трогаем', async () => {
+    // Текущий scope в БД = 'category', запрос {id, targets:[]} без applyScope.
+    // Очистка целей оставила бы scope='category' с 0 целей (мёртвый промокод) →
+    // должен быть отказ validation, без UPDATE/DELETE.
+    sqlMock.mockImplementationOnce(() =>
+      Promise.resolve([{ id: UUID, code: 'OLD', apply_scope: 'category' }]),
+    );
+
+    const res = await updatePromoCode({ id: UUID, targets: [] });
+
+    expect(res.ok).toBe(false);
+    if (res.ok) throw new Error('ожидался отказ');
+    expect(res.error).toBe('validation');
+    expect(res.message).toContain('цель');
+    expect(findUpdateArgs(), 'UPDATE не должен выполниться').toBeUndefined();
+    expect(deletedTargets()).toBe(false);
+  });
+
+  it('#1-регресс: targets:[] + явный applyScope=cart → разрешено (перевод в cart + очистка)', async () => {
+    sqlMock.mockImplementationOnce(() =>
+      Promise.resolve([{ id: UUID, code: 'OLD', apply_scope: 'category' }]),
+    );
+
+    const res = await updatePromoCode({ id: UUID, applyScope: 'cart', targets: [] });
+
+    expect(res.ok).toBe(true);
+    expect(deletedTargets()).toBe(true); // scope=cart → цели чистим, это валидно
+    expect(insertedTargets()).toBe(false);
+  });
 });
 
 // =============================================================================

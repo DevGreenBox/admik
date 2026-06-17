@@ -44,7 +44,9 @@ export async function GET(req: Request): Promise<Response> {
 
     // brandId — точный id-фильтр: если задан, обязан быть валидным uuid, иначе
     // 400 (не доводим мусор до ::uuid-каста в БД → 500). Отсутствие — ok.
-    const brandIdRaw = q.get('brandId');
+    // ПУСТАЯ строка (`brandId=`) трактуется как отсутствие (фронт часто шлёт
+    // `brandId=${sel||''}`): trim()||null → null, иначе 400 был бы ложным.
+    const brandIdRaw = q.get('brandId')?.trim() || null;
     if (brandIdRaw !== null && !uuidParam.safeParse(brandIdRaw).success) {
       return jsonError('bad_request', 'Параметр brandId должен быть корректным UUID.', cors);
     }
@@ -52,8 +54,11 @@ export async function GET(req: Request): Promise<Response> {
     // Категория может прийти как categoryId (uuid) или как category (slug).
     // Slug удобнее витрине (она знает дерево /categories по slug). Явный
     // categoryId имеет приоритет; иначе резолвим slug → id (нет такой → пусто).
-    let categoryId = q.get('categoryId') ?? undefined;
-    // categoryId — тоже точный id-фильтр: задан и не uuid → 400 (как brandId).
+    // ПУСТАЯ строка (`categoryId=`) → undefined, чтобы не отвергнуть запрос с
+    // валидным slug-параметром `category=` (типичный `categoryId=${sel||''}`):
+    // тогда сработает резолв slug ниже, а не 400.
+    let categoryId = q.get('categoryId')?.trim() || undefined;
+    // categoryId — тоже точный id-фильтр: задан (непустой) и не uuid → 400 (как brandId).
     if (categoryId !== undefined && !uuidParam.safeParse(categoryId).success) {
       return jsonError('bad_request', 'Параметр categoryId должен быть корректным UUID.', cors);
     }

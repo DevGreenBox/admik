@@ -663,6 +663,23 @@ export const updatePromoCode = defineAction({
     const manageTargets = data.applyScope !== undefined || data.targets !== undefined;
     const targetsToWrite = data.targets ?? [];
 
+    // Инвариант refinePromo: scope category/brand/set требует ≥1 цели. При
+    // частичном апдейте scope может быть опущен — берём ЭФФЕКТИВНЫЙ (из запроса
+    // или текущий из БД). Если очищаем/оставляем targets пустыми у scoped-
+    // промокода — отказ: иначе apply_scope рассинхронизировался бы с promo_targets
+    // (scoped-промокод без целей — «мёртвый», даёт 0 скидки). refinePromo это не
+    // ловит, т.к. при опущенном applyScope не знает текущий scope строки.
+    if (manageTargets && targetsToWrite.length === 0) {
+      const effectiveScope = (data.applyScope ?? before[0].apply_scope) as string;
+      if (effectiveScope === 'category' || effectiveScope === 'brand' || effectiveScope === 'set') {
+        throw new OrderError(
+          'scope_requires_targets',
+          `Для акции с областью «${effectiveScope}» нужна хотя бы одна цель. ` +
+            'Укажите цели (targets) или смените область на «вся корзина» (cart).',
+        );
+      }
+    }
+
     let after: Record<string, unknown>[];
     try {
       after = await sql.begin(async (tx: TransactionSql) => {

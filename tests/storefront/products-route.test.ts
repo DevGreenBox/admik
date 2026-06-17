@@ -106,4 +106,18 @@ describe('storefront/products — uuid-валидация фильтров (BUG 
     expect(r.status).toBe(200);
     expect(listProducts).toHaveBeenCalledTimes(1);
   });
+
+  it('#2-регресс: пустой categoryId= + валидный category=slug → 200 (резолв slug, не 400)', async () => {
+    // Фронт часто шлёт categoryId=${sel||''} рядом со slug. Пустая строка не
+    // должна давать ложный 400 — должен сработать резолв slug.
+    const r = await get('?categoryId=&category=phones');
+    expect(r.status).toBe(200);
+    expect(listProducts).toHaveBeenCalledTimes(1);
+  });
+
+  it('#2-регресс: пустой brandId= → 200 (трактуется как отсутствие, не 400)', async () => {
+    const r = await get('?brandId=');
+    expect(r.status).toBe(200);
+    expect(listProducts).toHaveBeenCalledTimes(1);
+  });
 });

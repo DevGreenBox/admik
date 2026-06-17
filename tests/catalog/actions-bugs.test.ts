@@ -55,6 +55,8 @@ const H = vi.hoisted(() => {
     sqlCalls: [] as SqlCall[],
     /** Управляемые ответы; ищется первый по подстроке match. */
     sqlResponses: [] as QueuedResult[],
+    /** Сколько раз вызван sql.begin (атомарность attachMedia #3). */
+    beginCalls: 0,
   };
 
   const PG_UNIQUE = '23505';
@@ -89,6 +91,12 @@ const H = vi.hoisted(() => {
     return Promise.resolve([] as unknown[]);
   });
   (sqlMock as unknown as { json: unknown }).json = (v: unknown) => v;
+  // sql.begin: tx — тот же спай (записи попадают в sqlCalls). Если коллбэк
+  // бросает (напр. INSERT упал) — begin реджектит, имитируя ROLLBACK.
+  (sqlMock as unknown as { begin: unknown }).begin = async (cb: (tx: unknown) => unknown) => {
+    state.beginCalls += 1;
+    return cb(sqlMock);
+  };
 
   return {
     state,
@@ -176,6 +184,7 @@ beforeEach(() => {
   H.state.currentUser = makeOwner();
   H.state.sqlCalls = [];
   H.state.sqlResponses = [];
+  H.state.beginCalls = 0;
   sqlMock.mockClear();
   H.writeAuditSpy.mockClear();
   H.rebuildCacheMock.mockClear();
@@ -401,6 +410,21 @@ describe('БАГ #13 — attachMedia снимает прежнее главно�
     const res = await attachMedia({ ...baseInput(), isPrimary: false });
     expect(res.ok).toBe(true);
     expect(findCall('UPDATE product_media SET is_primary')).toBeUndefined();
+  });
+
+  it('#3: демоут+INSERT в ОДНОЙ транзакции — при сбое INSERT откат демоута, файл удалён', async () => {
+    // INSERT падает → sql.begin реджектит → снятие is_primary не коммитится
+    // (товар не остаётся без главного фото). Загруженный объект компенсируется.
+    H.state.sqlResponses.push({
+      match: 'INSERT INTO product_media',
+      throwError: new Error('insert failed'),
+    });
+    const res = await attachMedia(baseInput());
+    expect(res.ok).toBe(false); // defineAction свернёт в internal
+    // Демоут и INSERT шли внутри sql.begin (атомарно).
+    expect(H.state.beginCalls).toBeGreaterThanOrEqual(1);
+    // Компенсация: загруженный в storage объект удалён.
+    expect(H.storageDeleteMock).toHaveBeenCalledTimes(1);
   });
 });
 

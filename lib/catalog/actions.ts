@@ -1,5 +1,7 @@
 'use server';
 
+import type { TransactionSql } from 'postgres';
+
 import { defineAction, type ActionCtx } from '@/lib/server/action';
 import { sql } from '@/lib/db/client';
 import { isModuleEnabled } from '@/lib/config/modules';
@@ -971,27 +973,30 @@ export const attachMedia = defineAction({
     // (5) Запись метаданных. Компенсация при сбое INSERT — удалить объект (§3.4 шаг 7).
     let inserted;
     try {
-      // Частичный индекс product_media_primary_uniq (0009) допускает ОДНО главное
-      // фото на товар. Если грузим новое как главное — сначала снимаем прежнее
-      // (как reorderMedia), иначе INSERT нарушил бы UNIQUE сырой ошибкой 23505.
-      if (data.isPrimary === true) {
-        await sql`
-          UPDATE product_media SET is_primary = false
-          WHERE product_id = ${data.productId} AND is_primary
+      // Демоут прежнего главного + вставка — в ОДНОЙ транзакции: если INSERT
+      // упадёт, снятие is_primary откатится (иначе товар остался бы без главного
+      // фото). Частичный индекс product_media_primary_uniq (0009) допускает ОДНО
+      // главное фото; новое-как-главное требует сначала снять прежнее (как reorderMedia).
+      inserted = await sql.begin(async (tx: TransactionSql) => {
+        if (data.isPrimary === true) {
+          await tx`
+            UPDATE product_media SET is_primary = false
+            WHERE product_id = ${data.productId} AND is_primary
+          `;
+        }
+        const rows = await tx<{ id: string }[]>`
+          INSERT INTO product_media
+            (product_id, variant_id, storage_key, url, type, mime, alt,
+             width, height, size_bytes, is_primary)
+          VALUES (
+            ${data.productId}, ${data.variantId ?? null}, ${put.key}, ${put.url},
+            ${data.type ?? 'image'}, ${'image/webp'}, ${data.alt ?? ''},
+            ${main.width}, ${main.height}, ${put.size}, ${data.isPrimary ?? false}
+          )
+          RETURNING id
         `;
-      }
-      const rows = await sql<{ id: string }[]>`
-        INSERT INTO product_media
-          (product_id, variant_id, storage_key, url, type, mime, alt,
-           width, height, size_bytes, is_primary)
-        VALUES (
-          ${data.productId}, ${data.variantId ?? null}, ${put.key}, ${put.url},
-          ${data.type ?? 'image'}, ${'image/webp'}, ${data.alt ?? ''},
-          ${main.width}, ${main.height}, ${put.size}, ${data.isPrimary ?? false}
-        )
-        RETURNING id
-      `;
-      inserted = rows[0]!;
+        return rows[0]!;
+      });
     } catch (err) {
       await storage.delete(put.key).catch(() => {});
       throw err;
