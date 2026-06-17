@@ -521,6 +521,26 @@ export async function listAttributeValues(
   return rows.map(mapAttributeValue);
 }
 
+/**
+ * Все значения словарей характеристик, сгруппированные по attribute_id —
+ * для выпадающих списков выбора значения select-атрибутов в форме товара
+ * (вместо ввода ID значения вручную).
+ */
+export async function listAttributeValuesByAttribute(): Promise<
+  Record<string, AttributeValue[]>
+> {
+  const rows = await sql<Record<string, unknown>[]>`
+    SELECT id, attribute_id, value, slug, sort
+    FROM attribute_values ORDER BY attribute_id, sort, value
+  `;
+  const map: Record<string, AttributeValue[]> = {};
+  for (const row of rows) {
+    const v = mapAttributeValue(row);
+    (map[v.attributeId] ??= []).push(v);
+  }
+  return map;
+}
+
 /** Остатки товара (все строки inventory). */
 export async function listInventory(
   productId: string,

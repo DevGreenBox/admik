@@ -5,6 +5,7 @@ import {
   listBrands,
   getCategoryTree,
   listAttributes,
+  listAttributeValuesByAttribute,
 } from '@/lib/catalog/repository';
 import { can } from '@/lib/auth/rbac';
 
@@ -37,11 +38,12 @@ export default async function ProductDetailPage({
   }
 
   const { id } = await params;
-  const [product, brands, categoryTree, attributes] = await Promise.all([
+  const [product, brands, categoryTree, attributes, attributeValues] = await Promise.all([
     getProductById(id),
     listBrands(),
     getCategoryTree(),
     listAttributes(),
+    listAttributeValuesByAttribute(),
   ]);
 
   if (!product) {
@@ -75,6 +77,7 @@ export default async function ProductDetailPage({
           brands={brands}
           categoryTree={categoryTree}
           attributes={attributes}
+          attributeValues={attributeValues}
         />
       </div>
     </div>

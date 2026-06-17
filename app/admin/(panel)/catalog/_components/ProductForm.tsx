@@ -21,7 +21,7 @@ import { VariantsSection } from './VariantsSection';
 import { AttributesSection } from './AttributesSection';
 import { MediaSection } from './MediaSection';
 import { InventorySection } from './InventorySection';
-import type { Attribute } from '@/lib/catalog/types';
+import type { Attribute, AttributeValue } from '@/lib/catalog/types';
 import {
   SeoFieldset,
   type SeoFieldsetValue,
@@ -63,12 +63,15 @@ export function ProductForm({
   brands,
   categoryTree,
   attributes,
+  attributeValues = {},
 }: {
   /** null → режим создания. */
   product: ProductDetail | null;
   brands: Brand[];
   categoryTree: CategoryTreeNode[];
   attributes: Attribute[];
+  /** Значения словарей характеристик по attribute_id — для select-атрибутов. */
+  attributeValues?: Record<string, AttributeValue[]>;
 }) {
   const router = useRouter();
   const isEdit = product !== null;
@@ -586,7 +589,11 @@ export function ProductForm({
           <VariantsSection product={product!} />
         ) : null}
         {section === 'attributes' && isEdit ? (
-          <AttributesSection product={product!} attributes={attributes} />
+          <AttributesSection
+            product={product!}
+            attributes={attributes}
+            attributeValues={attributeValues}
+          />
         ) : null}
         {section === 'media' && isEdit ? <MediaSection product={product!} /> : null}
       </div>

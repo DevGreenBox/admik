@@ -3,7 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
-import type { Attribute, ProductDetail } from '@/lib/catalog/types';
+import type { Attribute, AttributeValue, ProductDetail } from '@/lib/catalog/types';
 
 import { setProductAttributesAction } from './form-actions';
 import { errorMessage } from './action-result';
@@ -19,9 +19,12 @@ type Fail = Extract<ActionResult<unknown>, { ok: false }>;
 export function AttributesSection({
   product,
   attributes,
+  attributeValues = {},
 }: {
   product: ProductDetail;
   attributes: Attribute[];
+  /** Значения словаря по attribute_id — для выпадающего списка select-атрибутов. */
+  attributeValues?: Record<string, AttributeValue[]>;
 }) {
   const router = useRouter();
   const [error, setError] = useState<Fail | null>(null);
@@ -107,6 +110,21 @@ export function AttributesSection({
                   <option value="">—</option>
                   <option value="true">Да</option>
                   <option value="false">Нет</option>
+                </select>
+              ) : attr.type === 'select' ? (
+                // Выбор значения из словаря по названию (раньше — ввод ID вручную).
+                <select
+                  id={id}
+                  value={values[attr.id] ?? ''}
+                  onChange={(e) => setValue(attr.id, e.target.value)}
+                  className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
+                >
+                  <option value="">— не выбрано —</option>
+                  {(attributeValues[attr.id] ?? []).map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.value}
+                    </option>
+                  ))}
                 </select>
               ) : (
                 <input
