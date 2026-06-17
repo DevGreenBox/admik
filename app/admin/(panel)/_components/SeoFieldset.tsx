@@ -68,7 +68,7 @@ export function SeoFieldset({
       <div className="grid grid-cols-1 gap-4">
         <div>
           <label htmlFor={id('title')} className={labelCls}>
-            SEO-заголовок (title)
+            Заголовок для поисковиков
           </label>
           <input
             id={id('title')}
@@ -82,7 +82,7 @@ export function SeoFieldset({
 
         <div>
           <label htmlFor={id('desc')} className={labelCls}>
-            SEO-описание (meta description)
+            Описание для поисковиков
           </label>
           <textarea
             id={id('desc')}
@@ -120,7 +120,7 @@ export function SeoFieldset({
           </div>
           <div>
             <label htmlFor={id('ogimg')} className={labelCls}>
-              Ключ OG-изображения (S3)
+              Картинка для соцсетей (адрес файла)
             </label>
             <input
               id={id('ogimg')}
@@ -149,7 +149,7 @@ export function SeoFieldset({
 
         <div>
           <label htmlFor={id('canonical')} className={labelCls}>
-            Canonical URL
+            Основной адрес страницы
           </label>
           <input
             id={id('canonical')}
@@ -170,7 +170,7 @@ export function SeoFieldset({
             checked={value.noindex}
             onChange={(e) => set('noindex', e.target.checked)}
           />
-          Скрыть из поиска (noindex)
+          Скрыть страницу от поисковиков
         </label>
       </div>
     </fieldset>

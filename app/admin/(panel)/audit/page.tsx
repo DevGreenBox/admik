@@ -29,9 +29,9 @@ interface AuditRow {
   entity_id: string | null;
 }
 
-/** Форматирует время записи в локали ru. */
+/** Форматирует время записи в локали ru (московское время — привычнее владельцу). */
 function formatTime(value: Date): string {
-  return new Date(value).toLocaleString('ru-RU', { timeZone: 'UTC' });
+  return new Date(value).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' });
 }
 
 export default async function AuditPage() {
@@ -59,7 +59,7 @@ export default async function AuditPage() {
         <table className="min-w-full divide-y divide-gray-200 text-sm">
           <thead className="bg-gray-50 text-left text-gray-500">
             <tr>
-              <th scope="col" className="px-4 py-2 font-medium">Время (UTC)</th>
+              <th scope="col" className="px-4 py-2 font-medium">Время (МСК)</th>
               <th scope="col" className="px-4 py-2 font-medium">Инициатор</th>
               <th scope="col" className="px-4 py-2 font-medium">Действие</th>
               <th scope="col" className="px-4 py-2 font-medium">Сущность</th>

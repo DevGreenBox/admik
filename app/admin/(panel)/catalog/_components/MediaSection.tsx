@@ -121,7 +121,7 @@ export function MediaSection({ product }: { product: ProductDetail }) {
             />
           </div>
           <div>
-            <label htmlFor="m-alt" className="block text-xs font-medium text-gray-600">Alt-текст</label>
+            <label htmlFor="m-alt" className="block text-xs font-medium text-gray-600">Подпись к фото</label>
             <input
               id="m-alt"
               value={alt}
