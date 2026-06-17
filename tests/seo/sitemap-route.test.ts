@@ -35,7 +35,9 @@ const ROWS = {
 };
 
 beforeEach(() => {
-  mocks.effective.mockResolvedValue({ seo: { site_url: 'https://shop.example' } });
+  mocks.effective.mockResolvedValue({
+    seo: { site_url: 'https://shop.example', noindex_site: false },
+  });
   mocks.getSetting.mockResolvedValue({ value: {} });
   mocks.getSitemapRows.mockResolvedValue(ROWS);
 });
@@ -70,6 +72,37 @@ describe('app/sitemap — наполнение и фильтр по модуля
     const { default: sitemap } = await import('@/app/sitemap');
     const urls = (await sitemap()).map((e) => e.url);
     expect(urls).not.toContain('https://shop.example/product/p-hidden');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Баг #6: noindex_site не применялся к /sitemap.xml — на staging полный список
+// URL отдавался даже при заблокированном сайте. После фикса при noindex_site=true
+// карта зеркалит robots (закрытый сайт) — только корень.
+// ---------------------------------------------------------------------------
+
+describe('app/sitemap — noindex_site (баг #6)', () => {
+  it('noindex_site=true → карта отдаёт только корень', async () => {
+    mocks.effective.mockResolvedValue({
+      seo: { site_url: 'https://shop.example', noindex_site: true },
+    });
+    mocks.effectiveModules.mockReturnValue(['catalog', 'cms']);
+    const { default: sitemap } = await import('@/app/sitemap');
+    const urls = (await sitemap()).map((e) => e.url);
+    expect(urls).toEqual(['https://shop.example']);
+    expect(urls.some((u) => u.includes('/product/'))).toBe(false);
+    expect(urls.some((u) => u.includes('/about'))).toBe(false);
+  });
+
+  it('noindex_site=false → полный список (товары/страницы присутствуют)', async () => {
+    mocks.effective.mockResolvedValue({
+      seo: { site_url: 'https://shop.example', noindex_site: false },
+    });
+    mocks.effectiveModules.mockReturnValue(['catalog', 'cms']);
+    const { default: sitemap } = await import('@/app/sitemap');
+    const urls = (await sitemap()).map((e) => e.url);
+    expect(urls).toContain('https://shop.example/product/p1');
+    expect(urls).toContain('https://shop.example/about');
   });
 });
 

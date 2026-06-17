@@ -26,6 +26,13 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     const settings = await getEffectiveSettings();
     const siteUrl = settings.seo.site_url ?? null;
 
+    // noindex_site (staging-флаг) закрывает сайт целиком — зеркалим robots:
+    // карта не должна раскрывать полный список URL заблокированного сайта.
+    // Отдаём только корень (или пусто, если домен не задан).
+    if (settings.seo.noindex_site) {
+      return siteUrl ? [{ url: siteUrl.replace(/\/+$/, '') }] : [];
+    }
+
     // Эффективные модули: env-набор ⊕ module_overrides из БД.
     const overridesRow = await getSetting('module_overrides');
     const overrides = parseSettingValue('module_overrides', overridesRow?.value) ?? {};
