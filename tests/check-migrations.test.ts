@@ -80,6 +80,13 @@ describe('check-migrations.sh — запрещённый деструктивн�
     expect(runLint(f).code).not.toBe(0);
   });
 
+  it('ALTER ... TYPE без слова COLUMN (ALTER bar TYPE bigint) → fail', () => {
+    // Postgres допускает `ALTER TABLE foo ALTER bar TYPE bigint` без COLUMN —
+    // линтер обязан ловить смену типа и в этой форме (правило №7).
+    const f = fixture('bad_type_no_column.sql', 'ALTER TABLE foo ALTER bar TYPE bigint;\n');
+    expect(runLint(f).code).not.toBe(0);
+  });
+
   it('SET NOT NULL без DEFAULT → fail', () => {
     const f = fixture('bad_set_nn.sql', 'ALTER TABLE x ALTER COLUMN c SET NOT NULL;\n');
     expect(runLint(f).code).not.toBe(0);

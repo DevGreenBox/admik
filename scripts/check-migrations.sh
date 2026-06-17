@@ -236,10 +236,13 @@ for f in "${FILES[@]}"; do
     'alter[[:space:]]+.*rename|rename[[:space:]]+(to|column|constraint)' \
     'запрещён RENAME (переименование ломает обращение старого кода по имени)'
 
-  # 7. ALTER COLUMN ... TYPE / SET DATA TYPE
+  # 7. ALTER [COLUMN] ... TYPE / SET DATA TYPE
+  #    Postgres допускает форму БЕЗ слова COLUMN: `ALTER TABLE foo ALTER bar TYPE
+  #    bigint`. Поэтому `column` делаем НЕОБЯЗАТЕЛЬНЫМ, а `set data` перед `type`
+  #    тоже опциональным — ловим обе записи смены типа (с COLUMN и без).
   check_rule "${content}" "${f}" \
-    'alter[[:space:]]+column[[:space:]]+.*(set[[:space:]]+data[[:space:]]+)?type|set[[:space:]]+data[[:space:]]+type' \
-    'запрещена смена типа колонки (ALTER COLUMN ... TYPE; возможна потеря данных)'
+    'alter[[:space:]]+(column[[:space:]]+)?[a-z_"]+[[:space:]]+(set[[:space:]]+data[[:space:]]+)?type|set[[:space:]]+data[[:space:]]+type' \
+    'запрещена смена типа колонки (ALTER [COLUMN] ... TYPE; возможна потеря данных)'
 
   # 9. ALTER TYPE ... DROP/RENAME VALUE (enum)
   check_rule "${content}" "${f}" \
