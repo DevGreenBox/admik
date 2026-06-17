@@ -1,8 +1,8 @@
-import Link from 'next/link';
-
 import { Forbidden } from '../../_components/Forbidden';
+import { PageHeader } from '../../_components/PageHeader';
 import { guardOrders } from '../../orders/_components/guard';
 import { PromoForm } from '../_components/PromoForm';
+import { loadPromoPickerData } from '../_components/picker-data';
 
 /**
  * Создание промокода (docs/07 §5). Право orders.write (guardOrders). Форма —
@@ -21,18 +21,18 @@ export default async function NewPromoPage() {
     return <Forbidden permission={guard.permission} />;
   }
 
+  const pickerData = await loadPromoPickerData();
+
   return (
     <div className="max-w-3xl">
-      <nav className="text-sm" aria-label="Хлебные крошки">
-        <Link href="/admin/promo" className="text-blue-700 hover:underline">
-          Промокоды
-        </Link>
-        <span className="mx-1 text-gray-400">/</span>
-        <span className="text-gray-600">Новый</span>
-      </nav>
-      <h1 className="mt-2 text-2xl font-semibold text-gray-900">Новый промокод</h1>
+      <PageHeader
+        title="Новый промокод"
+        breadcrumbs={[{ label: 'Промокоды', href: '/admin/promo' }, { label: 'Новый' }]}
+        backHref="/admin/promo"
+        backLabel="К промокодам"
+      />
       <div className="mt-6">
-        <PromoForm promo={null} />
+        <PromoForm promo={null} pickerData={pickerData} />
       </div>
     </div>
   );

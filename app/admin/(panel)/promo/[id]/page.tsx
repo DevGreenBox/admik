@@ -5,8 +5,10 @@ import { mapPromoCode } from '@/lib/orders/repository';
 import type { PromoCode, PromoTarget } from '@/lib/orders/types';
 
 import { Forbidden } from '../../_components/Forbidden';
+import { PageHeader } from '../../_components/PageHeader';
 import { guardOrders } from '../../orders/_components/guard';
 import { PromoForm } from '../_components/PromoForm';
+import { loadPromoPickerData } from '../_components/picker-data';
 
 /**
  * Редактирование промокода (docs/07 §5). Право orders.write. Загрузка — прямой
@@ -64,6 +66,7 @@ export default async function EditPromoPage({
   const { id } = await params;
   const promo = await loadPromo(id);
   const targets = promo ? await loadPromoTargets(id) : [];
+  const pickerData = promo ? await loadPromoPickerData() : {};
   if (!promo) {
     return (
       <div role="alert" className="rounded-md border border-amber-200 bg-amber-50 p-6">
@@ -79,21 +82,15 @@ export default async function EditPromoPage({
 
   return (
     <div className="max-w-3xl">
-      <nav className="text-sm" aria-label="Хлебные крошки">
-        <Link href="/admin/promo" className="text-blue-700 hover:underline">
-          Промокоды
-        </Link>
-        <span className="mx-1 text-gray-400">/</span>
-        <span className="text-gray-600">{promo.code}</span>
-      </nav>
-      <div className="mt-2 flex flex-wrap items-baseline gap-3">
-        <h1 className="text-2xl font-semibold text-gray-900">
-          Промокод <code>{promo.code}</code>
-        </h1>
-        <span className="text-sm text-gray-500">Использован: {promo.usedCount} раз</span>
-      </div>
+      <PageHeader
+        title={`Промокод ${promo.code}`}
+        subtitle={`Использован: ${promo.usedCount} раз`}
+        breadcrumbs={[{ label: 'Промокоды', href: '/admin/promo' }, { label: promo.code }]}
+        backHref="/admin/promo"
+        backLabel="К промокодам"
+      />
       <div className="mt-6">
-        <PromoForm promo={promo} targets={targets} />
+        <PromoForm promo={promo} targets={targets} pickerData={pickerData} />
       </div>
     </div>
   );

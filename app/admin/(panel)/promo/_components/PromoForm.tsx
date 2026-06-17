@@ -84,12 +84,19 @@ const TARGET_TYPE_LABEL: Record<PromoTargetType, string> = {
   variant: 'Вариант',
 };
 
+/** Списки сущностей для выбора таргета по названию (вместо ввода UUID). */
+export type PromoPickerData = Partial<
+  Record<PromoTargetType, { id: string; name: string }[]>
+>;
+
 export function PromoForm({
   promo,
   targets = [],
+  pickerData = {},
 }: {
   promo: PromoCode | null;
   targets?: PromoTarget[];
+  pickerData?: PromoPickerData;
 }) {
   const router = useRouter();
   const isEdit = promo !== null;
@@ -333,7 +340,8 @@ export function PromoForm({
             <div className="mt-3">
               <p className="text-sm font-medium text-gray-700">Таргеты акции</p>
               <p className="mb-2 text-xs text-gray-500">
-                Укажите тип и идентификатор (UUID) сущности, к которой применяется акция.
+                Выберите, к чему применяется акция: тип (категория / бренд / товар) и саму
+                сущность из списка.
               </p>
               {targetRows.length === 0 ? (
                 <p className="text-xs text-gray-400">Таргетов нет — добавьте хотя бы один.</p>
@@ -352,14 +360,30 @@ export function PromoForm({
                         <option key={tt} value={tt}>{TARGET_TYPE_LABEL[tt]}</option>
                       ))}
                     </select>
-                    <label className="sr-only" htmlFor={`tgt-id-${i}`}>ID таргета {i + 1}</label>
-                    <input
-                      id={`tgt-id-${i}`}
-                      value={row.id}
-                      onChange={(e) => updateTargetRow(i, { id: e.target.value })}
-                      placeholder="UUID"
-                      className="min-w-[18rem] flex-1 rounded border border-gray-300 px-2 py-1.5 text-sm"
-                    />
+                    <label className="sr-only" htmlFor={`tgt-id-${i}`}>Сущность таргета {i + 1}</label>
+                    {pickerData[row.targetType] ? (
+                      <select
+                        id={`tgt-id-${i}`}
+                        value={row.id}
+                        onChange={(e) => updateTargetRow(i, { id: e.target.value })}
+                        className="min-w-[18rem] flex-1 rounded border border-gray-300 px-2 py-1.5 text-sm"
+                      >
+                        <option value="">— выберите —</option>
+                        {pickerData[row.targetType]!.map((o) => (
+                          <option key={o.id} value={o.id}>
+                            {o.name}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        id={`tgt-id-${i}`}
+                        value={row.id}
+                        onChange={(e) => updateTargetRow(i, { id: e.target.value })}
+                        placeholder="идентификатор"
+                        className="min-w-[18rem] flex-1 rounded border border-gray-300 px-2 py-1.5 text-sm"
+                      />
+                    )}
                     <button
                       type="button"
                       onClick={() => removeTargetRow(i)}
@@ -385,7 +409,7 @@ export function PromoForm({
 
         <div>
           <label htmlFor="p-priority" className="block text-sm font-medium text-gray-700">
-            Приоритет (меньше = раньше)
+            Очерёдность применения (меньше — раньше)
           </label>
           <input id="p-priority" value={priority} onChange={(e) => setPriority(e.target.value)}
             inputMode="numeric"
