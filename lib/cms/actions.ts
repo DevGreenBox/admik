@@ -2,7 +2,7 @@
 
 import type { TransactionSql } from 'postgres';
 
-import { defineAction, type ActionCtx } from '@/lib/server/action';
+import { defineAction, PublicActionError, type ActionCtx } from '@/lib/server/action';
 import { sql } from '@/lib/db/client';
 import { isModuleEnabled } from '@/lib/config/modules';
 
@@ -145,29 +145,43 @@ export const updateCmsPage = defineAction({
       throw new CmsError('not_found', 'Страница не найдена.');
     }
 
-    const after = await sql<Record<string, unknown>[]>`
-      UPDATE cms_pages SET
-        slug               = COALESCE(${data.slug ?? null}, slug),
-        title              = COALESCE(${data.title ?? null}, title),
-        status             = COALESCE(${data.status ?? null}, status),
-        seo_title          = CASE WHEN ${data.seoTitle !== undefined}
-                                  THEN ${data.seoTitle ?? null} ELSE seo_title END,
-        seo_description    = CASE WHEN ${data.seoDescription !== undefined}
-                                  THEN ${data.seoDescription ?? null} ELSE seo_description END,
-        og_image_url       = CASE WHEN ${data.ogImageUrl !== undefined}
-                                  THEN ${data.ogImageUrl ?? null} ELSE og_image_url END,
-        canonical_url      = CASE WHEN ${data.canonicalUrl !== undefined}
-                                  THEN ${data.canonicalUrl ?? null} ELSE canonical_url END,
-        noindex            = COALESCE(${data.noindex ?? null}, noindex),
-        sitemap_priority   = CASE WHEN ${data.sitemapPriority !== undefined}
-                                  THEN ${data.sitemapPriority ?? null} ELSE sitemap_priority END,
-        sitemap_changefreq = CASE WHEN ${data.sitemapChangefreq !== undefined}
-                                  THEN ${data.sitemapChangefreq ?? null} ELSE sitemap_changefreq END,
-        updated_by         = ${ctx.user.id},
-        updated_at         = now()
-      WHERE id = ${data.id}
-      RETURNING *
-    `;
+    // Уникальный индекс slug может нарушиться при смене slug на уже занятый.
+    // Ловим 23505 и отдаём ПОНЯТНОЕ сообщение (PublicActionError → validation),
+    // иначе ошибка всплыла бы как невнятный 'internal' (образец createOrder для
+    // duplicate_code). CmsError здесь не подходит — он не наследует PublicActionError.
+    let after: Record<string, unknown>[];
+    try {
+      after = await sql<Record<string, unknown>[]>`
+        UPDATE cms_pages SET
+          slug               = COALESCE(${data.slug ?? null}, slug),
+          title              = COALESCE(${data.title ?? null}, title),
+          status             = COALESCE(${data.status ?? null}, status),
+          seo_title          = CASE WHEN ${data.seoTitle !== undefined}
+                                    THEN ${data.seoTitle ?? null} ELSE seo_title END,
+          seo_description    = CASE WHEN ${data.seoDescription !== undefined}
+                                    THEN ${data.seoDescription ?? null} ELSE seo_description END,
+          og_image_url       = CASE WHEN ${data.ogImageUrl !== undefined}
+                                    THEN ${data.ogImageUrl ?? null} ELSE og_image_url END,
+          canonical_url      = CASE WHEN ${data.canonicalUrl !== undefined}
+                                    THEN ${data.canonicalUrl ?? null} ELSE canonical_url END,
+          noindex            = COALESCE(${data.noindex ?? null}, noindex),
+          sitemap_priority   = CASE WHEN ${data.sitemapPriority !== undefined}
+                                    THEN ${data.sitemapPriority ?? null} ELSE sitemap_priority END,
+          sitemap_changefreq = CASE WHEN ${data.sitemapChangefreq !== undefined}
+                                    THEN ${data.sitemapChangefreq ?? null} ELSE sitemap_changefreq END,
+          updated_by         = ${ctx.user.id},
+          updated_at         = now()
+        WHERE id = ${data.id}
+        RETURNING *
+      `;
+    } catch (err) {
+      if (isUniqueViolation(err)) {
+        throw new PublicActionError(
+          'Страница с таким адресом (slug) уже существует.',
+        );
+      }
+      throw err;
+    }
 
     return {
       result: { id: data.id },

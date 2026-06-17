@@ -74,11 +74,59 @@ function pageMeta(page: CmsPage, ctx: SeoCtx): SeoMetaDto {
   );
 }
 
-/** Секция домена → публичная { type, content } (без id/enabled/timestamps). */
-function toPublicSectionDto(section: CmsSection): PublicSectionDto {
+/** Резолвер ключ объекта хранилища → публичный URL (инъекция storage.url). */
+export type PublicUrlResolver = (key: string) => string;
+
+/**
+ * Подменяет в content секции СЫРЫЕ ключи хранилища публичными URL: витрине НЕ
+ * раскрываем storage_key (инвариант, зеркально каталог-медиа toMediaDto). По типу
+ * секции: hero/banner — `imageKey` → `imageUrl`; gallery — `images[].imageKey` →
+ * `images[].imageUrl`. Сырой ключ удаляется. Прочие типы (text/products_grid/
+ * faq/cta) изображений не несут и возвращаются как есть.
+ */
+function resolveSectionMedia(
+  type: CmsSectionType,
+  content: Record<string, unknown>,
+  publicUrl: PublicUrlResolver,
+): Record<string, unknown> {
+  if (type === 'hero' || type === 'banner') {
+    const { imageKey, ...rest } = content as { imageKey?: unknown };
+    if (typeof imageKey === 'string') {
+      return { ...rest, imageUrl: publicUrl(imageKey) };
+    }
+    return { ...rest };
+  }
+
+  if (type === 'gallery') {
+    const images = Array.isArray((content as { images?: unknown }).images)
+      ? ((content as { images: Array<Record<string, unknown>> }).images)
+      : [];
+    return {
+      ...content,
+      images: images.map((img) => {
+        const { imageKey, ...rest } = img as { imageKey?: unknown };
+        return typeof imageKey === 'string'
+          ? { ...rest, imageUrl: publicUrl(imageKey) }
+          : { ...rest };
+      }),
+    };
+  }
+
+  return content;
+}
+
+/**
+ * Секция домена → публичная { type, content } (без id/enabled/timestamps).
+ * `publicUrl` инъецируется роутом (storage.url) — сырые ключи изображений
+ * заменяются публичными URL (см. resolveSectionMedia).
+ */
+function toPublicSectionDto(
+  section: CmsSection,
+  publicUrl: PublicUrlResolver,
+): PublicSectionDto {
   return {
     type: section.type,
-    content: section.content,
+    content: resolveSectionMedia(section.type, section.content, publicUrl),
   };
 }
 
@@ -91,6 +139,7 @@ function toPublicSectionDto(section: CmsSection): PublicSectionDto {
 export function toPublicPageDto(
   page: CmsPageWithSections,
   seoCtx: SeoCtx,
+  publicUrl: PublicUrlResolver = seoCtx.publicUrl,
 ): PublicPageDto {
   const sections = page.sections
     .filter((s) => s.enabled)
@@ -100,7 +149,7 @@ export function toPublicPageDto(
         ? a.displayOrder - b.displayOrder
         : a.id.localeCompare(b.id),
     )
-    .map(toPublicSectionDto);
+    .map((s) => toPublicSectionDto(s, publicUrl));
 
   return {
     slug: page.slug,

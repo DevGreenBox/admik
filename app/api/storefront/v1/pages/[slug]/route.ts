@@ -34,9 +34,12 @@ export async function GET(
       // SEO-контекст: домен/шаблон из настроек, og:image-URL — через storage.
       const settings = await getEffectiveSettings();
       const storage = getStorage();
-      const seoCtx = buildEntitySeoCtx(settings, (k) => storage.url(k), 'page');
+      const publicUrl = (k: string) => storage.url(k);
+      const seoCtx = buildEntitySeoCtx(settings, publicUrl, 'page');
 
-      return jsonData(toPublicPageDto(page, seoCtx), {}, cors);
+      // publicUrl передаётся явно: секции hero/banner/gallery отдают imageUrl
+      // (публичный URL), а НЕ сырой ключ хранилища (инвариант, зеркаль каталог-медиа).
+      return jsonData(toPublicPageDto(page, seoCtx, publicUrl), {}, cors);
     },
     { module: 'cms' },
   );
