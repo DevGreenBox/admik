@@ -135,6 +135,11 @@ step "Шаг 4/5. Инициализирую магазин (init-shop внут�
 docker compose exec -T app /app/scripts/init-shop.sh
 ok "Инициализация завершена"
 
+# Регресс-гард нативного sharp/libvips в образе (ловит ERR_DLOPEN, из-за которого
+# падали экшены каталога и storefront brands/products/pages — см. sharp-selfcheck.mjs).
+step "Проверяю нативный sharp/libvips внутри образа"
+docker compose exec -T app node /app/scripts/sharp-selfcheck.mjs
+
 # -----------------------------------------------------------------------------
 # Шаг 5. Smoke — подтверждение готовности
 # -----------------------------------------------------------------------------

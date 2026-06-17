@@ -161,6 +161,12 @@ jobs:
       - name: Инициализация магазина внутри контейнера app (make init)
         run: make init
 
+      - name: Регресс-гард нативного sharp/libvips в образе
+        # Ловит ERR_DLOPEN (libvips не дотрассирован в standalone), из-за которого
+        # падали экшены каталога и storefront brands/products/pages. ESM import —
+        # как грузит external Turbopack. См. scripts/sharp-selfcheck.mjs.
+        run: docker compose exec -T app node /app/scripts/sharp-selfcheck.mjs
+
       - name: Smoke-проверка эндпоинтов (make smoke)
         run: make smoke
 
