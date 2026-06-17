@@ -56,6 +56,15 @@ export function ModulesForm({
   const envSet = new Set(envEnabled);
 
   async function save() {
+    // Подтверждение при выключении модулей: выключение «Каталога»/«Заказов» и т.п.
+    // скрывает разделы и может «сломать» витрину — предупреждаем заранее.
+    const turningOff = MODULES.filter(({ name }) => state[name] === 'off').map((m) => m.label);
+    if (turningOff.length > 0) {
+      const ok = window.confirm(
+        `Выключить модули: ${turningOff.join(', ')}? Соответствующие разделы админки и функции на сайте станут недоступны. Продолжить?`,
+      );
+      if (!ok) return;
+    }
     setPending(true);
     setError(null);
     setWarnings([]);

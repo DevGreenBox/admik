@@ -88,9 +88,13 @@ export function SeoSettingsForm({ seo }: { seo: EffectiveSettings['seo'] }) {
           {fe('site_url') ? <p className="mt-1 text-xs text-red-600">{fe('site_url')}</p> : null}
         </div>
         <div>
-          <label htmlFor="seo-tpl" className={labelCls}>Шаблон заголовка (должен содержать «%s»)</label>
+          <label htmlFor="seo-tpl" className={labelCls}>Шаблон заголовка страниц</label>
           <input id="seo-tpl" value={titleTemplate} onChange={(e) => setTitleTemplate(e.target.value)}
-            placeholder="%s — Магазин" className={inputCls} />
+            placeholder="%s — Мой магазин" className={inputCls} />
+          <p className="mt-1 text-xs text-gray-500">
+            <code>%s</code> заменится названием страницы. Пример: <code>%s — Мой магазин</code> →
+            «Куртка — Мой магазин».
+          </p>
           {fe('title_template') ? <p className="mt-1 text-xs text-red-600">{fe('title_template')}</p> : null}
         </div>
         <div>
@@ -103,12 +107,12 @@ export function SeoSettingsForm({ seo }: { seo: EffectiveSettings['seo'] }) {
             rows={2} className={inputCls} />
         </div>
         <div className="lg:col-span-2">
-          <label htmlFor="seo-og" className={labelCls}>Ключ OG-изображения по умолчанию (S3)</label>
+          <label htmlFor="seo-og" className={labelCls}>Картинка для соцсетей по умолчанию (адрес файла)</label>
           <input id="seo-og" value={defaultOgImageKey} onChange={(e) => setDefaultOgImageKey(e.target.value)}
             placeholder="defaults/og.webp" className={inputCls} />
         </div>
         <div className="lg:col-span-2">
-          <label htmlFor="seo-robots" className={labelCls}>robots.txt — дополнительные строки</label>
+          <label htmlFor="seo-robots" className={labelCls}>Доп. правила для поисковых роботов (для специалистов, необязательно)</label>
           <textarea id="seo-robots" value={robotsExtra} onChange={(e) => setRobotsExtra(e.target.value)}
             rows={2} className={inputCls} />
         </div>
