@@ -231,6 +231,27 @@ describe('storefront/dto — карточка товара', () => {
     expect(v).not.toHaveProperty('productId');
   });
 
+  // Регресс (Prevki «Халат, остаток 50, но нет в наличии» + «не выбрать размер»):
+  // товар БЕЗ вариантов с остатком на УРОВНЕ ТОВАРА (variant_id = null) должен
+  // отдавать id (для заказа по productId), inStock=true и пустой список вариантов.
+  it('товар без вариантов + остаток на уровне товара → id, inStock=true, variants пуст', () => {
+    const simple: ProductDetail = {
+      ...product,
+      variants: [],
+      inventory: [
+        { id: 'i0', productId: 'p1', variantId: null, warehouseCode: 'W', quantity: 50, reserved: 0, updatedAt: D },
+      ],
+    };
+    const dto = toProductDetailDto(simple, {
+      effectiveIsNew: false,
+      categorySlugs: [],
+      seoCtx: TEST_SEO_CTX,
+    });
+    expect(dto.id).toBe('p1');
+    expect(dto.variants).toHaveLength(0);
+    expect(dto.inStock).toBe(true);
+  });
+
   it('toVariantDto наследует compareAtPrice товара, считает скидку', () => {
     const dto = toVariantDto(variant, product);
     // variant.compareAtPrice=null → наследует product 1500.
