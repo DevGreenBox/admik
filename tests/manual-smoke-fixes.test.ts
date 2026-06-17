@@ -15,6 +15,10 @@ import { lineTotalMinor, type PricedLine } from '@/lib/orders/pricing';
 import { quantitySchema, CartQuoteSchema, PromoUpdateSchema } from '@/lib/orders/schemas';
 import { redirectDueDate } from '@/lib/payments/tbank/service';
 import { toMinor } from '@/lib/orders/money';
+import { PromoCreateSchema } from '@/lib/orders/schemas';
+import { ModuleOverridesInputSchema } from '@/lib/settings/action-factory';
+import { buildDailySeries } from '@/lib/analytics/repository';
+import { ALL_MODULES } from '@/lib/config/modules';
 
 const D = new Date('2026-06-17T00:00:00Z');
 function inv(quantity: number, reserved: number, variantId: string | null = null): InventoryItem {
@@ -109,5 +113,37 @@ describe('РУЧНОЙ smoke: RedirectDueDate формат Т-Банк (реал
     expect(s).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+03:00$/);
     expect(s).not.toContain('Z');
     expect(s).not.toMatch(/\.\d{3}/);
+  });
+});
+
+describe('РУЧНОЙ smoke: фиксы 2-й волны (реальный прогон)', () => {
+  it('free_delivery допустим только при applyScope=cart (refinePromo)', () => {
+    const cart = PromoCreateSchema.safeParse({ code: 'SMK-FD-CART', kind: 'free_delivery', applyScope: 'cart' });
+    const cat = PromoCreateSchema.safeParse({
+      code: 'SMK-FD-CAT', kind: 'free_delivery', applyScope: 'category',
+      targets: [{ targetType: 'category', categoryId: '11111111-1111-4111-8111-111111111111' }],
+    });
+    console.log(`free_delivery+cart ok=${cart.success}; free_delivery+category ok=${cat.success}`);
+    expect(cart.success).toBe(true);
+    expect(cat.success).toBe(false);
+  });
+
+  it('ModuleOverridesInputSchema принимает payments и все ALL_MODULES', () => {
+    const one = ModuleOverridesInputSchema.safeParse({ moduleOverrides: { payments: true } });
+    const allObj = Object.fromEntries(ALL_MODULES.map((m) => [m, false]));
+    const all = ModuleOverridesInputSchema.safeParse({ moduleOverrides: allObj });
+    const unknown = ModuleOverridesInputSchema.safeParse({ moduleOverrides: { nope: true } });
+    console.log(`overrides payments ok=${one.success}; all-modules ok=${all.success}; unknown ok=${unknown.success}`);
+    expect(one.success).toBe(true);
+    expect(all.success).toBe(true);
+    expect(unknown.success).toBe(false); // .strict() отвергает неизвестный ключ
+  });
+
+  it('buildDailySeries сохраняет большое значение посещений (bigint, без обрезки)', () => {
+    const series = buildDailySeries(new Map([['2026-06-17', 3_000_000_000]]), 3, '2026-06-17');
+    const last = series[series.length - 1]!;
+    console.log(`buildDailySeries last = ${JSON.stringify(last)}`);
+    expect(last.count).toBe(3_000_000_000);
+    expect(Number.isNaN(last.count)).toBe(false);
   });
 });
