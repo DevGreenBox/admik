@@ -460,10 +460,13 @@ period_min = 2, period_max = 5
 - Кеш 24ч (Redis). `from_location` витрине не нужен.
 
 **`POST /api/storefront/v1/delivery/cdek/calculate`**
-- Тело: `{ to: { city_code?, postal_code? }, deliveryMode: 'pvz'|'postamat'|'door', items: [{ variantId, qty }] }`.
+- Тело: `{ to: { city_code?, postal_code? }, deliveryMode: 'pvz'|'postamat'|'door', items: [{ variantId, qty }], tariffCode? }`.
 - `from_location` — **всегда серверный** (`CDEK_FROM_LOCATION_CODE`), из тела не берётся (анти-tamper, ADR-010).
-- Хендлер собирает `packages` по `items` (вес/габариты сервер-сайд), → `Calculator.calculateAvailable`
-  → фильтр по `CDEK_ALLOWED_TARIFFS` и режиму → `{ data: { tariffCode, deliverySum, periodMin, periodMax } }` (рекомендуемый тариф).
+- **`tariffCode` из тела НЕ доверяется напрямую** (анти-tamper): нормализуется по `CDEK_ALLOWED_TARIFFS`
+  (`resolveAllowedTariff`). Если whitelist непуст и входной код вне списка → подмена на
+  `CDEK_DEFAULT_TARIFF` (расчёт не падает, тарифом управляет сервер). Пустой whitelist → любой код.
+- Хендлер собирает `packages` по `items` (вес/габариты сервер-сайд), → `Calculator`
+  → `{ data: { tariffCode, deliverySum, periodMin, periodMax } }`.
 - В mock — формула §5.3 + фикстурные `tariff_codes`.
 
 ### 6.2 Виджет
@@ -566,15 +569,27 @@ export class PrintService {
 'force-dynamic'`. Это **не** Storefront-роут (СДЭК → сервер), поэтому без `runStorefront`/CORS;
 защита своя.
 
-### 8.2 Защита (порт `CdekController::actionWebhook`)
+### 8.2 Защита (порт `CdekController::actionWebhook`, ужесточена после security-ревью)
 
-1. **IP-whitelist:** `CDEK_WEBHOOK_IPS` (IP/CIDR). Если непусто и `REMOTE_ADDR` не в диапазоне →
-   `403`. Пустой список разрешён только при `CDEK_TEST_MODE=true` (иначе старт логирует предупреждение).
-   IP берём из соединения (не из `X-Forwarded-For`); за Caddy — пробрасывается доверенный заголовок,
-   конфигурируется в `CDEK_WEBHOOK_TRUST_PROXY`.
-2. **Секрет:** `?key=` должен равняться `CDEK_WEBHOOK_SECRET` (непустой), иначе `401`.
-3. **Парсинг:** битый JSON → `200 { ok:false, warn:'invalid_json' }` (не 4xx/5xx — СДЭК не должен ретраить вечно).
-4. Любая ошибка хендлера → `200 { ok:false, warn:'handler_error' }` (логируется). Успех → `200 { ok:true }`.
+Аутентификация — `authenticate()` в `app/api/cdek/webhook/route.ts`. Порядок (defense-in-depth):
+
+1. **Секрет `?key=` — ПЕРВИЧНАЯ аутентификация.** Если задан `CDEK_WEBHOOK_SECRET`, он
+   **обязателен** и сверяется ПЕРВЫМ (constant-time, `safeEqual` из `lib/storefront/order-dto.ts`).
+   Неверный/отсутствующий ключ → `401` (жёсткий отказ; IP-слой НЕ перекрывает неверный секрет).
+2. **IP-whitelist — ДОП. слой, ТОЛЬКО за доверенным прокси.** `CDEK_WEBHOOK_IPS` (IP/CIDR).
+   **SECURITY:** IP берём из соединения, а **не** из `X-Forwarded-For`/`X-Real-IP` — эти заголовки
+   клиент-контролируемые и доверяются ТОЛЬКО при `CDEK_WEBHOOK_TRUST_PROXY=true` (за Caddy, который
+   пробрасывает реальный IP). Без `trustProxy` источник IP пустой → подделка заголовка обхода не даёт.
+   Непустой список + IP вне диапазона → `403`.
+3. **Пустой whitelist** разрешён (bypass с warn) **ТОЛЬКО в mock-режиме** (нет боевых
+   `CDEK_ACCOUNT`/`CDEK_SECRET`, `isCdekMock()` — edu/CI-контур). **SECURITY:** bypass завязан на
+   `isMock`, а **не** на `CDEK_TEST_MODE` — боевой test-контур (реальные ключи + `CDEK_TEST_MODE=true`)
+   больше НЕ открывает write-путь к боевым `orders`. Вне mock-режима, если не настроены НИ секрет,
+   НИ whitelist → `401` (роут не работает открытым).
+4. **Аудит:** IP источника (если получен за `trustProxy`) сохраняется в `cdek_status_log.ip`
+   (`handleWebhookEvent(payload, ip)` → `insertStatusLog({ ip })`, миграция 0017).
+5. **Парсинг:** битый JSON → `200 { ok:false, warn:'invalid_json' }` (не 4xx/5xx — СДЭК не должен ретраить вечно).
+6. Любая ошибка хендлера → `200 { ok:false, warn:'handler_error' }` (логируется). Успех → `200 { ok:true }`.
 
 ### 8.3 `WebhookService` (порт `WebhookService.php`)
 
@@ -778,13 +793,13 @@ mock-стоимость; webhook-роут тестируется фейковы�
 | `CDEK_FROM_LOCATION_CODE` | код города отправления | `44` (Москва) |
 | `CDEK_SHIPMENT_POINT` | код склада отправителя (взаимоисключим с from_location) | — |
 | `CDEK_DEFAULT_TARIFF` | тариф по умолчанию | `136` |
-| `CDEK_ALLOWED_TARIFFS` | белый список тарифов (csv) | — |
+| `CDEK_ALLOWED_TARIFFS` | белый список тарифов (csv); непуст → storefront-расчёт отклоняет код вне списка (fallback на `CDEK_DEFAULT_TARIFF`) | — |
 | `CDEK_SENDER_NAME` / `CDEK_SENDER_CONTACT_NAME` | отправитель | — |
 | `CDEK_SENDER_PHONE` | телефон отправителя | — |
 | `CDEK_SENDER_EMAIL` / `CDEK_SENDER_INN` | email/ИНН отправителя | — |
 | `CDEK_DEFAULT_WEIGHT_G` / `_LENGTH_CM` / `_WIDTH_CM` / `_HEIGHT_CM` | дефолтные габариты | `500 / 30 / 20 / 10` |
 | `CDEK_WEBHOOK_SECRET` | секрет `?key=` для webhook | — |
-| `CDEK_WEBHOOK_IPS` | IP/CIDR whitelist (csv) | — (пусто допустимо лишь в test) |
+| `CDEK_WEBHOOK_IPS` | IP/CIDR whitelist (csv); работает ТОЛЬКО за `CDEK_WEBHOOK_TRUST_PROXY=true` | — (пусто допустимо лишь в mock-режиме, нет боевых ключей) |
 | `CDEK_WEBHOOK_TRUST_PROXY` | доверять прокси-заголовку IP (за Caddy) | `false` |
 | `CDEK_CRON_SECRET` | секрет cron-роутов | — |
 | `CDEK_CREATE_ENABLED` | kill-switch авто-создания | `true` |

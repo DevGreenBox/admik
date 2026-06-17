@@ -62,16 +62,29 @@ function ipInCidr(ip: string, cidr: string): boolean {
 export interface VerifyIpOptions {
   /** Доверять прокси-заголовку (за Caddy). Влияет только на выбор источника IP — вызывающий уже извлёк ip. */
   trustProxy?: boolean;
-  /** mock/test-режим: пустой whitelist разрешён (bypass с warn). */
+  /**
+   * MOCK-режим (нет боевых ключей CDEK_ACCOUNT/CDEK_SECRET): пустой whitelist
+   * разрешён (bypass с warn) — edu/CI-контур. SECURITY: bypass завязан именно на
+   * isMock, а НЕ на CDEK_TEST_MODE — иначе боевой test-контур (реальные ключи +
+   * CDEK_TEST_MODE) открывал бы write-путь к боевым orders (finding #2).
+   */
+  isMock?: boolean;
+  /**
+   * @deprecated НЕ управляет bypass-ом. Оставлен для совместимости контракта;
+   * SECURITY-bypass пустого whitelist завязан на isMock (не на testMode).
+   */
   testMode?: boolean;
 }
 
 /**
  * Проверяет, разрешён ли IP по whitelist (docs/08 §8.2, порт checkIp):
  *   • whitelist непустой → IP должен входить хотя бы в один диапазон (иначе false);
- *   • whitelist пустой → разрешено ТОЛЬКО в testMode (bypass с warn), иначе false.
+ *   • whitelist пустой → разрешено ТОЛЬКО в mock-режиме (bypass с warn), иначе false.
  * Чистая, детерминированная. trustProxy здесь не меняет результат (источник IP
  * выбирает route-слой) — принимается для совместимости контракта.
+ *
+ * SECURITY: пустой whitelist в боевом режиме (isMock=false) → ВСЕГДА false, даже
+ * при CDEK_TEST_MODE. Открыть запись в боевые orders «test-контуром» нельзя.
  */
 export function verifyWebhookIp(
   ip: string,
@@ -79,8 +92,8 @@ export function verifyWebhookIp(
   opts: VerifyIpOptions = {},
 ): boolean {
   if (!whitelist || whitelist.length === 0) {
-    if (opts.testMode) {
-      console.warn('[cdek] webhook IP-whitelist пуст — bypass разрешён только в test-режиме.');
+    if (opts.isMock) {
+      console.warn('[cdek] webhook IP-whitelist пуст — bypass разрешён только в mock-режиме (нет боевых ключей).');
       return true;
     }
     return false;
@@ -170,8 +183,11 @@ export class WebhookService {
    *   4) маппинг статуса + переход delivery_status (canTransition) — недопустимый молча пропускается;
    *   5) markStatusLogProcessed.
    * Всегда безопасно при повторной доставке (никаких двойных переходов/эффектов).
+   *
+   * @param ip IP источника вебхука (из route-слоя) — сохраняется в
+   *   cdek_status_log.ip для аудита (миграция 0017, finding #3).
    */
-  async handleWebhookEvent(payload: unknown): Promise<HandleResult> {
+  async handleWebhookEvent(payload: unknown, ip?: string): Promise<HandleResult> {
     const event = parseEvent(payload);
 
     if (!event.cdekUuid || !event.statusCode) {
@@ -206,6 +222,7 @@ export class WebhookService {
       cityName: event.cityName,
       isMock: this.manager.isMock,
       rawPayload: event.raw,
+      ip: ip ?? null,
     });
 
     if (!logResult.inserted) {

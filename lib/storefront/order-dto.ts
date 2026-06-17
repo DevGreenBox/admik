@@ -49,8 +49,10 @@ export function orderAccessToken(
     .slice(0, 32);
 }
 
-/** Сравнение строк постоянного времени-ish (длина + посимвольно). */
-function safeEqual(a: string, b: string): boolean {
+/** Сравнение строк постоянного времени-ish (длина + посимвольно). Экспортируется
+ * для переиспользования (напр. сверка ?key= webhook СДЭК) — единый constant-time
+ * хелпер вместо дублирования. */
+export function safeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   let diff = 0;
   for (let i = 0; i < a.length; i++) {

@@ -64,13 +64,17 @@ describe('cdek/webhook — verifyWebhookIp (чистая, IP-whitelist)', () => 
   it('несколько диапазонов: хотя бы один совпал → true', () => {
     expect(verifyWebhookIp('10.0.0.5', ['1.2.3.0/24', '10.0.0.0/8'])).toBe(true);
   });
-  it('пустой whitelist + НЕ testMode → false (запрет)', () => {
+  it('пустой whitelist + НЕ mock → false (запрет)', () => {
     expect(verifyWebhookIp('1.2.3.4', [])).toBe(false);
   });
-  it('пустой whitelist + testMode → true (bypass с warn)', () => {
+  it('пустой whitelist + mock-режим → true (bypass с warn)', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    expect(verifyWebhookIp('1.2.3.4', [], { testMode: true })).toBe(true);
+    expect(verifyWebhookIp('1.2.3.4', [], { isMock: true })).toBe(true);
     warn.mockRestore();
+  });
+  it('SECURITY: пустой whitelist + testMode (боевые ключи) → false (НЕ bypass)', () => {
+    // testMode НЕ связан с mock — боевой edu-контур не должен открывать write-путь.
+    expect(verifyWebhookIp('1.2.3.4', [], { testMode: true, isMock: false })).toBe(false);
   });
   it('CIDR /32 — точное совпадение', () => {
     expect(verifyWebhookIp('1.2.3.4', ['1.2.3.4/32'])).toBe(true);
@@ -150,6 +154,22 @@ describe('cdek/webhook — handleWebhookEvent идемпотентность', (
     expect(r).toEqual({ processed: true, duplicate: false });
     expect(applyDeliveryStatusMock).toHaveBeenCalledWith('ord-1', 'delivered', expect.any(String));
     expect(markProcessedMock).toHaveBeenCalledWith('log-1');
+  });
+
+  it('IP источника пробрасывается в insertStatusLog (cdek_status_log.ip)', async () => {
+    insertStatusLogMock.mockResolvedValue({ inserted: true, entry: { id: 'log-3' } });
+    await svc.handleWebhookEvent(payload, '203.0.113.10');
+    expect(insertStatusLogMock).toHaveBeenCalledWith(
+      expect.objectContaining({ ip: '203.0.113.10' }),
+    );
+  });
+
+  it('IP не задан → insertStatusLog получает ip=null (без падения)', async () => {
+    insertStatusLogMock.mockResolvedValue({ inserted: true, entry: { id: 'log-4' } });
+    await svc.handleWebhookEvent(payload);
+    expect(insertStatusLogMock).toHaveBeenCalledWith(
+      expect.objectContaining({ ip: null }),
+    );
   });
 
   it('ДУБЛИКАТ (inserted=false) → {duplicate:true}, обработка НЕ повторяется', async () => {
