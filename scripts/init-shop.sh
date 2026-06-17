@@ -118,12 +118,22 @@ DB_HOST="${PGHOST:-postgres}"
 DB_PORT="${PGPORT:-5432}"
 
 # Готовим переменные окружения для psql/pg_isready, чтобы не дублировать
-# параметры подключения в каждой команде.
+# параметры подключения в каждой команде. По умолчанию PG* = СУПЕРПОЛЬЗОВАТЕЛЬ
+# (POSTGRES_USER) — он нужен ТОЛЬКО для bootstrap (создание ролей/расширений) и
+# наката superuser-only миграций. Миграции (DDL) и seed выполняются под менее
+# привилегированными ролями (admik_migrator / admik_app) через явные -U ниже —
+# это и есть least-privilege на уровне СУБД (ADR-002/ADR-006).
 export PGHOST="${DB_HOST}"
 export PGPORT="${DB_PORT}"
 export PGUSER="${POSTGRES_USER}"
 export PGPASSWORD="${POSTGRES_PASSWORD}"
 export PGDATABASE="${POSTGRES_DB}"
+
+# Пароли служебных ролей: нужны и для bootstrap (создание ролей), и для
+# подключения psql под этими ролями ниже. Безопасные значения по умолчанию —
+# чтобы накат не падал на необъявленной переменной; для боя задайте свои в .env.
+APP_PASSWORD="${APP_PASSWORD:-change-me-app-password}"
+MIGRATOR_PASSWORD="${MIGRATOR_PASSWORD:-change-me-migrator-password}"
 
 # Ждём готовности до 60 попыток с паузой 2с (≈2 минуты).
 ATTEMPTS=60
@@ -140,16 +150,69 @@ done
 ok "База данных доступна (${DB_HOST}:${DB_PORT})"
 
 # -----------------------------------------------------------------------------
-# Шаг 3. Накат миграций (идемпотентно)
+# Шаг 3. Накат миграций (идемпотентно), least-privilege по ролям БД
 # -----------------------------------------------------------------------------
 step "Шаг 3/5. Накатываю миграции из db/migrations"
 
-# Пароли ролей БД (admik_app / admik_migrator) приходят psql-переменными
-# (:'APP_PASSWORD' / :'MIGRATOR_PASSWORD') в миграции 0001 (§3.4). Если они не
-# заданы в .env — подставляем безопасные значения по умолчанию, чтобы накат не
-# падал на необъявленной psql-переменной. Для боевого запуска задайте свои.
-APP_PASSWORD="${APP_PASSWORD:-change-me-app-password}"
-MIGRATOR_PASSWORD="${MIGRATOR_PASSWORD:-change-me-migrator-password}"
+# Модель привилегий (ADR-002/ADR-006):
+#   • Суперпользователь (POSTGRES_USER) — ТОЛЬКО bootstrap: создание ролей и
+#     расширений (это операции, которые в стоковом postgres недоступны обычной
+#     роли) + накат миграций, содержащих CREATE EXTENSION / CREATE ROLE.
+#   • admik_migrator — все ПРОЧИЕ миграции (DDL): создаёт таблицы (становясь их
+#     владельцем) и выдаёт точечные GRANT роли admik_app.
+#   • admik_app — рантайм приложения (минимальный DML); НИКОГДА не накатывает DDL.
+# Так суперпользователь не участвует в рутинном накате схемы, а audit_log
+# остаётся append-only для admik_app (SELECT/INSERT без UPDATE/DELETE, 0004).
+
+# 3.0. BOOTSTRAP суперпользователем (идемпотентно). Гарантируем, что роли,
+#      расширения и таблица журнала миграций существуют ДО любого наката, а
+#      admik_migrator имеет право вести журнал schema_migrations. Это снимает
+#      «курицу и яйцо»: миграция 0001 создаёт роли/расширения, но накатывать её
+#      под admik_migrator нельзя (роль ещё не существует, CREATE EXTENSION/ROLE
+#      требуют суперпользователя). Все конструкции IF NOT EXISTS / WHERE NOT
+#      EXISTS — повтор безопасен.
+printf "  → bootstrap (суперпользователь): роли, расширения, журнал миграций\n"
+if ! PGUSER="${POSTGRES_USER}" PGPASSWORD="${POSTGRES_PASSWORD}" \
+     psql -v ON_ERROR_STOP=1 \
+          -v APP_PASSWORD="${APP_PASSWORD}" \
+          -v MIGRATOR_PASSWORD="${MIGRATOR_PASSWORD}" \
+          -q <<'SQL'
+-- Расширения, которые миграции ждут готовыми (0001: pgcrypto/citext, 0005:
+-- pg_trgm). Создаём их суперпользователем заранее, чтобы CREATE EXTENSION
+-- IF NOT EXISTS в миграциях, идущих под admik_migrator, был безопасным no-op.
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+CREATE EXTENSION IF NOT EXISTS citext;
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+-- Роли БД. CREATE ROLE не поддерживает IF NOT EXISTS → идемпотентность через
+-- SELECT ... \gexec (роль есть → 0 строк → no-op). %L безопасно квотирует пароль.
+SELECT format('CREATE ROLE admik_migrator LOGIN PASSWORD %L', :'MIGRATOR_PASSWORD')
+WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'admik_migrator')
+\gexec
+SELECT format('CREATE ROLE admik_app LOGIN PASSWORD %L', :'APP_PASSWORD')
+WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'admik_app')
+\gexec
+
+-- Базовые права на схему: migrator владеет DDL, app — только USAGE.
+GRANT ALL   ON SCHEMA public TO admik_migrator;
+GRANT USAGE ON SCHEMA public TO admik_app;
+
+-- Журнал применённых миграций. Создаём здесь, чтобы admik_migrator мог вести
+-- его при последующем накате (миграции под migrator пишут сюда INSERT).
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  version     text         PRIMARY KEY,
+  name        text         NOT NULL,
+  applied_at  timestamptz  NOT NULL DEFAULT now()
+);
+-- migrator ведёт журнал; app только читает (диагностика).
+GRANT SELECT, INSERT, UPDATE ON schema_migrations TO admik_migrator;
+GRANT SELECT                 ON schema_migrations TO admik_app;
+SQL
+then
+  fail "Ошибка bootstrap БД (создание ролей/расширений суперпользователем)."
+  exit 1
+fi
+ok "Bootstrap выполнен (роли admik_migrator/admik_app, расширения, журнал)"
 
 if [ ! -d "${MIGRATIONS_DIR}" ]; then
   warn "Каталог ${MIGRATIONS_DIR} не найден — пропускаю миграции."
@@ -162,24 +225,36 @@ else
   if [ "${#MIGRATION_FILES[@]}" -eq 0 ]; then
     warn "Файлы миграций (*.sql) не найдены — пропускаю."
   else
-    # Накатываем по порядку имён (миграции принято нумеровать: 001_, 002_, ...).
-    # Миграции должны быть идемпотентны (CREATE ... IF NOT EXISTS),
-    # поэтому повторный запуск безопасен.
+    # Накатываем по порядку имён (миграции нумерованы: 0001_, 0002_, ...).
+    # Миграции идемпотентны (CREATE ... IF NOT EXISTS) → повтор безопасен.
     for migration in $(printf '%s\n' "${MIGRATION_FILES[@]}" | sort); do
       name="$(basename "${migration}")"
-      printf "  → применяю %s\n" "${name}"
+
+      # Выбор роли наката (least-privilege): по умолчанию admik_migrator. Файлы с
+      # CREATE EXTENSION / CREATE ROLE требуют суперпользователя (стоковый postgres
+      # не даёт это обычной роли) — их накатываем суперпользователем. Расширения и
+      # роли в них уже созданы bootstrap'ом выше, поэтому это в основном no-op, но
+      # сами таблицы/GRANT из таких файлов корректно отработают под суперпользователем.
+      if grep -qiE 'create[[:space:]]+extension|create[[:space:]]+role' "${migration}"; then
+        run_user="${POSTGRES_USER}"; run_pass="${POSTGRES_PASSWORD}"; run_label="superuser"
+      else
+        run_user="admik_migrator"; run_pass="${MIGRATOR_PASSWORD}"; run_label="admik_migrator"
+      fi
+
+      printf "  → применяю %s (под %s)\n" "${name}" "${run_label}"
       # ON_ERROR_STOP=1 — остановиться при первой ошибке SQL.
-      # -v передаёт пароли ролей БД в миграцию 0001 (§3.4); прочие миграции их
-      # не используют — лишние переменные psql безвредны.
-      if ! psql -v ON_ERROR_STOP=1 \
+      # -v передаёт пароли ролей в миграцию 0001 (§3.4); прочим миграциям эти
+      # переменные не нужны — лишние psql-переменные безвредны.
+      if ! PGUSER="${run_user}" PGPASSWORD="${run_pass}" \
+           psql -v ON_ERROR_STOP=1 \
                 -v APP_PASSWORD="${APP_PASSWORD}" \
                 -v MIGRATOR_PASSWORD="${MIGRATOR_PASSWORD}" \
                 -q -f "${migration}"; then
-        fail "Ошибка при применении миграции ${name}."
+        fail "Ошибка при применении миграции ${name} (под ${run_label})."
         exit 1
       fi
     done
-    ok "Миграции применены (${#MIGRATION_FILES[@]} шт.)"
+    ok "Миграции применены (${#MIGRATION_FILES[@]} шт.; DDL — под admik_migrator)"
   fi
 fi
 

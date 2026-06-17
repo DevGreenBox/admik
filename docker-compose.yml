@@ -20,6 +20,10 @@ services:
     # текущий тегируется как образ-снимок, и при провале откат ВОЗВРАЩАЕТ его
     # без пересборки. Переопределяется через .env (APP_IMAGE), дефолт ниже.
     image: ${APP_IMAGE:-admik-app:current}
+    # Все секреты/параметры берутся из .env. ВАЖНО (least-privilege, ADR-002/ADR-006):
+    # рантайм подключается к БД по DATABASE_URL под ролью admik_app (минимальный DML),
+    # НЕ под суперпользователем POSTGRES_USER. Суперпользователь — только init/бэкап;
+    # миграции (DDL) — под admik_migrator (см. scripts/init-shop.sh, .env.example).
     env_file:
       - .env
     restart: unless-stopped
