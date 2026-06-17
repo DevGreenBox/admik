@@ -3,6 +3,7 @@ import { can } from '@/lib/auth/rbac';
 import { sql } from '@/lib/db/client';
 
 import { Forbidden } from '../_components/Forbidden';
+import { PageHeader } from '../_components/PageHeader';
 
 /**
  * Каркас раздела «Пользователи» (docs/04 §6.1). МИНИМАЛЬНЫЙ список под правом
@@ -35,11 +36,11 @@ export default async function UsersPage() {
 
   return (
     <div>
-      <h1 className="text-2xl font-semibold text-gray-900">Пользователи</h1>
-      <p className="mt-2 text-sm text-gray-600">
-        Каркас раздела. TODO: создание, редактирование, отключение, назначение
-        ролей (право <code>users.manage</code>).
-      </p>
+      <PageHeader
+        title="Пользователи"
+        subtitle="Сотрудники с доступом в админку и их роли."
+        breadcrumbs={[{ label: 'Пользователи' }]}
+      />
 
       <div className="mt-6 overflow-x-auto rounded-lg border border-gray-200">
         <table className="min-w-full divide-y divide-gray-200 text-sm">

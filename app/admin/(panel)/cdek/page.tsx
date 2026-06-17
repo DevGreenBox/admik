@@ -5,6 +5,7 @@ import { isCdekMock, getCdekConfig } from '@/lib/cdek/config';
 import { formatDateTime } from '@/lib/admin/order-format';
 
 import { Forbidden } from '../_components/Forbidden';
+import { PageHeader } from '../_components/PageHeader';
 import { guardCdek } from './_components/guard';
 
 /**
@@ -144,20 +145,21 @@ export default async function CdekPage({
 
   return (
     <div>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold text-gray-900">Доставка (СДЭК)</h1>
-          <p className="mt-1 text-sm text-gray-600">Найдено отправлений: {total}.</p>
-        </div>
-        <div className="text-right">
-          <span
-            className={`inline-block rounded-full border px-3 py-1 text-xs font-medium ${mode.cls}`}
-          >
-            {mode.label}
-          </span>
-          <p className="mt-1 max-w-xs text-xs text-gray-400">{mode.hint}</p>
-        </div>
-      </div>
+      <PageHeader
+        title="Доставка (СДЭК)"
+        subtitle={`Найдено отправлений: ${total}.`}
+        breadcrumbs={[{ label: 'Доставка' }]}
+        action={
+          <div className="text-right">
+            <span
+              className={`inline-block rounded-full border px-3 py-1 text-xs font-medium ${mode.cls}`}
+            >
+              {mode.label}
+            </span>
+            <p className="mt-1 max-w-xs text-xs text-gray-400">{mode.hint}</p>
+          </div>
+        }
+      />
 
       <form method="get" className="mt-4 flex gap-2">
         <input

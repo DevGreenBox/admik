@@ -19,6 +19,7 @@ import {
 } from '@/lib/orders/types';
 
 import { Forbidden } from '../_components/Forbidden';
+import { PageHeader } from '../_components/PageHeader';
 import { guardOrders } from './_components/guard';
 import { OrderFilters } from './_components/OrderFilters';
 import {
@@ -169,20 +170,19 @@ export default async function OrdersPage({
 
   return (
     <div>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold text-gray-900">Заказы</h1>
-          <p className="mt-1 text-sm text-gray-600">
-            Найдено заказов: {total}. Суммы в {currency}.
-          </p>
-        </div>
-        <Link
-          href="/admin/promo"
-          className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100"
-        >
-          Промокоды
-        </Link>
-      </div>
+      <PageHeader
+        title="Заказы"
+        subtitle={`Найдено заказов: ${total}. Суммы в ${currency}.`}
+        breadcrumbs={[{ label: 'Заказы' }]}
+        action={
+          <Link
+            href="/admin/promo"
+            className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100"
+          >
+            Промокоды
+          </Link>
+        }
+      />
 
       <div className="mt-4">
         <OrderFilters />

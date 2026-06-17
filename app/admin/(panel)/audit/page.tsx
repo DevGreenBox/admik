@@ -3,6 +3,7 @@ import { can } from '@/lib/auth/rbac';
 import { sql } from '@/lib/db/client';
 
 import { Forbidden } from '../_components/Forbidden';
+import { PageHeader } from '../_components/PageHeader';
 
 /**
  * Просмотр журнала аудита (docs/04 §7, задача 1.4/1.5). Последние N записей,
@@ -48,10 +49,11 @@ export default async function AuditPage() {
 
   return (
     <div>
-      <h1 className="text-2xl font-semibold text-gray-900">Журнал аудита</h1>
-      <p className="mt-2 text-sm text-gray-600">
-        Последние {LIMIT} событий (по убыванию времени).
-      </p>
+      <PageHeader
+        title="Журнал аудита"
+        subtitle={`Последние ${LIMIT} событий (по убыванию времени).`}
+        breadcrumbs={[{ label: 'Аудит' }]}
+      />
 
       <div className="mt-6 overflow-x-auto rounded-lg border border-gray-200">
         <table className="min-w-full divide-y divide-gray-200 text-sm">

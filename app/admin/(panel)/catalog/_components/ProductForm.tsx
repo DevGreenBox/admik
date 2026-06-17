@@ -418,12 +418,13 @@ export function ProductForm({
               </select>
             </div>
 
-            <fieldset className="lg:col-span-2">
-              <legend className="text-sm font-medium text-gray-700">
-                Вес и габариты (для расчёта доставки СДЭК)
-              </legend>
+            <details className="lg:col-span-2 rounded border border-gray-200 p-3">
+              <summary className="cursor-pointer text-sm font-medium text-gray-700">
+                Вес и габариты (для расчёта доставки) — необязательно
+              </summary>
               <p className="mt-1 text-xs text-gray-500">
-                Пусто — берётся дефолт магазина. На уровне варианта можно переопределить.
+                Пусто — берётся значение по умолчанию из настроек магазина. У каждого
+                варианта можно задать свои.
               </p>
               <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
                 <div>
@@ -479,7 +480,7 @@ export function ProductForm({
                   {fieldErr('heightCm') ? <p className="mt-1 text-xs text-red-600">{fieldErr('heightCm')}</p> : null}
                 </div>
               </div>
-            </fieldset>
+            </details>
 
             <fieldset className="flex flex-col gap-2">
               <legend className="text-sm font-medium text-gray-700">Флаги</legend>

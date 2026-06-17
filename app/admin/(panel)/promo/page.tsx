@@ -13,6 +13,7 @@ import { mapPromoCode } from '@/lib/orders/repository';
 import type { PromoCode } from '@/lib/orders/types';
 
 import { Forbidden } from '../_components/Forbidden';
+import { PageHeader } from '../_components/PageHeader';
 import { guardOrders } from '../orders/_components/guard';
 import { PromoRowActions } from './_components/PromoRowActions';
 
@@ -69,28 +70,27 @@ export default async function PromoPage() {
 
   return (
     <div>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold text-gray-900">Промокоды</h1>
-          <p className="mt-1 text-sm text-gray-600">
-            Всего промокодов: {promos.length}.
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Link
-            href="/admin/orders"
-            className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100"
-          >
-            К заказам
-          </Link>
-          <Link
-            href="/admin/promo/new"
-            className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700"
-          >
-            Создать промокод
-          </Link>
-        </div>
-      </div>
+      <PageHeader
+        title="Промокоды"
+        subtitle={`Всего промокодов: ${promos.length}.`}
+        breadcrumbs={[{ label: 'Промокоды' }]}
+        action={
+          <>
+            <Link
+              href="/admin/orders"
+              className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100"
+            >
+              К заказам
+            </Link>
+            <Link
+              href="/admin/promo/new"
+              className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700"
+            >
+              + Создать промокод
+            </Link>
+          </>
+        }
+      />
 
       <div className="mt-6 overflow-x-auto rounded-lg border border-gray-200">
         <table className="min-w-full divide-y divide-gray-200 text-sm">

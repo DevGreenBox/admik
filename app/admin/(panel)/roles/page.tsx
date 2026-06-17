@@ -3,6 +3,7 @@ import { can } from '@/lib/auth/rbac';
 import { sql } from '@/lib/db/client';
 
 import { Forbidden } from '../_components/Forbidden';
+import { PageHeader } from '../_components/PageHeader';
 
 /**
  * Каркас раздела «Роли» (docs/04 §6.1). МИНИМАЛЬНЫЙ список под правом
@@ -42,11 +43,11 @@ export default async function RolesPage() {
 
   return (
     <div>
-      <h1 className="text-2xl font-semibold text-gray-900">Роли</h1>
-      <p className="mt-2 text-sm text-gray-600">
-        Каркас раздела. TODO: создание ролей и привязка прав
-        (<code>role_permissions</code>). Системные роли неудаляемы.
-      </p>
+      <PageHeader
+        title="Роли"
+        subtitle="Наборы прав для сотрудников. Системные роли удалить нельзя."
+        breadcrumbs={[{ label: 'Роли' }]}
+      />
 
       <div className="mt-6 overflow-x-auto rounded-lg border border-gray-200">
         <table className="min-w-full divide-y divide-gray-200 text-sm">

@@ -4,6 +4,7 @@ import { listCmsPages, type CmsPageListFilter } from '@/lib/cms/repository';
 import { CMS_PAGE_STATUSES, type CmsPageStatus } from '@/lib/cms/types';
 
 import { Forbidden } from '../_components/Forbidden';
+import { PageHeader } from '../_components/PageHeader';
 import { guardCms } from './_components/guard';
 import { StatusBadge } from './_components/StatusBadge';
 
@@ -86,18 +87,19 @@ export default async function CmsPagesPage({
 
   return (
     <div>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold text-gray-900">Контент — страницы</h1>
-          <p className="mt-1 text-sm text-gray-600">Найдено страниц: {total}.</p>
-        </div>
-        <Link
-          href="/admin/cms/new"
-          className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700"
-        >
-          Создать страницу
-        </Link>
-      </div>
+      <PageHeader
+        title="Контент — страницы"
+        subtitle={`Найдено страниц: ${total}.`}
+        breadcrumbs={[{ label: 'Контент' }]}
+        action={
+          <Link
+            href="/admin/cms/new"
+            className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700"
+          >
+            + Создать страницу
+          </Link>
+        }
+      />
 
       {/* Поиск + фильтр статуса (GET-форма → searchParams). */}
       <form method="get" className="mt-4 flex flex-wrap items-end gap-3">

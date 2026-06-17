@@ -1,6 +1,7 @@
 import { getEffectiveSettings } from '@/lib/config/settings';
 
 import { Forbidden } from '../../_components/Forbidden';
+import { PageHeader } from '../../_components/PageHeader';
 import { guardSettings } from '../_components/guard';
 import { SeoSettingsForm } from '../_components/SeoSettingsForm';
 
@@ -25,11 +26,16 @@ export default async function SeoSettingsPage() {
 
   return (
     <div className="max-w-4xl">
-      <h1 className="text-2xl font-semibold text-gray-900">SEO-настройки</h1>
-      <p className="mt-1 text-sm text-gray-500">
-        Домен, шаблон заголовка и дефолты SEO. Используются в sitemap.xml,
-        robots.txt и метатегах витрины. Значения по умолчанию — из окружения.
-      </p>
+      <PageHeader
+        title="SEO-настройки"
+        subtitle="Домен, заголовки и описания для поисковиков и соцсетей."
+        breadcrumbs={[
+          { label: 'Настройки', href: '/admin/settings' },
+          { label: 'SEO' },
+        ]}
+        backHref="/admin/settings"
+        backLabel="К настройкам"
+      />
 
       <section className="mt-8 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
         <SeoSettingsForm seo={eff.seo} />

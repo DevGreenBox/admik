@@ -4,6 +4,7 @@ import { getEnabledModules } from '@/lib/config/modules';
 import { parseSettingValue, type ModuleOverrides } from '@/lib/settings/schemas';
 
 import { Forbidden } from '../_components/Forbidden';
+import { PageHeader } from '../_components/PageHeader';
 import { guardSettings } from './_components/guard';
 import { BrandingForm } from './_components/BrandingForm';
 import { CurrencyUnitsForm } from './_components/CurrencyUnitsForm';
@@ -38,10 +39,11 @@ export default async function SettingsPage() {
 
   return (
     <div className="max-w-4xl">
-      <h1 className="text-2xl font-semibold text-gray-900">Настройки магазина</h1>
-      <p className="mt-1 text-sm text-gray-500">
-        Значения по умолчанию берутся из окружения (env); заданное здесь переопределяет их в БД.
-      </p>
+      <PageHeader
+        title="Настройки магазина"
+        subtitle="Название, валюта, контакты, доставка и другие параметры магазина."
+        breadcrumbs={[{ label: 'Настройки' }]}
+      />
 
       <Section title="Брендинг">
         <BrandingForm branding={eff.branding} />
