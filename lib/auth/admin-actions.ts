@@ -5,6 +5,7 @@ import type { TransactionSql } from 'postgres';
 import { defineAction, PublicActionError, type ActionCtx } from '@/lib/server/action';
 import { sql } from '@/lib/db/client';
 import { hashPassword } from '@/lib/auth/password';
+import { invalidateUserSessions } from '@/lib/auth/session';
 import { ALL_PERMISSIONS } from '@/lib/auth/permissions';
 
 import {
@@ -59,6 +60,26 @@ function filterKnownPermissions(codes: string[]): string[] {
   return codes.filter((c) => KNOWN_PERMISSION_CODES.has(c));
 }
 
+/**
+ * Серверный гард защиты владельца магазина (RBAC §5.4): учётку с is_owner нельзя
+ * изменять, отключать или сбрасывать ей пароль через UI — иначе любой носитель
+ * users.manage мог бы перехватить владельца (privilege escalation).
+ *
+ * Читает users.is_owner по id и бросает PublicActionError, если это владелец.
+ * Возвращает строку пользователя (id/is_owner), чтобы вызывающий мог отличить
+ * «не найден» (null) от «найден, не владелец» без повторного SELECT.
+ */
+async function assertNotOwner(id: string): Promise<{ id: string; is_owner: boolean } | null> {
+  const rows = await sql<{ id: string; is_owner: boolean }[]>`
+    SELECT id, is_owner FROM users WHERE id = ${id} LIMIT 1
+  `;
+  const row = rows[0];
+  if (row?.is_owner) {
+    throw new PublicActionError('Владельца магазина нельзя изменять или отключать.');
+  }
+  return row ?? null;
+}
+
 // =============================================================================
 // ПОЛЬЗОВАТЕЛИ.
 // =============================================================================
@@ -111,19 +132,17 @@ export const updateUser = defineAction({
   permission: 'users.manage',
   input: UserUpdateSchema,
   handler: async (data, ctx: ActionCtx) => {
+    // Защита владельца — единый хелпер (бросает PublicActionError, если is_owner).
+    await assertNotOwner(data.id);
+
     const before = await sql<
-      { id: string; email: string; display_name: string; status: string; is_owner: boolean }[]
+      { id: string; email: string; display_name: string; status: string }[]
     >`
-      SELECT id, email, display_name, status, is_owner
+      SELECT id, email, display_name, status
       FROM users WHERE id = ${data.id} LIMIT 1
     `;
     if (!before[0]) {
       throw new PublicActionError('Пользователь не найден.');
-    }
-
-    // Защита владельца: учётку владельца через UI не меняем (RBAC §5.4).
-    if (before[0].is_owner) {
-      throw new PublicActionError('Владельца магазина нельзя изменять или отключать.');
     }
 
     // Нельзя отключить самого себя — иначе можно потерять доступ к админке.
@@ -145,6 +164,13 @@ export const updateUser = defineAction({
         await assignUserRoles(tx, data.id, data.roleIds);
       }
     });
+
+    // Отключение пользователя (status != active) — ротация сессий: гасим все его
+    // сессии, иначе уже выданные cookie остались бы валидными после блокировки.
+    const disabling = data.status !== undefined && data.status !== 'active';
+    if (disabling) {
+      await invalidateUserSessions(data.id);
+    }
 
     return {
       result: { id: data.id },
@@ -171,6 +197,11 @@ export const resetUserPassword = defineAction({
   permission: 'users.manage',
   input: UserPasswordResetSchema,
   handler: async (data, _ctx: ActionCtx) => {
+    // Защита владельца (RBAC §5.4): нельзя сбросить пароль владельцу — иначе
+    // носитель users.manage перехватил бы его учётку (privilege escalation).
+    // Симметрично updateUser — общий хелпер бросает PublicActionError для is_owner.
+    await assertNotOwner(data.id);
+
     const passwordHash = await hashPassword(data.password);
     const rows = await sql<{ id: string }[]>`
       UPDATE users SET password_hash = ${passwordHash}, updated_at = now()
@@ -180,6 +211,11 @@ export const resetUserPassword = defineAction({
     if (!rows[0]) {
       throw new PublicActionError('Пользователь не найден.');
     }
+
+    // Ротация сессий цели: после сброса пароля старые сессии должны умереть
+    // (иначе выданные ранее cookie остались бы валидными) — как в changePassword.
+    await invalidateUserSessions(data.id);
+
     return {
       result: { id: data.id },
       revalidate: [USERS_PATH],
