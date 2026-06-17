@@ -77,6 +77,14 @@ export const deliverySelectionSchema = z
   .object({
     type: z.enum(DELIVERY_TYPES),
     city: z.string().trim().max(200).optional(),
+    /**
+     * Код города СДЭК (необязателен). Когда витрина знает числовой код города
+     * (из автокомплита /cities), он пробрасывается в расчёт точнее, чем имя.
+     * Если не задан — расчёт идёт по строковому `city` (geocoding в real СДЭК,
+     * по весу в mock). Из тела доверяем (это не цена): итог всё равно считает
+     * сервер из каталога, тариф — из whitelist (anti-tamper, ADR-010).
+     */
+    cityCode: z.number().int().positive().optional(),
     address: z.string().trim().max(500).optional(),
     pvzCode: z.string().trim().max(64).optional(),
   })
@@ -241,6 +249,47 @@ const promoBaseShape = {
 };
 
 /**
+ * Форма для ЧАСТИЧНОГО обновления промокода (баги #17/#18, data-integrity).
+ *
+ * Критично: здесь у полей НЕТ `.default(...)`, в отличие от promoBaseShape.
+ * Если строить update-схему как `.partial()` поверх схемы с дефолтами, Zod при
+ * ОТСУТСТВИИ ключа всё равно подставляет DEFAULT (value→'0', minOrderTotal→'0',
+ * isActive→true, comment→'', applyScope→'cart', priority→100, stackable→false,
+ * targets→[]) — `.partial()` снимает «обязательность», но НЕ отменяет default.
+ * Тогда handler через COALESCE(${default}, col) затирал бы реальные значения в
+ * БД, а applyScope='cart' включал manageTargets и стирал promo_targets.
+ *
+ * Здесь каждое поле — `.optional()` БЕЗ default: опущенный ключ остаётся
+ * `undefined`, и handler различает «ключ не передан» (не трогаем колонку/таргеты)
+ * от «явный null» (очищаем колонку). nullish-поля (maxDiscount, usageLimit,
+ * starts_at и т.п.) и так без default — переносятся как есть.
+ */
+const promoUpdateShape = {
+  code: promoCodeSchema.optional(),
+  kind: z.enum(PROMO_KINDS).optional(),
+  value: moneySchema.optional(),
+  minOrderTotal: moneySchema.optional(),
+  maxDiscount: moneySchema.nullish(),
+  usageLimit: z.number().int().min(0).nullish(),
+  perCustomerLimit: z.number().int().min(0).nullish(),
+  startsAt: z.coerce.date().nullish(),
+  endsAt: z.coerce.date().nullish(),
+  isActive: z.boolean().optional(),
+  bogoBuyQty: z.number().int().min(1).nullish(),
+  bogoPayQty: z.number().int().min(1).nullish(),
+  // ---- N×M промо-механики (Пакет 5.P-1) ----
+  applyScope: z.enum(PROMO_APPLY_SCOPES).optional(),
+  priority: z.number().int().min(0).optional(),
+  stackable: z.boolean().optional(),
+  minQty: z.number().int().min(1).nullish(),
+  giftProductId: uuidSchema.nullish(),
+  giftVariantId: uuidSchema.nullish(),
+  giftQty: z.number().int().min(1).nullish(),
+  targets: z.array(promoTargetSchema).optional(),
+  comment: z.string().trim().max(2000).optional(),
+};
+
+/**
  * Общая семантическая проверка промокода:
  *  - percent: value в диапазоне 0..100;
  *  - даты: ends_at ≥ starts_at (если обе заданы);
@@ -325,15 +374,7 @@ export const PromoCreateSchema = z.object(promoBaseShape).superRefine(refineProm
 export type PromoCreateInput = z.infer<typeof PromoCreateSchema>;
 
 export const PromoUpdateSchema = z
-  .object({ id: uuidSchema, ...promoBaseShape })
-  .partial({
-    code: true,
-    kind: true,
-    value: true,
-    minOrderTotal: true,
-    isActive: true,
-    comment: true,
-  })
+  .object({ id: uuidSchema, ...promoUpdateShape })
   .superRefine(refinePromo);
 export type PromoUpdateInput = z.infer<typeof PromoUpdateSchema>;
 

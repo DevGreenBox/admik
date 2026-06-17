@@ -95,7 +95,13 @@ function hasDestination(d: DeliveryDestination): boolean {
   return (
     d.cityCode !== undefined ||
     (d.postalCode !== undefined && d.postalCode !== '') ||
-    (d.pvzCode !== undefined && d.pvzCode !== '')
+    (d.pvzCode !== undefined && d.pvzCode !== '') ||
+    // Курьерская доставка из orders несёт назначение строковым cityName
+    // (deliverySelectionSchema.city). Без его учёта needsCdekProvider всегда
+    // возвращал false → stub 0.00, и курьерская доставка считалась бесплатной
+    // (BUG #3). Имя города — валидный признак назначения: real СДЭК геокодирует
+    // его через to_location.address, mock считает по весу.
+    (d.cityName !== undefined && d.cityName !== '')
   );
 }
 
@@ -149,6 +155,9 @@ export async function computeDeliveryCost(
       to: {
         code: input.destination.cityCode,
         postalCode: input.destination.postalCode,
+        // Имя города пробрасываем как address: real СДЭК геокодирует его, когда
+        // нет числового кода/индекса (BUG #3 — курьер несёт только cityName).
+        address: input.destination.cityName,
       },
       lines: input.lines.map((l) => ({
         qty: l.qty,

@@ -104,6 +104,36 @@ describe('orders/delivery-cost — адаптер расчёта доставк�
     expect(res.source).toBe('stub');
   });
 
+  // BUG #3 (correctness): курьерская доставка из orders несёт назначение ТОЛЬКО
+  // строковым cityName (deliverySelectionSchema.city → destination.cityName). До
+  // фикса hasDestination игнорировал cityName → needsCdekProvider=false → stub
+  // 0.00, поэтому курьерская доставка всегда считалась бесплатной. Назначение по
+  // имени города ДОЛЖНО триггерить cdek-расчёт (mock считает по весу).
+  it('cdek включён + только cityName (курьер) → mock-расчёт, не 0.00 (BUG #3)', async () => {
+    process.env.ADMIK_MODULES = 'orders,cdek';
+    const { computeDeliveryCost } = await load();
+    const res = await computeDeliveryCost({
+      deliveryType: 'courier',
+      lines: [{ qty: 1, weightG: 500 }],
+      destination: { cityName: 'Москва' },
+    });
+    expect(res.source).toBe('cdek_mock');
+    expect(Number(res.cost)).toBeGreaterThan(0);
+  });
+
+  it('hasDestination учитывает cityName: needsCdekProvider true при наличии города', async () => {
+    process.env.ADMIK_MODULES = 'orders,cdek';
+    const { computeDeliveryCost } = await load();
+    // pvz без pvzCode, но с cityName — расчёт должен пройти (назначение есть).
+    const res = await computeDeliveryCost({
+      deliveryType: 'pvz',
+      lines: [{ qty: 1, weightG: 500 }],
+      destination: { cityName: 'Санкт-Петербург' },
+    });
+    expect(res.source).toBe('cdek_mock');
+    expect(Number(res.cost)).toBeGreaterThan(0);
+  });
+
   it('needsCdekProvider — чистый выбор провайдера', async () => {
     const { needsCdekProvider } = await load();
     // pickup никогда не считаем

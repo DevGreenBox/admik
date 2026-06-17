@@ -414,6 +414,15 @@ export async function computeDeliveryCost(input: DeliveryCostInput): Promise<Del
 4. В mock-режиме — формула (§5.3), `source: 'cdek_mock'`.
 - Применяется порог бесплатной доставки `SHOP_FREE_DELIVERY_THRESHOLD` (если сумма корзины ≥ порога → `cost = '0.00'`, как в Этапе 3).
 
+**Признак назначения (`hasDestination`):** расчёт СДЭК запускается, если в `destination`
+есть хотя бы один признак — `cityCode` (код города), `postalCode` (индекс), `pvzCode`
+(код ПВЗ) **или `cityName` (имя города)**. Имя города критично для КУРЬЕРСКОЙ доставки:
+заказ из `lib/orders` несёт назначение строкой `delivery.city` (→ `destination.cityName`),
+числового кода у курьера обычно нет. Без учёта `cityName` курьерская доставка всегда
+деградировала к stub `0.00` (был баг). `cityName` пробрасывается в `Calculator.to` как
+`address` (real СДЭК геокодирует; mock считает по весу). Опц. числовой `delivery.cityCode`
+(из автокомплита витрины) даёт точное назначение и идёт в `Calculator.to.code`.
+
 ### 5.2 `Calculator` (порт `Calculator.php`)
 
 ```ts

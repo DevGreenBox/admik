@@ -44,6 +44,19 @@ import type { CartQuoteInput, CreateOrderInput } from './schemas';
 const NIL_UUID = '00000000-0000-0000-0000-000000000000';
 const MAIN_WAREHOUSE = 'main';
 
+/** Код нарушения уникального индекса PostgreSQL (как в catalog/actions). */
+const PG_UNIQUE_VIOLATION = '23505';
+
+/** true, если ошибка — нарушение уникального индекса (postgres.js прокидывает code). */
+function isUniqueViolation(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    'code' in err &&
+    (err as { code?: string }).code === PG_UNIQUE_VIOLATION
+  );
+}
+
 // =============================================================================
 // Мапперы row→domain.
 // =============================================================================
@@ -479,10 +492,15 @@ async function resolveDeliveryCost(args: {
   deliveryType: DeliveryType | undefined;
   lines: ReadonlyArray<{ qty: number }>;
   city?: string;
+  cityCode?: number;
   pvzCode?: string;
 }): Promise<string> {
   const deliveryType: DeliveryType = args.deliveryType ?? 'courier';
+  // Назначение: код города (если витрина его знает) + имя города + код ПВЗ.
+  // cityName КРИТИЧЕН для курьера (BUG #3): курьерская доставка часто несёт
+  // только имя города — без него расчёт деградировал к stub 0.00.
   const destination: DeliveryDestination = {
+    cityCode: args.cityCode,
     cityName: args.city,
     pvzCode: args.pvzCode,
   };
@@ -574,6 +592,7 @@ export async function quoteCart(
     deliveryType: input.delivery?.type,
     lines,
     city: input.delivery?.city,
+    cityCode: input.delivery?.cityCode,
     pvzCode: input.delivery?.pvzCode,
   });
 
@@ -785,6 +804,7 @@ export async function createOrder(
     deliveryType: input.delivery.type,
     lines: resolved,
     city: input.delivery.city,
+    cityCode: input.delivery.cityCode,
     pvzCode: input.delivery.pvzCode,
   });
 
@@ -963,6 +983,20 @@ export async function createOrder(
         code: 'invalid_promo',
         message: 'Лимит промокода на одного покупателя исчерпан.',
       };
+    }
+    // BUG #2 (reliability): гонка идемпотентного создания. Предтранзакционная
+    // проверка ключа (выше) не видит чужую вставку, ещё не закоммиченную; INSERT
+    // в транзакции нарывается на UNIQUE orders_idempotency_uniq (23505). Это НЕ
+    // ошибка клиента — заказ уже создан конкурентным запросом с тем же ключом:
+    // перечитываем его и возвращаем как успешный идемпотентный повтор (reused).
+    // Конфликт без ключа (иной индекс) НЕ маскируем — пробрасываем как есть.
+    if (input.idempotencyKey && isUniqueViolation(err)) {
+      const existing = await sql<Record<string, unknown>[]>`
+        SELECT * FROM orders WHERE idempotency_key = ${input.idempotencyKey} LIMIT 1
+      `;
+      if (existing[0]) {
+        return { ok: true, order: mapOrder(existing[0]), reused: true };
+      }
     }
     throw err;
   }

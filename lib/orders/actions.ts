@@ -653,13 +653,15 @@ export const updatePromoCode = defineAction({
     if (!before[0]) {
       throw new OrderError('not_found', 'Промокод не найден.');
     }
-    // Управляем таргетами, когда задан scope ≠ cart, передан непустой targets,
-    // ИЛИ scope явно переводится в 'cart' (тогда чистим). При partial-update без
-    // упоминания scope/targets — таргеты не трогаем (сохраняем существующие).
-    const manageTargets =
-      (data.applyScope !== undefined && data.applyScope !== 'cart') ||
-      data.targets.length > 0 ||
-      data.applyScope === 'cart';
+    // Управляем таргетами ТОЛЬКО когда они реально затрагиваются запросом
+    // (баг #18): scope передан явно (в т.ч. 'cart' — тогда чистим) ИЛИ передан
+    // массив targets. При partial-update БЕЗ упоминания scope/targets — таргеты
+    // не трогаем (сохраняем существующие). Раньше applyScope получал default
+    // 'cart' даже при опущенном ключе → manageTargets всегда true → DELETE стирал
+    // promo_targets категорийного/брендового промокода. Теперь applyScope/targets
+    // приходят undefined, если ключ не передан (см. promoUpdateShape).
+    const manageTargets = data.applyScope !== undefined || data.targets !== undefined;
+    const targetsToWrite = data.targets ?? [];
 
     let after: Record<string, unknown>[];
     try {
@@ -703,7 +705,7 @@ export const updatePromoCode = defineAction({
         `;
         if (manageTargets) {
           await tx`DELETE FROM promo_targets WHERE promo_code_id = ${data.id}`;
-          await insertPromoTargets(tx, data.id, data.targets);
+          await insertPromoTargets(tx, data.id, targetsToWrite);
         }
         return updated;
       });

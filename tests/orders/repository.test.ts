@@ -334,6 +334,39 @@ describe.skipIf(!INTEGRATION_DB_URL)('orders/repository (интеграция, �
     expect(Number(inv!.reserved)).toBe(1);
   });
 
+  it('гонка идемпотентности: два параллельных createOrder с одним ключом → один заказ (BUG #2)', async () => {
+    const productId = await makeProduct({ basePrice: '100.00', quantity: 10 });
+    const key = 'idem-race-' + Math.random().toString(36).slice(2);
+    const args = {
+      items: [{ productId, qty: 1 }],
+      customer: customer(),
+      delivery: { type: 'courier' as const },
+      paymentMethod: 'cod' as const,
+      idempotencyKey: key,
+    };
+    // Параллельно: один вставит, второй нарвётся на UNIQUE orders_idempotency_uniq
+    // (23505) и ДОЛЖЕН вернуть существующий заказ (reused), а не упасть с 500.
+    const [a, b] = await Promise.all([repo.createOrder(args), repo.createOrder(args)]);
+    expect(a.ok && b.ok).toBe(true);
+    if (a.ok) created.orderIds.push(a.order.id);
+    if (a.ok && b.ok) {
+      // Оба ссылаются на один и тот же заказ.
+      expect(b.order.id).toBe(a.order.id);
+      // Ровно один реально создал, второй — идемпотентный повтор.
+      expect(a.reused !== b.reused).toBe(true);
+    }
+    // Резерв списан ровно один раз (анти-дубль).
+    const [inv] = await sql<{ reserved: number }[]>`
+      SELECT reserved FROM inventory WHERE product_id = ${productId} AND warehouse_code = 'main'
+    `;
+    expect(Number(inv!.reserved)).toBe(1);
+    // В БД ровно одна строка с этим ключом.
+    const [cnt] = await sql<{ n: string }[]>`
+      SELECT count(*)::text AS n FROM orders WHERE idempotency_key = ${key}
+    `;
+    expect(Number(cnt!.n)).toBe(1);
+  });
+
   it('createOrder отклоняет при нехватке остатка', async () => {
     const productId = await makeProduct({ basePrice: '100.00', quantity: 1 });
     const r = await repo.createOrder({

@@ -37,6 +37,12 @@ const H = vi.hoisted(() => {
     txResultQueue: [] as unknown[][],
     /** Лог SQL-запросов внутри транзакции (строки шаблонов) — для проверок Fix 1/4. */
     txCalls: [] as string[][],
+    /**
+     * Лог tx-запросов с интерполированными аргументами — для проверок, что
+     * UPDATE промокода НЕ затирает поля дефолтами при partial-update (Fix #17/#18).
+     * Каждый элемент: { strings: статические куски, args: значения интерполяции }.
+     */
+    txCallsWithArgs: [] as { strings: string[]; args: unknown[] }[],
   };
   // sql.begin как управляемый спай: по умолчанию выполняет колбэк с tx-моком.
   // tx`...` снимает результат из txResultQueue, а если очередь пуста — возвращает
@@ -46,19 +52,27 @@ const H = vi.hoisted(() => {
   // txResultQueue пустой массив [] (0 строк) как результат первого UPDATE.
   const DEFAULT_TX_ROW = [{ id: 'tx-row-id' }];
   const sqlBeginMock = vi.fn(async (cb: (tx: unknown) => Promise<unknown>) => {
-    const tx = (strings: TemplateStringsArray, ..._args: unknown[]) => {
+    const tx = (strings: TemplateStringsArray, ...args: unknown[]) => {
       // Записываем шаблон (склейку статических кусков) — позволяет утверждать
       // наличие «AND status =» / «promo_redemptions» / «used_count» в запросе.
       state.txCalls.push(Array.from(strings ?? []));
+      state.txCallsWithArgs.push({ strings: Array.from(strings ?? []), args });
       const next = state.txResultQueue.length > 0 ? state.txResultQueue.shift()! : DEFAULT_TX_ROW;
       return Promise.resolve(next);
     };
     (tx as unknown as { json: unknown }).json = (v: unknown) => v;
     return cb(tx);
   });
+  // sql как tagged-template-спай: по умолчанию возвращает [] (как раньше), но это
+  // vi.fn — тесты могут переопределить ОДИН вызов (mockImplementationOnce), чтобы
+  // SELECT существующего промокода в updatePromoCode вернул строку.
+  const sqlMock = vi.fn((..._args: unknown[]) => Promise.resolve([] as unknown[]));
+  (sqlMock as unknown as { begin: unknown }).begin = sqlBeginMock;
+  (sqlMock as unknown as { json: unknown }).json = (v: unknown) => v;
   return {
     state,
     sqlBeginMock,
+    sqlMock,
     writeAuditSpy: vi.fn(async (..._args: unknown[]) => {}),
     getCurrentUserMock: vi.fn(async () => state.currentUser),
     getOrderByIdMock: vi.fn(async (..._args: unknown[]) => state.getOrderByIdQueue.shift() ?? null),
@@ -74,6 +88,7 @@ const H = vi.hoisted(() => {
 
 const {
   sqlBeginMock,
+  sqlMock,
   writeAuditSpy,
   getCurrentUserMock,
   getOrderByIdMock,
@@ -106,17 +121,10 @@ vi.mock('next/headers', () => ({
   headers: async () => ({ get: () => null }),
 }));
 
-// sql: tagged-template, возвращающий [] по умолчанию; sql.begin — управляемый
+// sql: tagged-template-спай H.sqlMock (по умолчанию []); sql.begin — управляемый
 // спай H.sqlBeginMock (выполняет колбэк с tx-моком, снимающим txResultQueue).
-function makeSqlMock() {
-  const sqlFn = (..._args: unknown[]) => Promise.resolve([] as unknown[]);
-  (sqlFn as unknown as { begin: unknown }).begin = H.sqlBeginMock;
-  (sqlFn as unknown as { json: unknown }).json = (v: unknown) => v;
-  return sqlFn;
-}
-
 vi.mock('@/lib/db/client', () => ({
-  sql: makeSqlMock(),
+  sql: H.sqlMock,
 }));
 
 vi.mock('@/lib/orders/repository', () => ({
@@ -178,7 +186,9 @@ beforeEach(() => {
   H.state.getOrderByIdQueue = [];
   H.state.txResultQueue = [];
   H.state.txCalls = [];
+  H.state.txCallsWithArgs = [];
   sqlBeginMock.mockClear();
+  sqlMock.mockClear();
   writeAuditSpy.mockClear();
   getOrderByIdMock.mockClear();
   releaseReservationMock.mockClear();
@@ -613,6 +623,136 @@ describe('промокоды: валидация и аудит', () => {
     expect(res.ok).toBe(false);
     if (res.ok) throw new Error('ожидался отказ');
     expect(res.error).toBe('validation');
+  });
+});
+
+// =============================================================================
+// PARTIAL-UPDATE ПРОМОКОДА: дефолты НЕ затирают существующие значения (баги #17/#18).
+//
+// Регресс: PromoUpdateSchema строилась как .partial() поверх схемы с .default(...).
+// При partial-update (передан только один-два поля) Zod подставлял DEFAULT для
+// опущенных ключей (value→'0', isActive→true, comment→'', applyScope→'cart',
+// priority→100, stackable→false, targets→[]), а handler писал их в БД через
+// COALESCE(${default}, col) — затирая реальные значения. Плюс applyScope='cart'
+// делал manageTargets=true → DELETE promo_targets даже без передачи targets.
+//
+// Юнит-уровень: проверяем интерполированные аргументы UPDATE-запроса и факт
+// (не)выполнения DELETE/INSERT promo_targets. БД не дёргается (мок tx).
+// =============================================================================
+
+describe('partial-update промокода: дефолты не затирают данные (#17/#18)', () => {
+  /** Перед UPDATE action делает SELECT promo_codes (sql`...`), отдаём непустую строку. */
+  function seedExistingPromo() {
+    // updatePromoCode сначала SELECT через sql`...` — мок sql по умолчанию [] →
+    // OrderError('not_found'). Подменяем мок sql, чтобы первый вызов вернул строку.
+    // Проще: используем txResultQueue только для tx; SELECT идёт через sql (не tx).
+    // sql-мок возвращает [] всегда → нужно вернуть строку. Делаем это локально.
+  }
+  void seedExistingPromo;
+
+  /** Находит интерполированные аргументы tx-запроса UPDATE promo_codes. */
+  function findUpdateArgs(): unknown[] | undefined {
+    const call = H.state.txCallsWithArgs.find((c) =>
+      c.strings.join('|').includes('UPDATE promo_codes'),
+    );
+    return call?.args;
+  }
+
+  /** Был ли среди tx-запросов DELETE FROM promo_targets. */
+  function deletedTargets(): boolean {
+    return H.state.txCalls.some((tpl) => tpl.join('|').includes('DELETE FROM promo_targets'));
+  }
+
+  /** Был ли INSERT в promo_targets среди tx-запросов. */
+  function insertedTargets(): boolean {
+    return H.state.txCalls.some((tpl) => tpl.join('|').includes('INSERT INTO promo_targets'));
+  }
+
+  it('#17: частичный апдейт (только code) не затирает value/minOrderTotal/isActive/comment/priority/stackable дефолтами', async () => {
+    // SELECT существующего промокода (sql`...`) → возвращаем строку.
+    sqlMock.mockImplementationOnce(() => Promise.resolve([{ id: UUID, code: 'OLD', apply_scope: 'cart' }]));
+
+    const res = await updatePromoCode({ id: UUID, code: 'NEWCODE' });
+    expect(res.ok).toBe(true);
+
+    const args = findUpdateArgs();
+    expect(args, 'UPDATE promo_codes должен выполниться').toBeDefined();
+    const a = args!;
+    // Позиции COALESCE-аргументов в UPDATE (см. lib/orders/actions.ts):
+    //  [0]=code [2]=value [3]=minOrderTotal [14]=isActive
+    //  [19]=applyScope [20]=priority [21]=stackable [30]=comment.
+    // Опущенные поля должны прийти как null (COALESCE сохраняет колонку в БД),
+    // а НЕ как дефолт ('0' / true / '' / 'cart' / 100 / false).
+    expect(a[0]).toBe('NEWCODE'); // code — единственное переданное
+    expect(a[2]).toBeNull(); // value: не дефолт '0'
+    expect(a[3]).toBeNull(); // minOrderTotal: не дефолт '0'
+    expect(a[14]).toBeNull(); // isActive: не дефолт true
+    expect(a[19]).toBeNull(); // applyScope: не дефолт 'cart'
+    expect(a[20]).toBeNull(); // priority: не дефолт 100
+    expect(a[21]).toBeNull(); // stackable: не дефолт false
+    expect(a[30]).toBeNull(); // comment: не дефолт ''
+  });
+
+  it('#18: частичный апдейт без targets не трогает promo_targets (нет DELETE/INSERT)', async () => {
+    sqlMock.mockImplementationOnce(() =>
+      Promise.resolve([{ id: UUID, code: 'OLD', apply_scope: 'category' }]),
+    );
+
+    const res = await updatePromoCode({ id: UUID, value: '500' });
+    expect(res.ok).toBe(true);
+
+    // applyScope не передан → manageTargets должен быть false → таргеты не трогаем.
+    expect(deletedTargets()).toBe(false);
+    expect(insertedTargets()).toBe(false);
+  });
+
+  it('#18: явный перевод scope в cart всё ещё чистит таргеты (DELETE без INSERT)', async () => {
+    sqlMock.mockImplementationOnce(() =>
+      Promise.resolve([{ id: UUID, code: 'OLD', apply_scope: 'category' }]),
+    );
+
+    const res = await updatePromoCode({ id: UUID, applyScope: 'cart' });
+    expect(res.ok).toBe(true);
+
+    expect(deletedTargets()).toBe(true);
+    expect(insertedTargets()).toBe(false); // targets пуст → ничего не вставляем
+  });
+
+  it('передача targets при scope=category пересоздаёт таргеты (DELETE + INSERT)', async () => {
+    sqlMock.mockImplementationOnce(() =>
+      Promise.resolve([{ id: UUID, code: 'OLD', apply_scope: 'category' }]),
+    );
+
+    const res = await updatePromoCode({
+      id: UUID,
+      applyScope: 'category',
+      targets: [{ targetType: 'category', categoryId: UUID }],
+    });
+    expect(res.ok).toBe(true);
+
+    expect(deletedTargets()).toBe(true);
+    expect(insertedTargets()).toBe(true);
+  });
+
+  it('явный апдейт value/comment/isActive проходит в UPDATE как переданные значения', async () => {
+    sqlMock.mockImplementationOnce(() =>
+      Promise.resolve([{ id: UUID, code: 'OLD', apply_scope: 'cart' }]),
+    );
+
+    const res = await updatePromoCode({
+      id: UUID,
+      value: '250',
+      comment: 'летняя акция',
+      isActive: false,
+    });
+    expect(res.ok).toBe(true);
+
+    const args = findUpdateArgs();
+    expect(args).toBeDefined();
+    const a = args!;
+    expect(a[2]).toBe('250'); // value передан явно (позиция COALESCE value)
+    expect(a[14]).toBe(false); // isActive=false передан явно (позиция COALESCE is_active)
+    expect(a[30]).toBe('летняя акция'); // comment передан явно (позиция COALESCE comment)
   });
 });
 

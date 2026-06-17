@@ -94,6 +94,34 @@ describe('orders/schemas — CartQuoteSchema (POST /cart/quote)', () => {
       }).success,
     ).toBe(true);
   });
+
+  // BUG #3: курьерская доставка несёт назначение городом — схема принимает
+  // опц. числовой cityCode (точный код СДЭК) рядом со строковым city.
+  it('доставка принимает опц. числовой cityCode (BUG #3)', () => {
+    const res = CartQuoteSchema.safeParse({
+      items: [{ variantId: UUID, qty: 1 }],
+      delivery: { type: 'courier', city: 'Москва', cityCode: 44 },
+    });
+    expect(res.success).toBe(true);
+    if (res.success) {
+      expect(res.data.delivery?.cityCode).toBe(44);
+    }
+  });
+
+  it('cityCode должен быть положительным целым', () => {
+    expect(
+      CartQuoteSchema.safeParse({
+        items: [{ variantId: UUID, qty: 1 }],
+        delivery: { type: 'courier', cityCode: -5 },
+      }).success,
+    ).toBe(false);
+    expect(
+      CartQuoteSchema.safeParse({
+        items: [{ variantId: UUID, qty: 1 }],
+        delivery: { type: 'courier', cityCode: 1.5 },
+      }).success,
+    ).toBe(false);
+  });
 });
 
 describe('orders/schemas — CreateOrderSchema (POST /orders)', () => {
