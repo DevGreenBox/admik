@@ -165,6 +165,18 @@ export const updateUser = defineAction({
       assertCanAssignRoles(ctx);
     }
 
+    // Защита от self-lockout: менять СВОИ роли через этот action нельзя. Иначе
+    // не-владелец-админ мог бы снять у себя роли, дающие доступ к админке/
+    // users.manage, и потерять доступ. Зеркало guard disablingSelf (ниже) для
+    // ролей: смену собственных ролей должен делать другой администратор.
+    // Владелец сюда не дойдёт — его раньше отсекает assertNotOwner.
+    const changingOwnRoles = data.roleIds !== undefined && data.id === ctx.user.id;
+    if (changingOwnRoles) {
+      throw new PublicActionError(
+        'Нельзя менять собственные роли — попросите другого администратора.',
+      );
+    }
+
     const before = await sql<
       { id: string; email: string; display_name: string; status: string }[]
     >`

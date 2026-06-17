@@ -345,3 +345,70 @@ describe('updateUser — изменение ролей требует roles.mana
     expect(h.assignUserRoles).toHaveBeenCalledWith(expect.anything(), TARGET, [ROLE_ADMIN]);
   });
 });
+
+// =============================================================================
+// updateUser — запрет самоснятия СВОИХ ролей (self-lockout).
+//
+// БАГ (reliability): updateUser блокирует самоотключение (disablingSelf), но НЕ
+// блокирует самоснятие собственных ролей. Носитель roles.manage мог бы вызвать
+// updateUser({ id: self, roleIds: [...] }) и убрать у себя роли, дающие доступ к
+// админке/users.manage → потеря доступа (self-lockout). Зеркалим guard
+// disablingSelf для ролей: менять СВОИ роли через этот action нельзя — это должен
+// сделать другой администратор.
+// =============================================================================
+
+describe('updateUser — запрет смены собственных ролей (self-lockout)', () => {
+  it('актор меняет roleIds САМ СЕБЕ → отказ, роли НЕ меняются', async () => {
+    // Актор обладает roles.manage (иначе отвалилось бы раньше на assertCanAssignRoles),
+    // но даже так не вправе трогать СВОИ роли через этот action. id === self (ACTOR).
+    h.currentUser.value = userAndRoleManager();
+    // assertNotOwner(self) → не владелец; before-снимок (на случай, если до него дойдёт).
+    h.state.sqlResults = [
+      [{ id: ACTOR, is_owner: false }],
+      [{ id: ACTOR, email: 'admin@shop.io', display_name: 'A', status: 'active', is_owner: false }],
+    ];
+
+    const res = await updateUser({ id: ACTOR, roleIds: [] });
+
+    expect(res.ok).toBe(false);
+    if (res.ok) throw new Error('ожидался отказ');
+    expect(res.error).toBe('validation');
+    expect(res.message).toBe('Нельзя менять собственные роли — попросите другого администратора.');
+
+    // Привязка ролей НЕ должна была произойти.
+    expect(h.assignUserRoles).not.toHaveBeenCalled();
+    // UPDATE users SET ... также не должен выполниться.
+    const ranUpdate = h.state.sqlCalls.some((c) => /UPDATE\s+users\s+SET/i.test(c.text));
+    expect(ranUpdate).toBe(false);
+  });
+
+  it('актор меняет roleIds ДРУГОМУ (с roles.manage) → успех, роли меняются', async () => {
+    // Контроль: запрет касается ТОЛЬКО собственных ролей, чужие — можно (TARGET != ACTOR).
+    h.currentUser.value = userAndRoleManager();
+    h.state.sqlResults = [
+      [{ id: TARGET, is_owner: false }],
+      [{ id: TARGET, email: 'u@shop.io', display_name: 'U', status: 'active', is_owner: false }],
+    ];
+
+    const res = await updateUser({ id: TARGET, roleIds: [ROLE_ADMIN] });
+
+    expect(res.ok).toBe(true);
+    if (!res.ok) throw new Error('ожидался успех');
+    expect(h.assignUserRoles).toHaveBeenCalledWith(expect.anything(), TARGET, [ROLE_ADMIN]);
+  });
+
+  it('актор меняет СВОЙ профиль (displayName) без roleIds → успех (профиль свой менять можно)', async () => {
+    // Контроль: запрет касается ТОЛЬКО ролей; свой профиль (без roleIds) править можно.
+    h.currentUser.value = userAndRoleManager();
+    h.state.sqlResults = [
+      [{ id: ACTOR, is_owner: false }],
+      [{ id: ACTOR, email: 'admin@shop.io', display_name: 'A', status: 'active', is_owner: false }],
+    ];
+
+    const res = await updateUser({ id: ACTOR, displayName: 'Новое имя' });
+
+    expect(res.ok).toBe(true);
+    if (!res.ok) throw new Error('ожидался успех');
+    expect(h.assignUserRoles).not.toHaveBeenCalled();
+  });
+});
