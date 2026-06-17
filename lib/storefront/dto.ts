@@ -109,6 +109,12 @@ export interface ProductListItemDto {
 }
 
 export interface ProductDetailDto {
+  /**
+   * Публичный id товара. Нужен витрине, чтобы заказать товар БЕЗ вариантов
+   * (cart/quote/orders принимают productId, когда variantId отсутствует —
+   * ADR-010). Сопоставимо по чувствительности с уже публичными id вариантов.
+   */
+  id: string;
   slug: string;
   sku: string;
   name: string;
@@ -307,6 +313,7 @@ export function toProductDetailDto(
   opts: { effectiveIsNew: boolean; categorySlugs: string[]; seoCtx: SeoCtx },
 ): ProductDetailDto {
   return {
+    id: product.id,
     slug: product.slug,
     sku: product.sku,
     name: product.name,

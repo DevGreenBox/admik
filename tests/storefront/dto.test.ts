@@ -206,8 +206,11 @@ describe('storefront/dto — карточка товара', () => {
     expect(dto.media[0]).not.toHaveProperty('storageKey');
     expect(dto.media[0]).not.toHaveProperty('sizeBytes');
     expect(dto.media[0]!.url).toBe('https://cdn/a.jpg');
-    // Внутренние поточные поля карточки не утекают.
-    expect(dto).not.toHaveProperty('id');
+    // Публичный id товара отдаётся НАМЕРЕННО — витрине нужен productId для заказа
+    // товара без вариантов (cart/quote/orders по productId, ADR-010); по
+    // чувствительности сопоставимо с уже публичными id вариантов.
+    expect(dto.id).toBe('p1');
+    // Прочие внутренние поля карточки по-прежнему не утекают.
     expect(dto).not.toHaveProperty('status');
     expect(dto).not.toHaveProperty('attributesCache');
   });
