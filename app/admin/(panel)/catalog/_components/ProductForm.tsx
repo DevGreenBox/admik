@@ -226,14 +226,19 @@ export function ProductForm({
   }
 
   // Виден ли товар покупателям прямо сейчас и что мешает публикации (подсказка).
+  // Для появления на витрине нужен ОСТАТОК (наличие), а НЕ обязательно вариант:
+  // остаток можно задать на уровне товара («Товар без вариантов») или варианта.
   const priceNum = Number(String(basePrice).replace(',', '.'));
   const hasPrice = Number.isFinite(priceNum) && priceNum > 0;
-  const variantCount = product?.variants.length ?? 0;
+  const totalStock = (product?.inventory ?? []).reduce(
+    (sum, i) => sum + (i.quantity ?? 0),
+    0,
+  );
   const publishBlockers: string[] = [];
   if (status !== 'active') publishBlockers.push('выберите статус «Активен — виден на сайте»');
   if (!hasPrice) publishBlockers.push('укажите цену больше 0');
-  if (isEdit && variantCount === 0)
-    publishBlockers.push('добавьте хотя бы один вариант на вкладке «Варианты» (например, размер)');
+  if (isEdit && totalStock <= 0)
+    publishBlockers.push('укажите наличие на вкладке «Варианты» (остаток хотя бы 1 шт.)');
   const isLiveOnSite = publishBlockers.length === 0;
 
   const tabs: Array<{ key: Section; label: string; editOnly?: boolean }> = [
