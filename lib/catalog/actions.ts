@@ -435,6 +435,50 @@ export const archiveProduct = defineAction({
   },
 });
 
+/**
+ * Полное удаление товара (карточка товара, действие «Удалить навсегда»).
+ *
+ * В отличие от archiveProduct (мягкое снятие с продажи), удаляет строку products.
+ * Дочерние сущности уходят каскадом (ON DELETE CASCADE: product_variants,
+ * product_media, product_categories, product_attributes, inventory, promo_targets).
+ * История заказов СОХРАНЯЕТСЯ: order_items.product_id — ON DELETE SET NULL, а
+ * name/sku/цена/атрибуты лежат снимком в позиции (ADR-010). Файлы медиа в
+ * хранилище чистим best-effort (как deleteBrand с лого).
+ */
+export const deleteProduct = defineAction({
+  permission: 'catalog.write',
+  input: ProductIdSchema,
+  handler: async (data, _ctx) => {
+    assertCatalogEnabled();
+    // Ключи медиа собираем ДО удаления (каскад снесёт строки product_media).
+    const mediaKeys = await sql<{ storage_key: string }[]>`
+      SELECT storage_key FROM product_media WHERE product_id = ${data.id}
+    `;
+    const rows = await sql<{ id: string }[]>`
+      DELETE FROM products WHERE id = ${data.id}
+      RETURNING id
+    `;
+    if (!rows[0]) {
+      throw new CatalogError('not_found', 'Товар не найден.');
+    }
+    // Best-effort чистка объектов хранилища (осиротевшие файлы не критичны).
+    const storage = getStorage();
+    await Promise.all(
+      mediaKeys.map((m) => storage.delete(m.storage_key).catch(() => {})),
+    );
+    return {
+      result: { id: data.id },
+      revalidate: [CATALOG_LIST_PATH, SITEMAP_PATH],
+      audit: {
+        action: 'catalog.product.delete',
+        entityType: 'product',
+        entityId: data.id,
+        after: { mediaDeleted: mediaKeys.length },
+      },
+    };
+  },
+});
+
 export const bulkSetProductStatus = defineAction({
   permission: 'catalog.write',
   input: BulkSetProductStatusSchema,

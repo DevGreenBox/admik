@@ -4,6 +4,7 @@ import {
   createProduct,
   updateProduct,
   archiveProduct,
+  deleteProduct,
   bulkSetProductStatus,
   duplicateProduct,
   createVariant,
@@ -47,6 +48,9 @@ export async function updateProductAction(input: unknown): Promise<ActionResult<
 }
 export async function archiveProductAction(input: unknown): Promise<ActionResult<{ id: string }>> {
   return archiveProduct(input);
+}
+export async function deleteProductAction(input: unknown): Promise<ActionResult<{ id: string }>> {
+  return deleteProduct(input);
 }
 export async function bulkSetProductStatusAction(
   input: unknown,

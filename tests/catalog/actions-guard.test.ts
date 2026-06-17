@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { defineAction, type ActionDeps } from '@/lib/server/action';
 import type { AuthUser } from '@/lib/auth/rbac';
 import type { PermissionCode } from '@/lib/auth/permissions';
-import { ProductCreateSchema } from '@/lib/catalog/schemas';
+import { ProductCreateSchema, ProductIdSchema } from '@/lib/catalog/schemas';
 
 // ЮНИТ: проверяем, что мутации каталога, собранные через defineAction с реальными
 // Zod-схемами каталога, корректно проходят guard (catalog.write) и валидацию —
@@ -104,5 +104,42 @@ describe('каталог через defineAction — guard catalog.write', () =>
     expect(res).toEqual({ ok: true, data: { id: 'p-1' } });
     expect(deps.revalidate).toHaveBeenCalledWith('/admin/catalog');
     expect(deps.writeAudit).toHaveBeenCalledTimes(1);
+  });
+});
+
+// Полное удаление товара (Prevki «нет возможности удалить товар»): guard
+// catalog.write + ProductIdSchema (id обязателен и должен быть uuid). Сам DELETE
+// с каскадом — интеграционно (БД), здесь — пайплайн guard/валидации без БД.
+describe('deleteProduct через defineAction — guard + ProductIdSchema', () => {
+  function buildDeleteAction(deps: ActionDeps, handler = vi.fn(async () => ({ result: { id: 'p-1' } }))) {
+    return {
+      action: defineAction({ permission: 'catalog.write', input: ProductIdSchema, handler, deps }),
+      handler,
+    };
+  }
+  const validId = { id: '123e4567-e89b-42d3-a456-426614174000' };
+
+  it('только catalog.read → forbidden, handler не вызван', async () => {
+    const deps = makeDeps(makeUser(['catalog.read']));
+    const { action, handler } = buildDeleteAction(deps);
+    const res = await action(validId);
+    expect(res).toEqual({ ok: false, error: 'forbidden' });
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('catalog.write + валидный uuid → проходит, handler вызван', async () => {
+    const deps = makeDeps(makeUser(['catalog.write']));
+    const { action, handler } = buildDeleteAction(deps);
+    const res = await action(validId);
+    expect(res.ok).toBe(true);
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it('невалидный id (не uuid) → validation, handler не вызван', async () => {
+    const deps = makeDeps(makeUser(['catalog.write']));
+    const { action, handler } = buildDeleteAction(deps);
+    const res = await action({ id: 'not-a-uuid' });
+    expect(res.ok).toBe(false);
+    expect(handler).not.toHaveBeenCalled();
   });
 });

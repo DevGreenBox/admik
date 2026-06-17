@@ -15,6 +15,7 @@ import {
   createProductAction,
   updateProductAction,
   archiveProductAction,
+  deleteProductAction,
 } from './form-actions';
 import { errorMessage, fieldError } from './action-result';
 import { VariantsSection } from './VariantsSection';
@@ -215,6 +216,32 @@ export function ProductForm({
         setStatus('archived');
         setSuccess('Товар снят с продажи (в архиве) — на сайте больше не показывается.');
         router.refresh();
+      } else {
+        setError(result);
+      }
+    } catch {
+      setError({ ok: false, error: 'internal' });
+    } finally {
+      setPending(false);
+    }
+  }
+
+  // Удалить товар НАВСЕГДА (в отличие от «снять с продажи»). Дочерние данные
+  // уходят каскадом; история заказов сохраняется (снимок позиции, ADR-010).
+  async function onDelete() {
+    if (!isEdit) return;
+    const ok = window.confirm(
+      'Удалить товар НАВСЕГДА? Это действие нельзя отменить: товар и его варианты/фото/остатки будут удалены. ' +
+        'История заказов с этим товаром сохранится. Если нужно просто убрать с сайта — используйте «Снять с продажи».',
+    );
+    if (!ok) return;
+    setPending(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const result = await deleteProductAction({ id: product!.id });
+      if (result.ok) {
+        router.push('/admin/catalog');
       } else {
         setError(result);
       }
@@ -633,15 +660,27 @@ export function ProductForm({
           >
             Отмена
           </button>
-          {isEdit && status !== 'archived' ? (
-            <button
-              type="button"
-              onClick={onArchive}
-              disabled={pending}
-              className="ml-auto rounded-md border border-red-300 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
-            >
-              Снять с продажи
-            </button>
+          {isEdit ? (
+            <div className="ml-auto flex items-center gap-2">
+              {status !== 'archived' ? (
+                <button
+                  type="button"
+                  onClick={onArchive}
+                  disabled={pending}
+                  className="rounded-md border border-amber-300 px-4 py-2 text-sm font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50"
+                >
+                  Снять с продажи
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={onDelete}
+                disabled={pending}
+                className="rounded-md border border-red-300 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+              >
+                Удалить навсегда
+              </button>
+            </div>
           ) : null}
         </div>
       ) : null}
