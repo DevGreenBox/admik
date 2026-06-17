@@ -7,6 +7,7 @@ import { sql } from '@/lib/db/client';
 import { hashPassword } from '@/lib/auth/password';
 import { invalidateUserSessions } from '@/lib/auth/session';
 import { ALL_PERMISSIONS } from '@/lib/auth/permissions';
+import { can } from '@/lib/auth/rbac';
 
 import {
   UserCreateSchema,
@@ -61,6 +62,23 @@ function filterKnownPermissions(codes: string[]): string[] {
 }
 
 /**
+ * Гард против эскалации привилегий через назначение ролей (RBAC §5.4).
+ *
+ * createUser/updateUser гейтятся на `users.manage`, но привязка ролей
+ * (assignUserRoles) — это операция НАД РОЛЯМИ: выдав пользователю роль с
+ * `roles.manage`/полным доступом, носитель одного `users.manage` повысил бы
+ * себе/другому права. Поэтому ЛЮБОЕ назначение/изменение ролей пользователя
+ * дополнительно требует `roles.manage` — того же права, которым гейтятся
+ * create/update/deleteRole. Владелец (`is_owner`) проходит за счёт короткого
+ * замыкания в `can()`. Бросает PublicActionError, если права нет.
+ */
+function assertCanAssignRoles(ctx: ActionCtx): void {
+  if (!can(ctx.user, 'roles.manage')) {
+    throw new PublicActionError('Недостаточно прав для назначения ролей.');
+  }
+}
+
+/**
  * Серверный гард защиты владельца магазина (RBAC §5.4): учётку с is_owner нельзя
  * изменять, отключать или сбрасывать ей пароль через UI — иначе любой носитель
  * users.manage мог бы перехватить владельца (privilege escalation).
@@ -87,7 +105,13 @@ async function assertNotOwner(id: string): Promise<{ id: string; is_owner: boole
 export const createUser = defineAction({
   permission: 'users.manage',
   input: UserCreateSchema,
-  handler: async (data, _ctx: ActionCtx) => {
+  handler: async (data, ctx: ActionCtx) => {
+    // Anti-escalation: назначение ролей требует roles.manage (до любой записи).
+    // Создание без ролей доступно носителю одного users.manage.
+    if (data.roleIds.length > 0) {
+      assertCanAssignRoles(ctx);
+    }
+
     const passwordHash = await hashPassword(data.password);
 
     let userId: string;
@@ -134,6 +158,12 @@ export const updateUser = defineAction({
   handler: async (data, ctx: ActionCtx) => {
     // Защита владельца — единый хелпер (бросает PublicActionError, если is_owner).
     await assertNotOwner(data.id);
+
+    // Anti-escalation: изменение ролей (включая снятие) требует roles.manage —
+    // до любой записи. Обновление профиля без ролей доступно носителю users.manage.
+    if (data.roleIds !== undefined) {
+      assertCanAssignRoles(ctx);
+    }
 
     const before = await sql<
       { id: string; email: string; display_name: string; status: string }[]

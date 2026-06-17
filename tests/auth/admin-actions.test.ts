@@ -48,6 +48,7 @@ const h = vi.hoisted(() => {
     hashPassword: vi.fn(async (plain: string) => `hashed:${plain}`),
     invalidateUserSessions: vi.fn(async (_userId: string) => {}),
     writeAudit: vi.fn(async () => {}),
+    assignUserRoles: vi.fn(async () => {}),
     currentUser: { value: null as unknown },
   };
 });
@@ -64,18 +65,20 @@ vi.mock('next/headers', () => ({
   headers: vi.fn(async () => ({ get: (_k: string) => undefined })),
 }));
 vi.mock('@/lib/auth/admin-repository', () => ({
-  assignUserRoles: vi.fn(async () => {}),
+  assignUserRoles: h.assignUserRoles,
   setRolePermissions: vi.fn(async () => {}),
 }));
 
 // Импорт ПОСЛЕ объявления моков.
-import { resetUserPassword, updateUser } from '@/lib/auth/admin-actions';
+import { createUser, resetUserPassword, updateUser } from '@/lib/auth/admin-actions';
 import type { AuthUser } from '@/lib/auth/rbac';
 import type { PermissionCode } from '@/lib/auth/permissions';
 
 const TARGET = '11111111-1111-4111-8111-111111111111';
 const ACTOR = '99999999-9999-4999-8999-999999999999';
+const ROLE_ADMIN = '22222222-2222-4222-8222-222222222222';
 
+/** Носитель ТОЛЬКО users.manage (без roles.manage). */
 function adminUser(): AuthUser {
   return {
     id: ACTOR,
@@ -85,12 +88,23 @@ function adminUser(): AuthUser {
   };
 }
 
+/** Носитель и users.manage, и roles.manage — вправе назначать роли. */
+function userAndRoleManager(): AuthUser {
+  return {
+    id: ACTOR,
+    email: 'admin@shop.io',
+    isOwner: false,
+    permissions: new Set<PermissionCode>(['users.manage', 'roles.manage']),
+  };
+}
+
 beforeEach(() => {
   h.state.sqlResults = [];
   h.state.sqlCalls.length = 0;
   h.hashPassword.mockClear();
   h.invalidateUserSessions.mockClear();
   h.writeAudit.mockClear();
+  h.assignUserRoles.mockClear();
   h.sqlMock.begin.mockClear();
   h.currentUser.value = adminUser();
 });
@@ -193,5 +207,141 @@ describe('updateUser — защита владельца и ротация пр�
 
     expect(res.ok).toBe(true);
     expect(h.invalidateUserSessions).not.toHaveBeenCalled();
+  });
+});
+
+// =============================================================================
+// Назначение ролей требует roles.manage (privilege escalation).
+//
+// БАГ: createUser/updateUser гейтятся ТОЛЬКО на users.manage, но позволяют
+// привязывать роли (assignUserRoles) — включая роль с админ-правами. Носитель
+// одного users.manage мог бы выдать себе/другому роль с roles.manage/полным
+// доступом → эскалация привилегий. Назначение ролей — операция над ролями,
+// поэтому требует дополнительно roles.manage.
+// =============================================================================
+
+describe('createUser — назначение ролей требует roles.manage', () => {
+  it('users.manage без roles.manage + непустые roleIds → отказ, роли НЕ назначаются', async () => {
+    // Актор имеет только users.manage.
+    h.currentUser.value = adminUser();
+
+    const res = await createUser({
+      email: 'new@shop.io',
+      password: 'secret123',
+      roleIds: [ROLE_ADMIN],
+    });
+
+    expect(res.ok).toBe(false);
+    if (res.ok) throw new Error('ожидался отказ');
+    expect(res.error).toBe('validation');
+    expect(res.message).toBe('Недостаточно прав для назначения ролей.');
+
+    // Привязка ролей НЕ должна была произойти.
+    expect(h.assignUserRoles).not.toHaveBeenCalled();
+    // INSERT пользователя также не выполняется (проверка до записи).
+    const ranInsert = h.state.sqlCalls.some((c) => /INSERT\s+INTO\s+users/i.test(c.text));
+    expect(ranInsert).toBe(false);
+  });
+
+  it('users.manage без roles.manage + пустые roleIds → успех (создание без ролей)', async () => {
+    h.currentUser.value = adminUser();
+    // INSERT ... RETURNING id.
+    h.state.sqlResults = [[{ id: TARGET }]];
+
+    const res = await createUser({
+      email: 'new@shop.io',
+      password: 'secret123',
+      roleIds: [],
+    });
+
+    expect(res.ok).toBe(true);
+    if (!res.ok) throw new Error('ожидался успех');
+    expect(res.data).toEqual({ id: TARGET });
+    // assignUserRoles вызывается с пустым набором — снятие/отсутствие ролей.
+    expect(h.assignUserRoles).toHaveBeenCalledWith(expect.anything(), TARGET, []);
+  });
+
+  it('users.manage + roles.manage + непустые roleIds → успех, роли назначаются', async () => {
+    h.currentUser.value = userAndRoleManager();
+    h.state.sqlResults = [[{ id: TARGET }]];
+
+    const res = await createUser({
+      email: 'new@shop.io',
+      password: 'secret123',
+      roleIds: [ROLE_ADMIN],
+    });
+
+    expect(res.ok).toBe(true);
+    if (!res.ok) throw new Error('ожидался успех');
+    expect(h.assignUserRoles).toHaveBeenCalledWith(expect.anything(), TARGET, [ROLE_ADMIN]);
+  });
+
+  it('владелец (isOwner) + непустые roleIds → успех (короткое замыкание can)', async () => {
+    h.currentUser.value = {
+      id: ACTOR,
+      email: 'owner@shop.io',
+      isOwner: true,
+      permissions: new Set<PermissionCode>(),
+    } satisfies AuthUser;
+    h.state.sqlResults = [[{ id: TARGET }]];
+
+    const res = await createUser({
+      email: 'new@shop.io',
+      password: 'secret123',
+      roleIds: [ROLE_ADMIN],
+    });
+
+    expect(res.ok).toBe(true);
+    expect(h.assignUserRoles).toHaveBeenCalledWith(expect.anything(), TARGET, [ROLE_ADMIN]);
+  });
+});
+
+describe('updateUser — изменение ролей требует roles.manage', () => {
+  it('users.manage без roles.manage + roleIds задан → отказ, роли НЕ меняются', async () => {
+    h.currentUser.value = adminUser();
+    // assertNotOwner(id) → не владелец; before-снимок.
+    h.state.sqlResults = [
+      [{ id: TARGET, is_owner: false }],
+      [{ id: TARGET, email: 'u@shop.io', display_name: 'U', status: 'active', is_owner: false }],
+    ];
+
+    const res = await updateUser({ id: TARGET, roleIds: [ROLE_ADMIN] });
+
+    expect(res.ok).toBe(false);
+    if (res.ok) throw new Error('ожидался отказ');
+    expect(res.error).toBe('validation');
+    expect(res.message).toBe('Недостаточно прав для назначения ролей.');
+
+    expect(h.assignUserRoles).not.toHaveBeenCalled();
+    // UPDATE users SET ... также не должен выполниться.
+    const ranUpdate = h.state.sqlCalls.some((c) => /UPDATE\s+users\s+SET/i.test(c.text));
+    expect(ranUpdate).toBe(false);
+  });
+
+  it('users.manage без roles.manage + roleIds НЕ задан → успех (профиль без ролей)', async () => {
+    h.currentUser.value = adminUser();
+    h.state.sqlResults = [
+      [{ id: TARGET, is_owner: false }],
+      [{ id: TARGET, email: 'u@shop.io', display_name: 'U', status: 'active', is_owner: false }],
+    ];
+
+    const res = await updateUser({ id: TARGET, displayName: 'Новое имя' });
+
+    expect(res.ok).toBe(true);
+    expect(h.assignUserRoles).not.toHaveBeenCalled();
+  });
+
+  it('users.manage + roles.manage + roleIds задан → успех, роли меняются', async () => {
+    h.currentUser.value = userAndRoleManager();
+    h.state.sqlResults = [
+      [{ id: TARGET, is_owner: false }],
+      [{ id: TARGET, email: 'u@shop.io', display_name: 'U', status: 'active', is_owner: false }],
+    ];
+
+    const res = await updateUser({ id: TARGET, roleIds: [ROLE_ADMIN] });
+
+    expect(res.ok).toBe(true);
+    if (!res.ok) throw new Error('ожидался успех');
+    expect(h.assignUserRoles).toHaveBeenCalledWith(expect.anything(), TARGET, [ROLE_ADMIN]);
   });
 });
