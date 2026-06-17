@@ -82,37 +82,48 @@ export async function applyPaymentStatus(
   to: PaymentStatus,
   comment = '',
 ): Promise<boolean> {
-  const rows = await sql<{ payment_status: string }[]>`
-    SELECT payment_status FROM orders WHERE id = ${orderId} LIMIT 1
-  `;
-  const from = rows[0]?.payment_status as PaymentStatus | undefined;
-  if (!from) return false;
-  if (from === to) return false;
-  if (!canTransition('payment', from, to)) return false;
+  // АТОМАРНОСТЬ (анти-TOCTOU): чтение `from`, проверка перехода и запись — в ОДНОЙ
+  // транзакции. SELECT ... FOR UPDATE берёт блокировку строки заказа на время
+  // транзакции, так что конкурентный webhook ждёт коммита и видит уже актуальный
+  // статус. Дополнительно guarded UPDATE (WHERE payment_status = from) защищает
+  // от out-of-order доставки: если к моменту UPDATE статус уже изменён другим
+  // событием — затронуто 0 строк, переход пропускаем (не откатываем paid→…).
+  // Эффекты (paid_at, история) применяются ТОЛЬКО при rowCount === 1.
+  return await sql.begin<boolean>(async (tx: TransactionSql) => {
+    const rows = await tx<{ payment_status: string }[]>`
+      SELECT payment_status FROM orders WHERE id = ${orderId} FOR UPDATE
+    `;
+    const from = rows[0]?.payment_status as PaymentStatus | undefined;
+    if (!from) return false;
+    if (from === to) return false;
+    if (!canTransition('payment', from, to)) return false;
 
-  await sql.begin(async (tx: TransactionSql) => {
-    if (to === 'paid') {
-      await tx`
-        UPDATE orders
-           SET payment_status = ${to}, paid_at = now(), updated_at = now()
-         WHERE id = ${orderId}
-      `;
-    } else {
-      await tx`
-        UPDATE orders
-           SET payment_status = ${to}, updated_at = now()
-         WHERE id = ${orderId}
-      `;
-    }
+    const updated =
+      to === 'paid'
+        ? await tx`
+            UPDATE orders
+               SET payment_status = ${to}, paid_at = now(), updated_at = now()
+             WHERE id = ${orderId} AND payment_status = ${from}
+          `
+        : await tx`
+            UPDATE orders
+               SET payment_status = ${to}, updated_at = now()
+             WHERE id = ${orderId} AND payment_status = ${from}
+          `;
+
+    // Гонка: статус успел измениться между SELECT и UPDATE (теоретически невозможно
+    // под FOR UPDATE в одной транзакции, но guarded UPDATE — дешёвая страховка
+    // на случай иной изоляции/реплик). 0 строк → эффект не применяем.
+    if (updated.count !== 1) return false;
+
     await tx`
       INSERT INTO order_status_history
         (order_id, kind, from_status, to_status, actor_user_id, comment)
       VALUES
         (${orderId}, 'payment', ${from}, ${to}, NULL, ${comment})
     `;
+    return true;
   });
-
-  return true;
 }
 
 /**

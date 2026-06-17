@@ -216,7 +216,11 @@ TBANK_REDIRECT_DUE_MIN=60
      `ON CONFLICT DO NOTHING`); дубликат → не обрабатываем повторно, но всё равно отвечаем `OK`;
    - маппит `Status` → `payment_status` через статус-машину `lib/orders/status.ts` (переход
      применяется лишь если допустим);
-   - обновляет `orders.payment_status`, при оплате — `paid_at`, `orders.status` (см. §4.3);
+   - обновляет `orders.payment_status` **атомарно** (`applyPaymentStatus`, см. §4.4) — чтение `from`
+     и запись в ОДНОЙ транзакции с `SELECT … FOR UPDATE` + guarded `UPDATE … WHERE payment_status =
+     from`; защита от out-of-order/конкурентных webhook (UNIQUE `(payment_id, status)` защищает от
+     повтора ОДНОГО события, а guard — от двух РАЗНЫХ, напр. не даёт откатить `paid → authorized`);
+     при оплате — `paid_at`, `orders.status` (см. §4.3);
    - **возвращает строго `OK`** (HTTP 200, plain text) — иначе Т-Банк ретраит.
 7. Витрина после редиректа на `SuccessURL` показывает статус, но **источник истины — webhook**
    (или `GetState` как fallback при «зависшем» платеже — задел под cron-синхронизацию).
@@ -249,6 +253,14 @@ TBANK_REDIRECT_DUE_MIN=60
   `order_id` (FK), `payment_id`, `status`, `amount_kop`, `pay_type`, `is_mock`, `raw_init`,
   `created_at`/`updated_at` — для аудита/рефандов/повторов. Плюс лог `tbank_payment_log`
   (`payment_id`, `status`, `received_at`, UNIQUE для идемпотентности webhook — порт `cdek_status_log`).
+- **`applyPaymentStatus(orderId, to, comment)`** (`repository.ts`, порт `applyDeliveryStatus`) —
+  смена `payment_status` без Server Actions (webhook не имеет RBAC-контекста). **Атомарность
+  (анти-TOCTOU):** вся операция в `sql.begin` — `SELECT payment_status … FOR UPDATE` (блокировка
+  строки заказа), проверка `canTransition('payment', from, to)`, guarded `UPDATE … WHERE id = orderId
+  AND payment_status = from`. История (`order_status_history`) и `paid_at` пишутся **только при
+  `rowCount === 1`**; иначе (заказ не найден / `from === to` / недопустимый переход / строку уже
+  изменил другой webhook) → `false`, no-op. Это исключает откат уже выставленного статуса
+  конкурентным/неупорядоченным уведомлением Т-Банка.
 
 ---
 
@@ -310,16 +322,28 @@ TBANK_REDIRECT_DUE_MIN=60
 ```
 
 Сборка `Receipt` — ЧИСТАЯ функция `buildReceipt(order, items, cfg)` в `receipt.ts`:
-- `Items` ← `order_items` (снимки `nameSnapshot`, `unitPrice`, `quantity`, `lineTotal`); цены ×100 в копейки;
+- `Items` ← `order_items` (снимки `nameSnapshot`, `unitPrice`, `quantity`, `lineTotal`); суммы в копейки
+  через **`toMinor`** (`@/lib/orders/money` — строковый разбор, без float; обёртка `toKopecks`
+  возвращает `0` на невалидном входе, не падает);
 - доставка (`deliveryTotal`) — отдельной позицией `Name: "Доставка"`, `PaymentObject: "service"` (если >0);
+  доставка **не дисконтируется** (отдельная услуга, полная стоимость);
+- **скидка промокода** (`order.discountTotal > 0`) распределяется ПО ПОЗИЦИЯМ товаров
+  пропорционально их доле (54-ФЗ требует учёта скидки в цене позиции, иначе Σ `Amount` >
+  `Init.Amount` ровно на `discountTotal` → Т-Банк отклонит Init). Остаток округления раздаётся
+  методом наибольшего остатка (largest remainder), чтобы Σ совпала точно до копейки. При наличии
+  скидки позиция формируется как одна строка чека (`Quantity:1`, `Price = Amount =` дисконтированный
+  итог строки) — это сохраняет инвариант `Amount === Price × Quantity` без дробной копейки на единицу;
 - `Email`/`Phone` ← `order.customerEmail`/`customerPhone`;
 - `Taxation` ← `TBANK_TAXATION`; `Tax` позиции ← `TBANK_DEFAULT_TAX` (на товар можно завести
   `tax` в каталоге — **отложено**, MVP: единая ставка из env).
 
-> **Критично:** сумма всех `Items.Amount` ДОЛЖНА равняться `Init.Amount` (иначе Т-Банк отклонит).
-> Это инвариант — покрыть unit-тестом `buildReceipt`. Промо-скидки/подарки (`isGift`, нулевые позиции)
-> учесть: цена позиции = эффективная `unitPrice` (после скидки), подарок = `Price:0` (**уточнить
-> допустимость нулевой позиции в чеке по докам ОФД/Т-Банка**).
+> **Критично:** сумма всех `Items.Amount` ДОЛЖНА равняться `Init.Amount` (= `grand_total` в копейках;
+> иначе Т-Банк отклонит). `buildReceipt` **сверяет инвариант ВСЕГДА** (`receiptTotalKop(receipt) ===
+> toKopecks(order.grandTotal)`) и при расхождении бросает `TbankError('tbank_receipt_mismatch')` —
+> лучше упасть на нашей стороне с понятной ошибкой, чем получить отказ Init. Покрыто unit-тестами
+> `buildReceipt` (в т.ч. кейсы со скидкой и остатком округления). Подарки (`isGift`, нулевые позиции):
+> цена = эффективная `unitPrice` (после скидки), подарок = `Price:0` (**уточнить допустимость нулевой
+> позиции в чеке по докам ОФД/Т-Банка**).
 
 ---
 
