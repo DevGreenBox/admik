@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { NAV, buildAdminNav, type NavItem } from '@/lib/admin/nav';
 import {
   buildPermissionSet,
@@ -94,6 +96,24 @@ describe('admin/nav — buildAdminNav', () => {
     const result = buildAdminNav(user, {});
     expect(labels(result)).toContain('Заказы');
     expect(labels(result)).not.toContain('Промокоды');
+  });
+
+  // Регресс: пункт меню не должен вести на несуществующий роут (404). Каждый
+  // href `/admin/<seg>` обязан иметь файл-страницу app/admin/(panel)/<seg>/page.tsx
+  // (для `/admin` — корневой app/admin/(panel)/page.tsx). Этот тест поймал бы
+  // «Доставку» → /admin/cdek без страницы (баг 2026-06-17).
+  it('каждый href меню имеет реальную страницу-роут (нет 404)', () => {
+    const panelDir = join(process.cwd(), 'app', 'admin', '(panel)');
+    for (const item of NAV) {
+      expect(item.href.startsWith('/admin')).toBe(true);
+      const seg = item.href.slice('/admin'.length).replace(/^\//, ''); // '' для /admin
+      const pageFile = seg
+        ? join(panelDir, seg, 'page.tsx')
+        : join(panelDir, 'page.tsx');
+      expect(existsSync(pageFile), `нет страницы для ${item.href} (${pageFile})`).toBe(
+        true,
+      );
+    }
   });
 
   it('«Дашборд» виден всегда (нет требований по модулю/праву)', () => {
