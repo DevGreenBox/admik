@@ -77,7 +77,7 @@ async function dbToday(): Promise<string> {
 async function ordersByDay(days: number): Promise<Map<string, number>> {
   try {
     const rows = await sql<{ day: string; n: number }[]>`
-      SELECT to_char(created_at::date, 'YYYY-MM-DD') AS day, count(*)::int AS n
+      SELECT to_char(created_at::date, 'YYYY-MM-DD') AS day, count(*)::bigint AS n
         FROM orders
        WHERE created_at::date > current_date - ${days}
        GROUP BY 1
@@ -92,7 +92,7 @@ async function ordersByDay(days: number): Promise<Map<string, number>> {
 async function viewsByDay(days: number): Promise<Map<string, number>> {
   try {
     const rows = await sql<{ day: string; n: number }[]>`
-      SELECT to_char(day, 'YYYY-MM-DD') AS day, views::int AS n
+      SELECT to_char(day, 'YYYY-MM-DD') AS day, views::bigint AS n
         FROM storefront_pageviews
        WHERE day > current_date - ${days}
     `;
