@@ -18,6 +18,10 @@ import type { ActionResult } from '@/lib/server/action';
  * Управление деревом категорий (docs/05 §5.4). Создание/переименование/
  * перемещение (смена родителя)/удаление через Server Actions. Защита от циклов —
  * на бэке (moveCategory); удаление категории с детьми — понятная ошибка RESTRICT.
+ *
+ * UX: переименование и перемещение делаются ПРЯМО в строке (inline-поле и
+ * выпадающий список родителя), БЕЗ window.prompt и ручного ввода UUID — раньше
+ * владелец-неспециалист не мог переместить категорию (требовался машинный ID).
  */
 type Fail = Extract<ActionResult<unknown>, { ok: false }>;
 
@@ -35,6 +39,15 @@ function flatten(nodes: CategoryTreeNode[], depth = 0): FlatOption[] {
   return out;
 }
 
+/** ID самого узла и всех его потомков — недопустимые родители при перемещении. */
+function selfAndDescendants(node: CategoryTreeNode): Set<string> {
+  const ids = new Set<string>([node.id]);
+  for (const c of node.children) {
+    for (const id of selfAndDescendants(c)) ids.add(id);
+  }
+  return ids;
+}
+
 export function CategoryManager({ tree }: { tree: CategoryTreeNode[] }) {
   const router = useRouter();
   const [error, setError] = useState<Fail | null>(null);
@@ -43,6 +56,12 @@ export function CategoryManager({ tree }: { tree: CategoryTreeNode[] }) {
   const [newName, setNewName] = useState('');
   const [newSlug, setNewSlug] = useState('');
   const [newParent, setNewParent] = useState('');
+
+  // Какой узел сейчас редактируется/перемещается (inline).
+  const [renameId, setRenameId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [moveId, setMoveId] = useState<string | null>(null);
+  const [moveParent, setMoveParent] = useState('');
 
   const options = flatten(tree);
 
@@ -77,56 +96,100 @@ export function CategoryManager({ tree }: { tree: CategoryTreeNode[] }) {
     setNewParent('');
   }
 
+  function startRename(node: CategoryTreeNode) {
+    setMoveId(null);
+    setRenameId(node.id);
+    setRenameValue(node.name);
+  }
+
+  async function saveRename(node: CategoryTreeNode) {
+    if (!renameValue.trim()) return;
+    await run(() => updateCategoryAction({ id: node.id, name: renameValue.trim() }), 'Переименовано.');
+    setRenameId(null);
+  }
+
+  function startMove(node: CategoryTreeNode) {
+    setRenameId(null);
+    setMoveId(node.id);
+    setMoveParent(node.parentId ?? '');
+  }
+
+  async function saveMove(node: CategoryTreeNode) {
+    await run(
+      () => moveCategoryAction({ id: node.id, parentId: moveParent || null }),
+      'Категория перемещена.',
+    );
+    setMoveId(null);
+  }
+
+  const btn = 'rounded border border-gray-300 px-2 py-1 text-xs font-medium hover:bg-gray-100';
+
   function renderNode(node: CategoryTreeNode, depth: number) {
+    const forbidden = selfAndDescendants(node); // нельзя сделать родителем себя/потомка
+    const parentOptions = options.filter((o) => !forbidden.has(o.id));
     return (
       <li key={node.id} className="py-1">
         <div className="flex flex-wrap items-center gap-2" style={{ paddingLeft: depth * 16 }}>
-          <span className="text-sm text-gray-800">{node.name}</span>
-          <code className="text-xs text-gray-400">/{node.slug}</code>
-          {!node.isActive ? <span className="text-xs text-amber-700">(скрыта)</span> : null}
-
-          <button
-            type="button"
-            onClick={() => {
-              const name = window.prompt('Новое название категории', node.name);
-              if (name && name.trim()) {
-                void run(() => updateCategoryAction({ id: node.id, name: name.trim() }), 'Переименовано.');
-              }
-            }}
-            className="text-xs text-blue-700 hover:underline"
-          >
-            переименовать
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              const parent = window.prompt(
-                'ID нового родителя (пусто — в корень)',
-                node.parentId ?? '',
-              );
-              if (parent === null) return;
-              void run(
-                () => moveCategoryAction({ id: node.id, parentId: parent.trim() || null }),
-                'Категория перемещена.',
-              );
-            }}
-            className="text-xs text-blue-700 hover:underline"
-          >
-            переместить
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              if (window.confirm(`Удалить категорию «${node.name}»?`)) {
-                void run(() => deleteCategoryAction({ id: node.id }), 'Категория удалена.');
-              }
-            }}
-            className="text-xs text-red-600 hover:underline"
-          >
-            удалить
-          </button>
+          {renameId === node.id ? (
+            <>
+              <input
+                autoFocus
+                value={renameValue}
+                onChange={(e) => setRenameValue(e.target.value)}
+                className="rounded border border-gray-300 px-2 py-1 text-sm"
+              />
+              <button type="button" onClick={() => void saveRename(node)} className={`${btn} text-blue-700`}>
+                Сохранить
+              </button>
+              <button type="button" onClick={() => setRenameId(null)} className={`${btn} text-gray-500`}>
+                Отмена
+              </button>
+            </>
+          ) : moveId === node.id ? (
+            <>
+              <span className="text-sm text-gray-800">{node.name} →</span>
+              <select
+                value={moveParent}
+                onChange={(e) => setMoveParent(e.target.value)}
+                className="rounded border border-gray-300 px-2 py-1 text-sm"
+              >
+                <option value="">— верхний уровень —</option>
+                {parentOptions.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+              <button type="button" onClick={() => void saveMove(node)} className={`${btn} text-blue-700`}>
+                Переместить
+              </button>
+              <button type="button" onClick={() => setMoveId(null)} className={`${btn} text-gray-500`}>
+                Отмена
+              </button>
+            </>
+          ) : (
+            <>
+              <span className="text-sm text-gray-800">{node.name}</span>
+              {!node.isActive ? <span className="text-xs text-amber-700">(скрыта)</span> : null}
+              <button type="button" onClick={() => startRename(node)} className={`${btn} text-gray-700`}>
+                Переименовать
+              </button>
+              <button type="button" onClick={() => startMove(node)} className={`${btn} text-gray-700`}>
+                Переместить
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (window.confirm(`Удалить категорию «${node.name}»?`)) {
+                    void run(() => deleteCategoryAction({ id: node.id }), 'Категория удалена.');
+                  }
+                }}
+                className={`${btn} text-red-600`}
+              >
+                Удалить
+              </button>
+            </>
+          )}
         </div>
         {node.children.length > 0 ? (
           <ul>{node.children.map((c) => renderNode(c, depth + 1))}</ul>
@@ -150,7 +213,10 @@ export function CategoryManager({ tree }: { tree: CategoryTreeNode[] }) {
 
       <div className="rounded-lg border border-gray-200 p-4">
         {tree.length === 0 ? (
-          <p className="text-sm text-gray-500">Категорий пока нет.</p>
+          <p className="text-sm text-gray-500">
+            Категорий пока нет. Создайте первую в форме ниже — по категориям товары
+            раскладываются в каталоге на сайте.
+          </p>
         ) : (
           <ul>{tree.map((n) => renderNode(n, 0))}</ul>
         )}
@@ -165,16 +231,16 @@ export function CategoryManager({ tree }: { tree: CategoryTreeNode[] }) {
               className="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-sm" />
           </div>
           <div>
-            <label htmlFor="c-slug" className="block text-xs font-medium text-gray-600">ЧПУ (slug)</label>
+            <label htmlFor="c-slug" className="block text-xs font-medium text-gray-600">Адрес на сайте</label>
             <input id="c-slug" value={newSlug} onChange={(e) => setNewSlug(e.target.value)}
-              placeholder="авто из названия"
+              placeholder="можно не заполнять — создастся автоматически"
               className="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-sm" />
           </div>
           <div>
-            <label htmlFor="c-parent" className="block text-xs font-medium text-gray-600">Родитель</label>
+            <label htmlFor="c-parent" className="block text-xs font-medium text-gray-600">Внутри категории</label>
             <select id="c-parent" value={newParent} onChange={(e) => setNewParent(e.target.value)}
               className="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-sm">
-              <option value="">— корень —</option>
+              <option value="">— верхний уровень —</option>
               {options.map((o) => (
                 <option key={o.id} value={o.id}>{o.label}</option>
               ))}

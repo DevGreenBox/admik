@@ -114,13 +114,10 @@ export function AttributesSection({
                   type={attr.type === 'number' ? 'number' : 'text'}
                   value={values[attr.id] ?? ''}
                   onChange={(e) => setValue(attr.id, e.target.value)}
-                  placeholder={attr.type === 'select' ? 'ID значения из словаря' : ''}
+                  placeholder=""
                   className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
                 />
               )}
-              <p className="mt-1 text-xs text-gray-400">
-                код: {attr.code} · тип: {attr.type}
-              </p>
             </div>
           );
         })}
