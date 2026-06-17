@@ -6,7 +6,7 @@
  *  - status товара (draft/archived вообще не должны попадать в выдачу — фильтр
  *    на уровне запроса), внутренние id связей, attributes_cache как сырой объект,
  *    storage_key медиа, точные остатки inventory.
- *  - вместо точного остатка отдаём `inStock: boolean` (inventory.quantity > 0).
+ *  - вместо точного остатка отдаём `inStock: boolean` (доступное = quantity − reserved > 0).
  *    ОБОСНОВАНИЕ: точный остаток — коммерчески чувствительная информация (даёт
  *    конкуренту оценку оборота/закупок); витрине для кнопки «В корзину» достаточно
  *    булева «в наличии». При необходимости порога low-stock — отдельное решение.
@@ -232,7 +232,10 @@ export function toProductListItemDto(
     isFeatured: row.isFeatured,
     brand: toBrandDto(row.brand),
     imageUrl: row.primaryMediaUrl,
-    inStock: row.totalStock > 0,
+    // «В наличии» = есть доступное (quantity − reserved > 0), а не физический
+    // остаток: зарезервированное под незавершённые заказы не показываем (оверселл).
+    // Семантика совпадает с computeInStock карточки/детали.
+    inStock: row.availableStock > 0,
   };
 }
 

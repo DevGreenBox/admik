@@ -97,6 +97,58 @@ describe.skipIf(!hasDb)('каталог — интеграция (репозит
   });
 });
 
+// ИНТЕГРАЦИЯ: listProducts.availableStock учитывает резерв (доступное = quantity−reserved).
+// РЕГРЕСС major: оверселл в списке, когда весь остаток зарезервирован.
+describe.skipIf(!hasDb)('каталог — availableStock в списке учитывает резерв', () => {
+  afterAll(async () => {
+    await closeSql();
+  });
+
+  it('товар с полностью зарезервированным остатком: totalStock>0, availableStock=0', async () => {
+    const suffix = Date.now().toString(36);
+    const sku = 'it-reserved-' + suffix;
+    const [{ id }] = await sql<{ id: string }[]>`
+      INSERT INTO products (sku, slug, name, status, base_price)
+      VALUES (${sku}, ${sku}, 'Зарезервированный', 'active', '100.00')
+      RETURNING id
+    `;
+    // Весь физический остаток зарезервирован: quantity=5, reserved=5 → доступно 0.
+    await sql`
+      INSERT INTO inventory (product_id, variant_id, warehouse_code, quantity, reserved)
+      VALUES (${id}, NULL, 'main', 5, 5)
+    `;
+
+    const { rows } = await listProducts({ search: sku, page: 1, pageSize: 5 });
+    const found = rows.find((r) => r.id === id);
+    expect(found).toBeTruthy();
+    expect(found!.totalStock).toBe(5); // физический остаток для админки сохранён
+    expect(found!.availableStock).toBe(0); // доступное к продаже — ноль
+
+    await sql`DELETE FROM products WHERE id = ${id}`;
+  });
+
+  it('частичный резерв: availableStock = quantity − reserved', async () => {
+    const suffix = Date.now().toString(36);
+    const sku = 'it-partial-' + suffix;
+    const [{ id }] = await sql<{ id: string }[]>`
+      INSERT INTO products (sku, slug, name, status, base_price)
+      VALUES (${sku}, ${sku}, 'Частичный резерв', 'active', '100.00')
+      RETURNING id
+    `;
+    await sql`
+      INSERT INTO inventory (product_id, variant_id, warehouse_code, quantity, reserved)
+      VALUES (${id}, NULL, 'a', 5, 2), (${id}, NULL, 'b', 3, 3)
+    `;
+
+    const { rows } = await listProducts({ search: sku, page: 1, pageSize: 5 });
+    const found = rows.find((r) => r.id === id);
+    expect(found!.totalStock).toBe(8); // 5 + 3
+    expect(found!.availableStock).toBe(3); // (5−2) + max(3−3,0) = 3 + 0
+
+    await sql`DELETE FROM products WHERE id = ${id}`;
+  });
+});
+
 // ИНТЕГРАЦИЯ: миграция 0011 (compare_at_price/флаги/бренды). Требует БД с накатанной 0011.
 describe.skipIf(!hasDb)('каталог 0011 — цена/флаги/бренды (интеграция)', () => {
   afterAll(async () => {

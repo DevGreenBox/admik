@@ -258,8 +258,14 @@ export interface ProductListRow {
   effectiveIsNew: boolean;
   /** Бренд товара (компактно), если есть. */
   brand: BrandRef | null;
-  /** Суммарный остаток по всем строкам inventory товара. */
+  /** Суммарный физический остаток по всем строкам inventory (для админки). */
   totalStock: number;
+  /**
+   * Доступное к продаже по всем строкам inventory: sum(max(quantity − reserved, 0)).
+   * Драйвер витринного inStock — зарезервированное под незавершённые заказы не
+   * показывается «в наличии» (иначе оверселл). Семантика совпадает с computeInStock.
+   */
+  availableStock: number;
   /** URL главного изображения (is_primary), если есть. */
   primaryMediaUrl: string | null;
   createdAt: Date;

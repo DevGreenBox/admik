@@ -103,11 +103,12 @@ describe('storefront/dto — список товаров', () => {
     effectiveIsNew: true,
     brand: brandRef,
     totalStock: 3,
+    availableStock: 3,
     primaryMediaUrl: 'https://cdn/img.jpg',
     createdAt: D,
   };
 
-  it('маппит цену/скидку и inStock из остатка; не утекает status/id/sku', () => {
+  it('маппит цену/скидку и inStock из доступного остатка; не утекает status/id/sku', () => {
     const dto = toProductListItemDto(row);
     expect(dto.price).toBe('790.00');
     expect(dto.compareAtPrice).toBe('1000.00');
@@ -122,10 +123,26 @@ describe('storefront/dto — список товаров', () => {
     expect(dto).not.toHaveProperty('id');
     expect(dto).not.toHaveProperty('status');
     expect(dto).not.toHaveProperty('totalStock');
+    expect(dto).not.toHaveProperty('availableStock');
   });
 
-  it('inStock=false при нулевом остатке', () => {
-    expect(toProductListItemDto({ ...row, totalStock: 0 }).inStock).toBe(false);
+  it('inStock=false при нулевом доступном остатке', () => {
+    expect(
+      toProductListItemDto({ ...row, totalStock: 0, availableStock: 0 }).inStock,
+    ).toBe(false);
+  });
+
+  // РЕГРЕСС (major, data-integrity): весь физический остаток зарезервирован под
+  // незавершённые заказы → доступное = 0, витрина НЕ должна показывать «в наличии».
+  // Семантика совпадает с computeInStock карточки/детали: in stock = quantity−reserved>0.
+  it('inStock=false когда физический остаток есть, но весь зарезервирован', () => {
+    const dto = toProductListItemDto({ ...row, totalStock: 5, availableStock: 0 });
+    expect(dto.inStock).toBe(false);
+  });
+
+  it('inStock=true когда доступно хоть сколько-то при наличии резерва', () => {
+    const dto = toProductListItemDto({ ...row, totalStock: 5, availableStock: 2 });
+    expect(dto.inStock).toBe(true);
   });
 });
 

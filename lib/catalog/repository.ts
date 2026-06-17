@@ -385,6 +385,7 @@ export async function listProducts(
       p.compare_at_price, p.is_featured, p.is_new, p.brand_id,
       b.id AS b_id, b.slug AS b_slug, b.name AS b_name, b.logo_key AS b_logo_key,
       COALESCE((SELECT sum(i.quantity) FROM inventory i WHERE i.product_id = p.id), 0) AS total_stock,
+      COALESCE((SELECT sum(GREATEST(i.quantity - i.reserved, 0)) FROM inventory i WHERE i.product_id = p.id), 0) AS available_stock,
       (SELECT m.url FROM product_media m
         WHERE m.product_id = p.id AND m.is_primary
         LIMIT 1) AS primary_media_url
@@ -427,6 +428,7 @@ export async function listProducts(
       effectiveIsNew: resolveIsNew(isNew, createdAt, newDays, now),
       brand: mapBrandRef(r),
       totalStock: Number(r.total_stock ?? 0),
+      availableStock: Number(r.available_stock ?? 0),
       primaryMediaUrl: r.primary_media_url ?? null,
       createdAt,
     };
