@@ -46,13 +46,15 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN pnpm build
 
 # -----------------------------------------------------------------------------
-# Этап sharp — чистая установка sharp под ЦЕЛЕВУЮ платформу (musl/x64)
+# Этап sharp — нативный libvips под ЦЕЛЕВУЮ платформу (musl/x64) для рантайма
 # -----------------------------------------------------------------------------
-# Зачем отдельная стадия: standalone-трассировка Next.js (nft) НЕ тянет нативный
-# libvips (@img/sharp-libvips-linuxmusl-x64), который sharp грузит через dlopen —
-# в итоге обработка изображений в рантайме падает (ERR_DLOPEN libvips-cpp.so.*),
-# и весь модуль lib/storage/image (а с ним экшены каталога) не загружается.
-# Чистый `npm install` под платформу кладёт совместимые @img/* с нужной ABI libvips.
+# Зачем: standalone-трассировка Next.js (nft) приносит нативный .node sharp, но НЕ
+# тянет dlopen-загружаемый libvips (@img/sharp-libvips-linuxmusl-x64@1.3.0 с
+# libvips-cpp.so.8.18.3) — в рантайме обработка изображений падает
+# ERR_DLOPEN_FAILED, из-за чего весь модуль lib/storage/image (и экшены каталога)
+# не загружается. Externalize sharp при этом РАБОТАЕТ (хеш-внешний резолвится в
+# пакет); не хватает только .so. Ставим sharp чисто под платформу, чтобы получить
+# КОРРЕКТНЫЙ libvips, и подкладываем его на путь загрузчика (LD_LIBRARY_PATH).
 # Версию берём из package.json приложения (синхронно, без хардкода).
 FROM node:20-alpine AS sharp
 WORKDIR /sharp
@@ -60,14 +62,7 @@ COPY package.json /tmp/app-package.json
 RUN SHARP_VER=$(node -p "require('/tmp/app-package.json').dependencies.sharp") \
  && npm init -y >/dev/null 2>&1 \
  && npm install --no-audit --no-fund --include=optional \
-      --os=linux --libc=musl --cpu=x64 "sharp@${SHARP_VER}" \
- # Вкладываем ВСЕ зависимости sharp (@img/color/detect-libc/semver и их транзитив)
- # внутрь sharp/node_modules — так пакет sharp становится САМОДОСТАТОЧНЫМ: в рантайме
- # копируем только node_modules/sharp, его require'ы резолвятся из вложенного
- # node_modules, не завися от верхнего уровня (где pnpm-симлинки) и не требуя NODE_PATH.
- && cd /sharp/node_modules \
- && mkdir -p sharp/node_modules \
- && for d in *; do case "$d" in sharp|.*) ;; *) mv "$d" sharp/node_modules/ ;; esac; done
+      --os=linux --libc=musl --cpu=x64 "sharp@${SHARP_VER}"
 
 # -----------------------------------------------------------------------------
 # Этап runner — финальный минимальный образ
@@ -107,18 +102,12 @@ COPY --from=build --chown=nextjs:nodejs /app/.next/static ./.next/static
 # 'postgres' в node_modules надёжно (даже как serverExternalPackages) — копируем
 # реальные файлы пакета из pnpm-стора (postgres.js zero-deps). Версия — из лок-файла.
 COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/postgres@*/node_modules/postgres ./node_modules/postgres
-# sharp + нативный libvips: standalone-трассировка Next.js приносит pnpm-копию sharp
-# с НЕсовместимым libvips (8.17.3 от 0.34.5 вместо 8.18.3 от 0.35.1) и без @img на
-# верхнем уровне → ERR_DLOPEN при обработке изображений, из-за чего весь модуль
-# lib/storage/image (и экшены каталога) не загружается.
-# Решение: удаляем сломанную pnpm-копию sharp из standalone и кладём на её место
-# САМОДОСТАТОЧНЫЙ sharp из стадии `sharp` (зависимости вложены в sharp/node_modules).
-# Turbopack грузит sharp как external через ESM import('sharp'), а import НЕ смотрит
-# в NODE_PATH — поэтому пакет должен лежать именно в /app/node_modules/sharp
-# (реальный каталог, не pnpm-симлинк), с вложенными @img/color/etc. внутри.
-# serverExternalPackages:['sharp'] (next.config) держит sharp вне бандла.
-RUN rm -rf ./node_modules/sharp ./node_modules/.pnpm/sharp@* ./node_modules/.pnpm/@img+*
-COPY --from=sharp --chown=nextjs:nodejs /sharp/node_modules/sharp ./node_modules/sharp
+# Нативный libvips для sharp (см. стадию `sharp`): кладём lib/ пакета
+# @img/sharp-libvips-linuxmusl-x64 (содержит libvips-cpp.so.8.18.3) и добавляем его
+# в LD_LIBRARY_PATH, чтобы dlopen из sharp .node нашёл библиотеку. Это закрывает
+# ERR_DLOPEN_FAILED без вмешательства в externalize/символические ссылки standalone.
+COPY --from=sharp --chown=nextjs:nodejs /sharp/node_modules/@img/sharp-libvips-linuxmusl-x64/lib /app/sharp-libvips/lib
+ENV LD_LIBRARY_PATH=/app/sharp-libvips/lib
 # Скрипты развёртывания и SQL-миграции/seed — НЕ входят в standalone-трассировку
 # Next.js, поэтому копируются явно (нужны init-shop.sh внутри контейнера app).
 COPY --from=build --chown=nextjs:nodejs /app/scripts ./scripts
