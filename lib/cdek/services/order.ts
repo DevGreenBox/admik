@@ -27,6 +27,7 @@ import {
   bumpShipmentRetry,
 } from '../repository';
 import { getOrderById, type OrderWithItems } from '@/lib/orders/repository';
+import { canTransitionDelivery } from '@/lib/orders/status';
 import type { Order, OrderItem } from '@/lib/orders/types';
 import type {
   CdekShipment,
@@ -423,6 +424,17 @@ export class OrderService {
   /**
    * Отмена отправления заказа (docs/08 §7.1). Real: DELETE/PATCH в СДЭК; mock:
    * только пометка. Обновляет статус отправления и delivery_status заказа.
+   *
+   * БАГ #12 (precondition, анти-рассинхрон): переход delivery_status → cancelled
+   * разрешён статус-машиной (lib/orders/status.ts) ТОЛЬКО из pending/registered.
+   * Если заказ уже in_transit/delivered/returned/cancelled — applyDeliveryStatus
+   * вернул бы false (no-op), а отправление мы бы уже пометили CANCELLED и (в боевом)
+   * реально отменили в СДЭК → рассинхрон «отправление CANCELLED ↔ delivery_status
+   * остался in_transit». Выбран САМЫЙ БЕЗОПАСНЫЙ вариант: проверяем допустимость
+   * перехода ДО любых побочных эффектов (нет вызова СДЭК, нет пометки отправления)
+   * и бросаем понятный CdekError. Семантика статус-машины не размывается: посылку,
+   * которая уже в пути/доставлена, нельзя «отменить» — для неё существует ветка
+   * returned, а не cancelled. Это тот же защитный приём, что canCreateShipment.
    */
   async cancelShipment(
     orderId: string,
@@ -436,6 +448,22 @@ export class OrderService {
       );
     }
 
+    // Precondition: отмена допустима лишь из pending/registered. Иначе — никаких
+    // побочных эффектов (СДЭК не дёргаем, отправление не помечаем), понятная ошибка.
+    const loaded = await getOrderById(orderId);
+    if (!loaded) {
+      throw new CdekError('cdek_order_not_found', `Заказ ${orderId} не найден.`);
+    }
+    const from = loaded.order.deliveryStatus;
+    if (!canTransitionDelivery(from, 'cancelled')) {
+      throw new CdekError(
+        'cdek_cancel_not_allowed',
+        `Нельзя отменить отправление: статус доставки "${from}" не допускает отмену ` +
+          `(отмена возможна только из pending/registered). Посылку в пути/доставленную ` +
+          `следует оформлять через возврат, а не отмену.`,
+      );
+    }
+
     if (!this.manager.isMock) {
       await this.cancel(shipment.cdekUuid, opts.afterAcceptance);
     }
@@ -446,7 +474,7 @@ export class OrderService {
       statusAt: new Date(),
     });
 
-    // delivery_status заказа → cancelled, если переход допустим.
+    // delivery_status заказа → cancelled (переход уже проверен precondition выше).
     await applyDeliveryStatus(orderId, 'cancelled');
   }
 }

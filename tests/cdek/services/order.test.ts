@@ -291,6 +291,72 @@ describe('cdek/order — createShipment (mock-создание, repository за�
   });
 });
 
+describe('cdek/order — cancelShipment (БАГ #12: нет рассинхрона отправление↔delivery_status)', () => {
+  beforeEach(() => {
+    repoState.shipment = null;
+    vi.clearAllMocks();
+  });
+
+  it('delivery_status=in_transit → precondition CdekError, отправление НЕ помечается CANCELLED, СДЭК не дёргается', async () => {
+    repoState.shipment = { id: 'sh-1', orderId: 'ord-1', cdekUuid: 'mock-uuid-1' };
+    getShipmentMock.mockResolvedValue(repoState.shipment);
+    getOrderByIdMock.mockResolvedValue({
+      order: makeOrder({ deliveryStatus: 'in_transit' }),
+      items: [makeItem()],
+    });
+    const svc = new OrderService(new CdekManager({ config: mockCfg }));
+    await expect(svc.cancelShipment('ord-1')).rejects.toThrow();
+    // Главное: НЕ перевели отправление в CANCELLED (иначе рассинхрон с in_transit).
+    expect(updateShipmentMock).not.toHaveBeenCalled();
+  });
+
+  it('delivery_status=delivered → precondition CdekError, отправление НЕ помечается CANCELLED', async () => {
+    repoState.shipment = { id: 'sh-1', orderId: 'ord-1', cdekUuid: 'mock-uuid-1' };
+    getShipmentMock.mockResolvedValue(repoState.shipment);
+    getOrderByIdMock.mockResolvedValue({
+      order: makeOrder({ deliveryStatus: 'delivered' }),
+      items: [makeItem()],
+    });
+    const svc = new OrderService(new CdekManager({ config: mockCfg }));
+    await expect(svc.cancelShipment('ord-1')).rejects.toThrow();
+    expect(updateShipmentMock).not.toHaveBeenCalled();
+  });
+
+  it('delivery_status=pending → отмена проходит, отправление помечается CANCELLED', async () => {
+    repoState.shipment = { id: 'sh-1', orderId: 'ord-1', cdekUuid: 'mock-uuid-1' };
+    getShipmentMock.mockResolvedValue(repoState.shipment);
+    getOrderByIdMock.mockResolvedValue({
+      order: makeOrder({ deliveryStatus: 'pending' }),
+      items: [makeItem()],
+    });
+    const svc = new OrderService(new CdekManager({ config: mockCfg }));
+    await expect(svc.cancelShipment('ord-1')).resolves.toBeUndefined();
+    expect(updateShipmentMock).toHaveBeenCalledTimes(1);
+    const patch = updateShipmentMock.mock.calls[0]![1] as Record<string, unknown>;
+    expect(patch.statusCode).toBe('CANCELLED');
+  });
+
+  it('delivery_status=registered → отмена проходит (переход registered → cancelled допустим)', async () => {
+    repoState.shipment = { id: 'sh-1', orderId: 'ord-1', cdekUuid: 'mock-uuid-1' };
+    getShipmentMock.mockResolvedValue(repoState.shipment);
+    getOrderByIdMock.mockResolvedValue({
+      order: makeOrder({ deliveryStatus: 'registered' }),
+      items: [makeItem()],
+    });
+    const svc = new OrderService(new CdekManager({ config: mockCfg }));
+    await expect(svc.cancelShipment('ord-1')).resolves.toBeUndefined();
+    expect(updateShipmentMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('нет отправления (cdek_uuid пуст) → CdekError, отправление не трогаем', async () => {
+    repoState.shipment = null;
+    getShipmentMock.mockResolvedValue(null);
+    const svc = new OrderService(new CdekManager({ config: mockCfg }));
+    await expect(svc.cancelShipment('ord-1')).rejects.toThrow();
+    expect(updateShipmentMock).not.toHaveBeenCalled();
+  });
+});
+
 describe('cdek/order — createShipment (real, замоканный client)', () => {
   beforeEach(() => {
     repoState.shipment = null;
