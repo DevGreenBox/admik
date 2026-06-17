@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
@@ -51,6 +52,12 @@ export function PromoRowActions({
   return (
     <div className="flex flex-col items-end gap-1">
       <div className="flex gap-2">
+        <Link
+          href={`/admin/promo/${id}`}
+          className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100"
+        >
+          Редактировать
+        </Link>
         {isActive ? (
           <button
             type="button"
@@ -58,10 +65,10 @@ export function PromoRowActions({
             onClick={() =>
               run(
                 () => deactivatePromoCodeAction({ id }),
-                `Деактивировать промокод «${code}»?`,
+                `Деактивировать промокод «${code}»? Он перестанет применяться, но останется в списке (включить обратно можно через «Редактировать»).`,
               )
             }
-            className="text-xs text-amber-700 hover:underline disabled:opacity-50"
+            className="rounded-md border border-amber-300 px-3 py-1.5 text-sm font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50"
           >
             Деактивировать
           </button>
@@ -75,7 +82,7 @@ export function PromoRowActions({
               `Удалить промокод «${code}» безвозвратно? История заказов сохранится.`,
             )
           }
-          className="text-xs text-red-700 hover:underline disabled:opacity-50"
+          className="rounded-md border border-red-300 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
         >
           Удалить
         </button>

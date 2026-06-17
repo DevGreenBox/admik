@@ -116,3 +116,14 @@ export const SYSTEM_ROLES: readonly SystemRoleDef[] = [
     ],
   },
 ] as const;
+
+/**
+ * Человеко-понятное название права по коду (для UI: «403», списки ролей и т.п.).
+ * Неизвестный код возвращается как есть (фолбэк для нестандартных строк).
+ */
+const PERMISSION_TITLE_BY_CODE = new Map<string, string>(
+  ALL_PERMISSIONS.map((p) => [p.code, p.title]),
+);
+export function permissionTitle(code: string): string {
+  return PERMISSION_TITLE_BY_CODE.get(code) ?? code;
+}

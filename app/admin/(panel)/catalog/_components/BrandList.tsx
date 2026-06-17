@@ -44,9 +44,9 @@ export function BrandList({ brands }: { brands: Brand[] }) {
             <tr>
               <th scope="col" className="px-4 py-2 font-medium">Лого</th>
               <th scope="col" className="px-4 py-2 font-medium">Название</th>
-              <th scope="col" className="px-4 py-2 font-medium">ЧПУ</th>
+              <th scope="col" className="px-4 py-2 font-medium">Адрес</th>
               <th scope="col" className="px-4 py-2 font-medium">Активен</th>
-              <th scope="col" className="px-4 py-2 font-medium">Действия</th>
+              <th scope="col" className="px-4 py-2 font-medium text-right">Действия</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
@@ -75,9 +75,21 @@ export function BrandList({ brands }: { brands: Brand[] }) {
                   <td className="px-4 py-2 text-gray-600"><code className="text-xs">{b.slug}</code></td>
                   <td className="px-4 py-2 text-gray-600">{b.isActive ? 'да' : 'нет'}</td>
                   <td className="px-4 py-2">
-                    <button type="button" onClick={() => remove(b)} className="text-xs text-red-600 hover:underline">
-                      удалить
-                    </button>
+                    <div className="flex justify-end gap-2">
+                      <Link
+                        href={`/admin/catalog/brands/${b.id}`}
+                        className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100"
+                      >
+                        Редактировать
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={() => remove(b)}
+                        className="rounded-md border border-red-300 px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50"
+                      >
+                        Удалить
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))
