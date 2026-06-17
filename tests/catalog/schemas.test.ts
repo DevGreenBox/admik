@@ -73,6 +73,12 @@ describe('ProductCreateSchema', () => {
     expect(res.success).toBe(true);
   });
 
+  it('артикул и адрес необязательны — достаточно одного названия (упрощение формы)', () => {
+    // Упрощение для нетехнического владельца: SKU и slug генерируются автоматически.
+    const res = ProductCreateSchema.safeParse({ name: 'Куртка' });
+    expect(res.success).toBe(true);
+  });
+
   it('отрицательная цена отклонена', () => {
     const res = ProductCreateSchema.safeParse({
       sku: 'SKU-1',

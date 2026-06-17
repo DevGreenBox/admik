@@ -297,13 +297,16 @@ export const createProduct = defineAction({
     const base = data.slug || slugify(data.name);
 
     const row = await insertWithUniqueSlug(base, async (slug) => {
+      // Артикул: если не задан — берём уникальный slug (insertWithUniqueSlug
+      // ретраит на любой unique-конфликт, включая products_sku_uniq).
+      const skuValue = data.sku || slug;
       const rows = await sql<{ id: string }[]>`
         INSERT INTO products (sku, slug, name, description, status, base_price,
                               compare_at_price, is_featured, is_new, brand_id,
                               seo_title, seo_description,
                               weight_g, length_cm, width_cm, height_cm)
         VALUES (
-          ${data.sku}, ${slug}, ${data.name}, ${data.description ?? ''},
+          ${skuValue}, ${slug}, ${data.name}, ${data.description ?? ''},
           ${data.status ?? 'draft'}, ${data.basePrice ?? '0'},
           ${data.compareAtPrice ?? null}, ${data.isFeatured ?? false},
           ${data.isNew ?? null}, ${data.brandId ?? null},

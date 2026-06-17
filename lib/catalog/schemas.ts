@@ -145,7 +145,9 @@ export const CategoryDeleteSchema = z.object({ id: uuidSchema });
 
 export const ProductCreateSchema = z
   .object({
-    sku: skuSchema,
+    // Артикул необязателен: если пуст — createProduct генерирует его из
+    // уникального slug (чтобы владелец не заполнял технический код вручную).
+    sku: skuSchema.optional(),
     // Необязателен: если пуст — createProduct генерирует из name (slugify,
     // транслитерация кириллицы), как у брендов. Раньше был обязателен.
     slug: slugSchema.optional(),

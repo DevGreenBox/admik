@@ -281,6 +281,9 @@ export function ProductForm({
       <div role="tablist" aria-label="Секции товара" className="flex flex-wrap gap-1 border-b border-gray-200">
         {tabs
           .filter((t) => isEdit || !t.editOnly)
+          // «Характеристики» (доп. атрибуты) прячем, пока их нет в справочнике —
+          // чтобы не загромождать форму неактуальной вкладкой для простого магазина.
+          .filter((t) => !(t.key === 'attributes' && attributes.length === 0))
           .map((t) => (
             <button
               key={t.key}
@@ -317,37 +320,17 @@ export function ProductForm({
             </div>
 
             <div>
-              <label htmlFor="p-sku" className="block text-sm font-medium text-gray-700">
-                Артикул*
+              <label htmlFor="p-price" className="block text-sm font-medium text-gray-700">
+                Цена*
               </label>
               <input
-                id="p-sku"
-                value={sku}
-                onChange={(e) => setSku(e.target.value)}
-                className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
-                required
-              />
-              <p className="mt-1 text-xs text-gray-500">
-                Уникальный код товара для учёта, например <code>FORMA-001</code>.
-              </p>
-              {fieldErr('sku') ? <p className="mt-1 text-xs text-red-600">{fieldErr('sku')}</p> : null}
-            </div>
-
-            <div>
-              <label htmlFor="p-slug" className="block text-sm font-medium text-gray-700">
-                Адрес страницы на сайте
-              </label>
-              <input
-                id="p-slug"
-                value={slug}
-                onChange={(e) => setSlug(e.target.value)}
-                placeholder="оставьте пустым — создастся автоматически из названия"
+                id="p-price"
+                inputMode="decimal"
+                value={basePrice}
+                onChange={(e) => setBasePrice(e.target.value)}
                 className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
               />
-              <p className="mt-1 text-xs text-gray-500">
-                Часть ссылки товара на витрине. Можно не заполнять.
-              </p>
-              {fieldErr('slug') ? <p className="mt-1 text-xs text-red-600">{fieldErr('slug')}</p> : null}
+              {fieldErr('basePrice') ? <p className="mt-1 text-xs text-red-600">{fieldErr('basePrice')}</p> : null}
             </div>
 
             <div>
@@ -367,148 +350,9 @@ export function ProductForm({
                 ))}
               </select>
               <p className="mt-1 text-xs text-gray-500">
-                «Активен» — товар показывается покупателям на сайте. «Черновик» и «В архиве» — скрыт.
+                «Активен» — товар виден на сайте. «Черновик» и «В архиве» — скрыт.
               </p>
             </div>
-
-            <div>
-              <label htmlFor="p-price" className="block text-sm font-medium text-gray-700">
-                Цена*
-              </label>
-              <input
-                id="p-price"
-                inputMode="decimal"
-                value={basePrice}
-                onChange={(e) => setBasePrice(e.target.value)}
-                className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
-              />
-              {fieldErr('basePrice') ? <p className="mt-1 text-xs text-red-600">{fieldErr('basePrice')}</p> : null}
-            </div>
-
-            <div>
-              <label htmlFor="p-compare" className="block text-sm font-medium text-gray-700">
-                Цена до скидки («было»)
-              </label>
-              <input
-                id="p-compare"
-                inputMode="decimal"
-                value={compareAtPrice}
-                onChange={(e) => setCompareAtPrice(e.target.value)}
-                placeholder="оставьте пустым — без скидки"
-                className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
-              />
-              {fieldErr('compareAtPrice') ? (
-                <p className="mt-1 text-xs text-red-600">{fieldErr('compareAtPrice')}</p>
-              ) : null}
-            </div>
-
-            <div>
-              <label htmlFor="p-brand" className="block text-sm font-medium text-gray-700">
-                Бренд
-              </label>
-              <select
-                id="p-brand"
-                value={brandId}
-                onChange={(e) => setBrandId(e.target.value)}
-                className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
-              >
-                <option value="">— без бренда —</option>
-                {brands.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <details className="lg:col-span-2 rounded border border-gray-200 p-3">
-              <summary className="cursor-pointer text-sm font-medium text-gray-700">
-                Вес и габариты (для расчёта доставки) — необязательно
-              </summary>
-              <p className="mt-1 text-xs text-gray-500">
-                Пусто — берётся значение по умолчанию из настроек магазина. У каждого
-                варианта можно задать свои.
-              </p>
-              <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
-                <div>
-                  <label htmlFor="p-weight" className="block text-xs font-medium text-gray-600">
-                    Вес (г)
-                  </label>
-                  <input
-                    id="p-weight"
-                    inputMode="numeric"
-                    value={weightG}
-                    onChange={(e) => setWeightG(e.target.value)}
-                    className="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
-                  />
-                  {fieldErr('weightG') ? <p className="mt-1 text-xs text-red-600">{fieldErr('weightG')}</p> : null}
-                </div>
-                <div>
-                  <label htmlFor="p-length" className="block text-xs font-medium text-gray-600">
-                    Длина (см)
-                  </label>
-                  <input
-                    id="p-length"
-                    inputMode="numeric"
-                    value={lengthCm}
-                    onChange={(e) => setLengthCm(e.target.value)}
-                    className="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
-                  />
-                  {fieldErr('lengthCm') ? <p className="mt-1 text-xs text-red-600">{fieldErr('lengthCm')}</p> : null}
-                </div>
-                <div>
-                  <label htmlFor="p-width" className="block text-xs font-medium text-gray-600">
-                    Ширина (см)
-                  </label>
-                  <input
-                    id="p-width"
-                    inputMode="numeric"
-                    value={widthCm}
-                    onChange={(e) => setWidthCm(e.target.value)}
-                    className="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
-                  />
-                  {fieldErr('widthCm') ? <p className="mt-1 text-xs text-red-600">{fieldErr('widthCm')}</p> : null}
-                </div>
-                <div>
-                  <label htmlFor="p-height" className="block text-xs font-medium text-gray-600">
-                    Высота (см)
-                  </label>
-                  <input
-                    id="p-height"
-                    inputMode="numeric"
-                    value={heightCm}
-                    onChange={(e) => setHeightCm(e.target.value)}
-                    className="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
-                  />
-                  {fieldErr('heightCm') ? <p className="mt-1 text-xs text-red-600">{fieldErr('heightCm')}</p> : null}
-                </div>
-              </div>
-            </details>
-
-            <fieldset className="flex flex-col gap-2">
-              <legend className="text-sm font-medium text-gray-700">Флаги</legend>
-              <label className="flex items-center gap-2 text-sm text-gray-700">
-                <input
-                  type="checkbox"
-                  checked={isFeatured}
-                  onChange={(e) => setIsFeatured(e.target.checked)}
-                />
-                Рекомендуемый (хит продаж) — бейдж на витрине
-              </label>
-              <div className="flex items-center gap-2 text-sm text-gray-700">
-                <label htmlFor="p-isnew">Бейдж «Новинка»:</label>
-                <select
-                  id="p-isnew"
-                  value={isNewMode}
-                  onChange={(e) => setIsNewMode(e.target.value as 'auto' | 'yes' | 'no')}
-                  className="rounded border border-gray-300 px-2 py-1 text-sm"
-                >
-                  <option value="auto">Авто (по дате)</option>
-                  <option value="yes">Да</option>
-                  <option value="no">Нет</option>
-                </select>
-              </div>
-            </fieldset>
 
             <div className="lg:col-span-2">
               <label htmlFor="p-desc" className="block text-sm font-medium text-gray-700">
@@ -558,6 +402,173 @@ export function ProductForm({
                 <p className="mt-1 text-xs text-red-600">{fieldErr('primaryCategoryId')}</p>
               ) : null}
             </fieldset>
+
+            <details className="lg:col-span-2 rounded border border-gray-200 p-3">
+              <summary className="cursor-pointer text-sm font-medium text-gray-700">
+                Дополнительные настройки — необязательно
+              </summary>
+
+              <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label htmlFor="p-sku" className="block text-sm font-medium text-gray-700">
+                    Артикул
+                  </label>
+                  <input
+                    id="p-sku"
+                    value={sku}
+                    onChange={(e) => setSku(e.target.value)}
+                    placeholder="оставьте пустым — создастся автоматически"
+                    className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
+                  />
+                  <p className="mt-1 text-xs text-gray-500">
+                    Код товара для учёта. Можно не заполнять.
+                  </p>
+                  {fieldErr('sku') ? <p className="mt-1 text-xs text-red-600">{fieldErr('sku')}</p> : null}
+                </div>
+
+                <div>
+                  <label htmlFor="p-slug" className="block text-sm font-medium text-gray-700">
+                    Адрес страницы на сайте
+                  </label>
+                  <input
+                    id="p-slug"
+                    value={slug}
+                    onChange={(e) => setSlug(e.target.value)}
+                    placeholder="оставьте пустым — создастся автоматически из названия"
+                    className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
+                  />
+                  <p className="mt-1 text-xs text-gray-500">
+                    Часть ссылки товара на витрине. Можно не заполнять.
+                  </p>
+                  {fieldErr('slug') ? <p className="mt-1 text-xs text-red-600">{fieldErr('slug')}</p> : null}
+                </div>
+
+                <div>
+                  <label htmlFor="p-compare" className="block text-sm font-medium text-gray-700">
+                    Цена до скидки («было»)
+                  </label>
+                  <input
+                    id="p-compare"
+                    inputMode="decimal"
+                    value={compareAtPrice}
+                    onChange={(e) => setCompareAtPrice(e.target.value)}
+                    placeholder="оставьте пустым — без скидки"
+                    className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
+                  />
+                  {fieldErr('compareAtPrice') ? (
+                    <p className="mt-1 text-xs text-red-600">{fieldErr('compareAtPrice')}</p>
+                  ) : null}
+                </div>
+
+                <div>
+                  <label htmlFor="p-brand" className="block text-sm font-medium text-gray-700">
+                    Бренд
+                  </label>
+                  <select
+                    id="p-brand"
+                    value={brandId}
+                    onChange={(e) => setBrandId(e.target.value)}
+                    className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
+                  >
+                    <option value="">— без бренда —</option>
+                    {brands.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <fieldset className="mt-4 flex flex-col gap-2">
+                <legend className="text-sm font-medium text-gray-700">Бейджи на витрине</legend>
+                <label className="flex items-center gap-2 text-sm text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={isFeatured}
+                    onChange={(e) => setIsFeatured(e.target.checked)}
+                  />
+                  Рекомендуемый (хит продаж) — бейдж на витрине
+                </label>
+                <div className="flex items-center gap-2 text-sm text-gray-700">
+                  <label htmlFor="p-isnew">Бейдж «Новинка»:</label>
+                  <select
+                    id="p-isnew"
+                    value={isNewMode}
+                    onChange={(e) => setIsNewMode(e.target.value as 'auto' | 'yes' | 'no')}
+                    className="rounded border border-gray-300 px-2 py-1 text-sm"
+                  >
+                    <option value="auto">Авто (по дате)</option>
+                    <option value="yes">Да</option>
+                    <option value="no">Нет</option>
+                  </select>
+                </div>
+              </fieldset>
+
+              <div className="mt-4">
+                <p className="text-sm font-medium text-gray-700">
+                  Вес и габариты (для расчёта доставки)
+                </p>
+                <p className="mt-1 text-xs text-gray-500">
+                  Пусто — берётся значение по умолчанию из настроек магазина. У каждого
+                  варианта можно задать свои.
+                </p>
+                <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  <div>
+                    <label htmlFor="p-weight" className="block text-xs font-medium text-gray-600">
+                      Вес (г)
+                    </label>
+                    <input
+                      id="p-weight"
+                      inputMode="numeric"
+                      value={weightG}
+                      onChange={(e) => setWeightG(e.target.value)}
+                      className="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
+                    />
+                    {fieldErr('weightG') ? <p className="mt-1 text-xs text-red-600">{fieldErr('weightG')}</p> : null}
+                  </div>
+                  <div>
+                    <label htmlFor="p-length" className="block text-xs font-medium text-gray-600">
+                      Длина (см)
+                    </label>
+                    <input
+                      id="p-length"
+                      inputMode="numeric"
+                      value={lengthCm}
+                      onChange={(e) => setLengthCm(e.target.value)}
+                      className="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
+                    />
+                    {fieldErr('lengthCm') ? <p className="mt-1 text-xs text-red-600">{fieldErr('lengthCm')}</p> : null}
+                  </div>
+                  <div>
+                    <label htmlFor="p-width" className="block text-xs font-medium text-gray-600">
+                      Ширина (см)
+                    </label>
+                    <input
+                      id="p-width"
+                      inputMode="numeric"
+                      value={widthCm}
+                      onChange={(e) => setWidthCm(e.target.value)}
+                      className="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
+                    />
+                    {fieldErr('widthCm') ? <p className="mt-1 text-xs text-red-600">{fieldErr('widthCm')}</p> : null}
+                  </div>
+                  <div>
+                    <label htmlFor="p-height" className="block text-xs font-medium text-gray-600">
+                      Высота (см)
+                    </label>
+                    <input
+                      id="p-height"
+                      inputMode="numeric"
+                      value={heightCm}
+                      onChange={(e) => setHeightCm(e.target.value)}
+                      className="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
+                    />
+                    {fieldErr('heightCm') ? <p className="mt-1 text-xs text-red-600">{fieldErr('heightCm')}</p> : null}
+                  </div>
+                </div>
+              </div>
+            </details>
           </div>
         ) : null}
 
