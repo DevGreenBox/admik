@@ -50,6 +50,34 @@ describe('storefront/auth — authorizeStorefront по ключу', () => {
   it('без ключа → !ok', () => {
     expect(authorizeStorefront(headers({}), withKeys).ok).toBe(false);
   });
+
+  it('совпадает любой из нескольких настроенных ключей (без раннего выхода)', () => {
+    const multi: StorefrontConfig = {
+      apiKeys: [
+        { key: 'sk_first', domain: 'a.com' },
+        { key: 'sk_second', domain: 'b.com' },
+      ],
+      allowedOrigins: [],
+    };
+    // Совпадает первый.
+    expect(
+      authorizeStorefront(headers({ 'x-storefront-key': 'sk_first' }), multi).ok,
+    ).toBe(true);
+    // Совпадает второй (проверка проходит по всем ключам).
+    expect(
+      authorizeStorefront(headers({ 'x-storefront-key': 'sk_second' }), multi).ok,
+    ).toBe(true);
+    // Не совпадает ни один.
+    expect(
+      authorizeStorefront(headers({ 'x-storefront-key': 'sk_none' }), multi).ok,
+    ).toBe(false);
+  });
+
+  it('ключ другой длины → !ok (constant-time сравнение не падает)', () => {
+    expect(
+      authorizeStorefront(headers({ 'x-storefront-key': 'x' }), withKeys).ok,
+    ).toBe(false);
+  });
 });
 
 describe('storefront/auth — authorizeStorefront по Origin', () => {

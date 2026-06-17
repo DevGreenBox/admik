@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { slugify, isValidSlug, uniquifySlug } from '@/lib/catalog/slug';
+import { slugify, isValidSlug, uniquifySlug, slugifyOrFallback } from '@/lib/catalog/slug';
 
 // ЮНИТ: генерация slug — чистая, всегда зелёная (без БД).
 describe('slugify — транслитерация и нормализация', () => {
@@ -53,6 +53,41 @@ describe('isValidSlug', () => {
       const out = slugify(s);
       expect(isValidSlug(out)).toBe(true);
     }
+  });
+});
+
+describe('slugifyOrFallback — непустой slug даже для иероглифов/эмодзи', () => {
+  it('обычное имя транслитерируется как slugify', () => {
+    expect(slugifyOrFallback('Красное платье')).toBe('krasnoe-plate');
+    expect(slugifyOrFallback('iPhone 15 Pro')).toBe('iphone-15-pro');
+  });
+
+  it('имя без латиницы/кириллицы/цифр (эмодзи) → непустой фолбэк-slug', () => {
+    const out = slugifyOrFallback('🎉🎉🎉');
+    expect(out).not.toBe('');
+    expect(isValidSlug(out)).toBe(true);
+    expect(out.startsWith('product-')).toBe(true);
+  });
+
+  it('иероглифы → непустой фолбэк-slug', () => {
+    const out = slugifyOrFallback('日本語');
+    expect(out).not.toBe('');
+    expect(isValidSlug(out)).toBe(true);
+  });
+
+  it('фолбэк использует переданный hint (sku), если slugify(hint) непуст', () => {
+    const out = slugifyOrFallback('🎉', 'ABC-123');
+    expect(out).toBe('abc-123');
+    expect(isValidSlug(out)).toBe(true);
+  });
+
+  it('пустая строка / только пробелы → непустой фолбэк-slug', () => {
+    expect(isValidSlug(slugifyOrFallback(''))).toBe(true);
+    expect(isValidSlug(slugifyOrFallback('   '))).toBe(true);
+  });
+
+  it('фолбэк детерминирован при заданном суффиксе (для ретрая)', () => {
+    expect(slugifyOrFallback('🎉', '', 'abcd')).toBe('product-abcd');
   });
 });
 

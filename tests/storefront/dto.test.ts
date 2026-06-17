@@ -144,6 +144,33 @@ describe('storefront/dto — computeInStock / цена варианта', () => 
     expect(computeInStock(inv, 'v2')).toBe(true);
   });
 
+  it('computeInStock учитывает reserved: доступно = quantity − reserved', () => {
+    // Весь остаток зарезервирован → не в наличии для витрины.
+    const reserved: InventoryItem[] = [
+      { id: 'i', productId: 'p1', variantId: null, warehouseCode: 'W', quantity: 5, reserved: 5, updatedAt: D },
+    ];
+    expect(computeInStock(reserved)).toBe(false);
+    // Часть зарезервирована, но что-то доступно → в наличии.
+    const partial: InventoryItem[] = [
+      { id: 'i', productId: 'p1', variantId: null, warehouseCode: 'W', quantity: 5, reserved: 4, updatedAt: D },
+    ];
+    expect(computeInStock(partial)).toBe(true);
+    // Reserved больше остатка (рассинхрон) → не уходит в минус, не в наличии.
+    const over: InventoryItem[] = [
+      { id: 'i', productId: 'p1', variantId: null, warehouseCode: 'W', quantity: 2, reserved: 5, updatedAt: D },
+    ];
+    expect(computeInStock(over)).toBe(false);
+  });
+
+  it('computeInStock по варианту учитывает reserved этого варианта', () => {
+    const v: InventoryItem[] = [
+      { id: 'i1', productId: 'p1', variantId: 'v1', warehouseCode: 'W', quantity: 3, reserved: 3, updatedAt: D },
+      { id: 'i2', productId: 'p1', variantId: 'v2', warehouseCode: 'W', quantity: 3, reserved: 1, updatedAt: D },
+    ];
+    expect(computeInStock(v, 'v1')).toBe(false);
+    expect(computeInStock(v, 'v2')).toBe(true);
+  });
+
   it('effectiveVariantPrice: override, иначе base+delta', () => {
     const base: ProductVariant = {
       id: 'v', productId: 'p', sku: 's', name: '', priceOverride: null,

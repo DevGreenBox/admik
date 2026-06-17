@@ -12,6 +12,8 @@
  *  - схлопывание повторных дефисов, обрезка дефисов по краям.
  */
 
+import { randomUUID } from 'node:crypto';
+
 /**
  * Таблица транслитерации кириллицы (рус.) → латиница.
  * Покрывает строчные буквы; верхний регистр приводится к нижнему до маппинга.
@@ -59,6 +61,31 @@ export function slugify(input: string): string {
  */
 export function isValidSlug(value: string): boolean {
   return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value);
+}
+
+/**
+ * Как slugify, но НИКОГДА не возвращает пустую строку (docs/05 §4.2).
+ *
+ * slugify('🎉')/slugify('日本語')/slugify('') → '' (нет латиницы/кириллицы/цифр),
+ * а пустой slug сломал бы вставку (NOT NULL/UNIQUE/isValidSlug) и сделал бы
+ * товар недоступным по ЧПУ. Фолбэк по приоритету:
+ *   1) slugify(hint) — обычно артикул (sku): читаемый и стабильный;
+ *   2) `product-<token>` — token из `suffix` (передаётся вызывающим →
+ *      детерминированно, годится для ретрая при коллизии) либо случайный hex,
+ *      если suffix не задан.
+ * Результат всегда проходит isValidSlug.
+ *
+ * NB: ветка без `suffix` использует случайность (`randomUUID`), поэтому в ней
+ * функция НЕ детерминирована — это осознанно (фолбэк-slug должен быть уникальным).
+ * Основные slugify/isValidSlug/uniquifySlug остаются чистыми.
+ */
+export function slugifyOrFallback(name: string, hint = '', suffix?: string): string {
+  const primary = slugify(name);
+  if (primary) return primary;
+  const fromHint = slugify(hint);
+  if (fromHint) return fromHint;
+  const token = (suffix && slugify(suffix)) || randomUUID().replace(/-/g, '').slice(0, 8);
+  return `product-${token}`;
 }
 
 /**

@@ -246,14 +246,20 @@ export function toMediaDto(media: ProductMedia): MediaDto {
   };
 }
 
-/** Считает «в наличии» по строкам inventory (опц. фильтр по варианту). */
+/**
+ * Считает «в наличии» по строкам inventory (опц. фильтр по варианту).
+ *
+ * Доступно = quantity − reserved: зарезервированное под незавершённые заказы НЕ
+ * показывается витрине как «в наличии» (иначе оверселл). Разность > 0 корректно
+ * отсекает и полный резерв (=0), и рассинхрон reserved > quantity (< 0).
+ */
 export function computeInStock(
   inventory: InventoryItem[],
   variantId?: string | null,
 ): boolean {
   return inventory.some(
     (i) =>
-      i.quantity > 0 &&
+      i.quantity - i.reserved > 0 &&
       (variantId === undefined || (i.variantId ?? null) === (variantId ?? null)),
   );
 }

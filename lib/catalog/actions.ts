@@ -38,7 +38,7 @@ import { listCategoryEdges, countCategoryChildren } from './repository';
 import { CatalogError } from './errors';
 import { canMoveCategory } from './tree';
 import { rebuildProductAttributesCache } from './cache';
-import { slugify, uniquifySlug } from './slug';
+import { slugify, slugifyOrFallback, uniquifySlug } from './slug';
 
 /**
  * Server Actions каталога (docs/05 §4).
@@ -121,7 +121,9 @@ export const createCategory = defineAction({
   input: CategoryCreateSchema,
   handler: async (data, _ctx: ActionCtx) => {
     assertCatalogEnabled();
-    const base = data.slug || slugify(data.name);
+    // slugifyOrFallback: имя без латиницы/кириллицы/цифр (эмодзи/иероглифы) не
+    // должно давать пустой slug → товар/категория остались бы без рабочего ЧПУ.
+    const base = data.slug || slugifyOrFallback(data.name);
 
     const row = await insertWithUniqueSlug(base, async (slug) => {
       const rows = await sql<{ id: string }[]>`
@@ -294,7 +296,8 @@ export const createProduct = defineAction({
   input: ProductCreateSchema,
   handler: async (data, _ctx) => {
     assertCatalogEnabled();
-    const base = data.slug || slugify(data.name);
+    // hint=sku: для имени из эмодзи/иероглифов фолбэк возьмёт читаемый артикул.
+    const base = data.slug || slugifyOrFallback(data.name, data.sku ?? '');
 
     const row = await insertWithUniqueSlug(base, async (slug) => {
       // Артикул: если не задан — берём уникальный slug (insertWithUniqueSlug
@@ -556,8 +559,10 @@ export const duplicateProduct = defineAction({
     }
 
     const copyName = `${String(src.name)} (копия)`;
-    const baseSlug = slugify(`${String(src.name)}-copy`);
     const baseSku = `${String(src.sku)}-copy`;
+    // Фолбэк через sku-копию: если имя без транслитерируемых символов, slug
+    // «<name>-copy» был бы пустым → берём «<sku>-copy» как читаемую основу.
+    const baseSlug = slugifyOrFallback(`${String(src.name)}-copy`, baseSku);
 
     // sku и slug — оба уникальны; ретраим через общий суффикс попытки, чтобы
     // обе колонки шли в ногу (insertWithUniqueSlug-подход, но по двум полям).
@@ -1105,7 +1110,7 @@ export const createBrand = defineAction({
   input: BrandCreateSchema,
   handler: async (data, _ctx) => {
     assertCatalogEnabled();
-    const base = data.slug || slugify(data.name);
+    const base = data.slug || slugifyOrFallback(data.name);
 
     const row = await insertWithUniqueSlug(base, async (slug) => {
       const rows = await sql<{ id: string }[]>`
