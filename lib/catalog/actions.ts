@@ -612,15 +612,39 @@ export const duplicateProduct = defineAction({
     `;
 
     // Варианты (product_variants) — копируем поля без id/timestamps.
-    await sql`
-      INSERT INTO product_variants
-        (product_id, sku, name, price_override, price_delta, compare_at_price,
-         is_active, sort, weight_g, length_cm, width_cm, height_cm)
-      SELECT ${newId}, sku || '-copy', name, price_override, price_delta,
-             compare_at_price, is_active, sort,
-             weight_g, length_cm, width_cm, height_cm
-      FROM product_variants WHERE product_id = ${data.id}
-    `;
+    // product_variants.sku имеет ГЛОБАЛЬНЫЙ UNIQUE (0007), поэтому литерал
+    // `sku || '-copy'` ломается при повторном дублировании того же товара или
+    // если '<sku>-copy' уже занят. Уникализируем суффикс варианта по попытке и
+    // ретраим весь батч на 23505 (как insertWithUniqueSlug, но по набору строк).
+    let variantsCopied = false;
+    for (let vAttempt = 0; vAttempt < maxAttempts; vAttempt++) {
+      // suffix попытки: '-copy' для первой, '-copy-2', '-copy-3', … для следующих.
+      const skuSuffix = vAttempt === 0 ? '-copy' : `-copy-${vAttempt + 1}`;
+      try {
+        await sql`
+          INSERT INTO product_variants
+            (product_id, sku, name, price_override, price_delta, compare_at_price,
+             is_active, sort, weight_g, length_cm, width_cm, height_cm)
+          SELECT ${newId}, sku || ${skuSuffix}, name, price_override, price_delta,
+                 compare_at_price, is_active, sort,
+                 weight_g, length_cm, width_cm, height_cm
+          FROM product_variants WHERE product_id = ${data.id}
+        `;
+        variantsCopied = true;
+        break;
+      } catch (err) {
+        if (isUniqueViolation(err) && vAttempt < maxAttempts - 1) {
+          continue;
+        }
+        throw err;
+      }
+    }
+    if (!variantsCopied) {
+      throw new CatalogError(
+        'slug_conflict',
+        'Не удалось подобрать уникальные артикулы вариантов для копии.',
+      );
+    }
 
     // Атрибуты УРОВНЯ ТОВАРА (variant_id IS NULL) — без перемапа вариантов.
     await sql`
@@ -867,10 +891,27 @@ export const setProductAttributes = defineAction({
   handler: async (data, _ctx) => {
     assertCatalogEnabled();
     // Полная замена привязок уровня товара (variant_id IS NULL) и переданных вариантов.
+    // Уровень товара чистим всегда; привязки переданных вариантов — тоже, иначе
+    // INSERT ... ON CONFLICT DO NOTHING (uniq включает value_id) НЕ перезапишет
+    // прежнее select-значение варианта (Красный→Синий дал бы два значения).
     await sql`
       DELETE FROM product_attributes
       WHERE product_id = ${data.productId} AND variant_id IS NULL
     `;
+    const variantIds = Array.from(
+      new Set(
+        data.items
+          .map((it) => it.variantId)
+          .filter((v): v is string => Boolean(v)),
+      ),
+    );
+    if (variantIds.length > 0) {
+      await sql`
+        DELETE FROM product_attributes
+        WHERE product_id = ${data.productId}
+          AND variant_id = ANY(${variantIds}::uuid[])
+      `;
+    }
     for (const item of data.items) {
       await sql`
         INSERT INTO product_attributes
@@ -930,6 +971,15 @@ export const attachMedia = defineAction({
     // (5) Запись метаданных. Компенсация при сбое INSERT — удалить объект (§3.4 шаг 7).
     let inserted;
     try {
+      // Частичный индекс product_media_primary_uniq (0009) допускает ОДНО главное
+      // фото на товар. Если грузим новое как главное — сначала снимаем прежнее
+      // (как reorderMedia), иначе INSERT нарушил бы UNIQUE сырой ошибкой 23505.
+      if (data.isPrimary === true) {
+        await sql`
+          UPDATE product_media SET is_primary = false
+          WHERE product_id = ${data.productId} AND is_primary
+        `;
+      }
       const rows = await sql<{ id: string }[]>`
         INSERT INTO product_media
           (product_id, variant_id, storage_key, url, type, mime, alt,
@@ -1032,21 +1082,32 @@ export const setInventory = defineAction({
   handler: async (data, _ctx) => {
     assertCatalogEnabled();
     // UPSERT по (product, variant, warehouse). COALESCE variant_id для конфликта.
+    // Защита от нарушения inventory_reserved_le_qty (0010): новое quantity не
+    // должно опускаться ниже уже зарезервированного (иначе сырой CHECK 23514).
+    // При обновлении проверяем EXCLUDED.quantity >= inventory.reserved; при пустом
+    // RETURNING (попытка опустить остаток ниже резерва) → доменная ошибка.
     const rows = await sql<{ id: string; quantity: number }[]>`
       INSERT INTO inventory (product_id, variant_id, warehouse_code, quantity, updated_at)
       VALUES (${data.productId}, ${data.variantId ?? null},
               ${data.warehouseCode ?? 'main'}, ${data.quantity}, now())
       ON CONFLICT (product_id, COALESCE(variant_id, '00000000-0000-0000-0000-000000000000'::uuid), warehouse_code)
       DO UPDATE SET quantity = EXCLUDED.quantity, updated_at = now()
+      WHERE EXCLUDED.quantity >= inventory.reserved
       RETURNING id, quantity
     `;
+    if (!rows[0]) {
+      throw new CatalogError(
+        'insufficient_stock',
+        'Нельзя установить остаток ниже зарезервированного количества.',
+      );
+    }
     return {
-      result: { id: rows[0]!.id, quantity: rows[0]!.quantity },
+      result: { id: rows[0].id, quantity: rows[0].quantity },
       revalidate: [productPath(data.productId)],
       audit: {
         action: 'catalog.inventory.set',
         entityType: 'inventory',
-        entityId: rows[0]!.id,
+        entityId: rows[0].id,
         after: {
           productId: data.productId,
           variantId: data.variantId ?? null,
@@ -1062,20 +1123,23 @@ export const adjustInventory = defineAction({
   input: StockAdjustSchema,
   handler: async (data, _ctx) => {
     assertCatalogEnabled();
-    // Атомарная корректировка: итог не уходит ниже 0 (условие в WHERE + CHECK).
+    // Атомарная корректировка: итог не уходит ниже 0 И не ниже зарезервированного
+    // (inventory_reserved_le_qty, 0010) — иначе сырой CHECK 23514. Условие в WHERE
+    // `quantity+delta >= reserved` покрывает обе границы (reserved >= 0): при
+    // нарушении RETURNING пуст → доменная ошибка insufficient_stock.
     const rows = await sql<{ id: string; quantity: number }[]>`
       INSERT INTO inventory (product_id, variant_id, warehouse_code, quantity, updated_at)
       VALUES (${data.productId}, ${data.variantId ?? null},
               ${data.warehouseCode ?? 'main'}, GREATEST(${data.delta}, 0), now())
       ON CONFLICT (product_id, COALESCE(variant_id, '00000000-0000-0000-0000-000000000000'::uuid), warehouse_code)
       DO UPDATE SET quantity = inventory.quantity + ${data.delta}, updated_at = now()
-      WHERE inventory.quantity + ${data.delta} >= 0
+      WHERE inventory.quantity + ${data.delta} >= inventory.reserved
       RETURNING id, quantity
     `;
     if (!rows[0]) {
       throw new CatalogError(
         'insufficient_stock',
-        'Недостаточно остатка для списания (итог был бы отрицательным).',
+        'Недостаточно остатка для списания (итог ниже 0 или ниже зарезервированного).',
       );
     }
     return {
