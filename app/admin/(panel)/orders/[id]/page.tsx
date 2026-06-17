@@ -7,6 +7,7 @@ import {
   getShipmentByOrderId,
   listStatusLogByOrderId,
 } from '@/lib/cdek/repository';
+import { isOrderPaidForShipment } from '@/lib/cdek/services/order';
 import { formatPrice } from '@/lib/admin/format';
 import {
   deliveryTypeLabel,
@@ -357,6 +358,7 @@ export default async function OrderDetailPage({
               shipment={cdek.shipment}
               history={cdek.history}
               deliveryType={order.deliveryType}
+              paymentReady={isOrderPaidForShipment(order)}
             />
           ) : null}
         </div>

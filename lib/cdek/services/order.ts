@@ -246,15 +246,43 @@ export function buildPayload(
 // Проверка состояния заказа (precondition).
 // -----------------------------------------------------------------------------
 
+/**
+ * Оплачен ли заказ настолько, чтобы формировать накладную СДЭК (FF.md: накладная
+ * создаётся ТОЛЬКО после поступления денег — иначе риск отправить неоплаченное).
+ * Признак оплаты: payment_status='paid' (выставляет webhook эквайринга при
+ * поступлении средств) ЛИБО статус заказа уже продвинут оператором за оплату
+ * (paid/packed/shipped/...). Единый источник правды для cron, сервиса и UI.
+ */
+export function isOrderPaidForShipment(
+  order: Pick<Order, 'paymentStatus' | 'status'>,
+): boolean {
+  return (
+    order.paymentStatus === 'paid' ||
+    ['paid', 'packed', 'shipped', 'delivered', 'completed'].includes(order.status)
+  );
+}
+
+/** Причина, по которой нельзя создать отправление (для сообщения пользователю). */
+export type ShipmentBlockReason = 'pickup' | 'not_paid';
+
+/** Человекочитаемое объяснение, почему отправление недоступно. */
+export function shipmentBlockMessage(reason: ShipmentBlockReason): string {
+  switch (reason) {
+    case 'pickup':
+      return 'Самовывоз — отправление СДЭК не создаётся.';
+    case 'not_paid':
+      return 'Заказ ещё не оплачен. Накладная создаётся только после поступления оплаты — это защищает от отправки неоплаченного заказа.';
+  }
+}
+
 /** Можно ли создавать отправление для заказа (оплачен и не самовывоз). */
-export function canCreateShipment(order: Order): { ok: boolean; reason?: string } {
+export function canCreateShipment(
+  order: Order,
+): { ok: boolean; reason?: ShipmentBlockReason } {
   if (order.deliveryType === 'pickup') {
     return { ok: false, reason: 'pickup' };
   }
-  const paid =
-    order.paymentStatus === 'paid' ||
-    ['paid', 'packed', 'shipped', 'delivered', 'completed'].includes(order.status);
-  if (!paid) {
+  if (!isOrderPaidForShipment(order)) {
     return { ok: false, reason: 'not_paid' };
   }
   return { ok: true };
@@ -320,7 +348,7 @@ export class OrderService {
     if (!precond.ok) {
       throw new CdekError(
         'cdek_precondition_failed',
-        `Нельзя создать отправление для заказа ${order.number}: ${precond.reason}.`,
+        shipmentBlockMessage(precond.reason!),
       );
     }
 

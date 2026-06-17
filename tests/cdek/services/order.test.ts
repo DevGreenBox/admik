@@ -49,6 +49,8 @@ import {
   normalizePhone,
   buildPayload,
   canCreateShipment,
+  isOrderPaidForShipment,
+  shipmentBlockMessage,
   deliveryModeFor,
   type BuildPayloadOptions,
 } from '@/lib/cdek/services/order';
@@ -153,12 +155,32 @@ describe('cdek/order — deliveryModeFor / canCreateShipment (чистые)', ()
   it('pickup → нельзя создавать', () => {
     expect(canCreateShipment(makeOrder({ deliveryType: 'pickup' })).ok).toBe(false);
   });
-  it('неоплаченный заказ → нельзя', () => {
+  it('неоплаченный заказ → нельзя (reason=not_paid)', () => {
     const o = makeOrder({ paymentStatus: 'pending', status: 'awaiting_payment' });
-    expect(canCreateShipment(o).ok).toBe(false);
+    const res = canCreateShipment(o);
+    expect(res.ok).toBe(false);
+    expect(res.reason).toBe('not_paid');
   });
   it('оплаченный курьерский → можно', () => {
     expect(canCreateShipment(makeOrder({ deliveryType: 'courier', paymentStatus: 'paid' })).ok).toBe(true);
+  });
+});
+
+describe('cdek/order — isOrderPaidForShipment (FF.md: накладная только после оплаты)', () => {
+  it('payment_status=paid → оплачен (хотя бы статус заказа new)', () => {
+    expect(isOrderPaidForShipment({ paymentStatus: 'paid', status: 'new' })).toBe(true);
+  });
+  it('payment_status=pending + статус awaiting_payment → НЕ оплачен', () => {
+    expect(isOrderPaidForShipment({ paymentStatus: 'pending', status: 'awaiting_payment' })).toBe(false);
+  });
+  it('статус продвинут оператором за оплату (packed) → считаем оплаченным', () => {
+    expect(isOrderPaidForShipment({ paymentStatus: 'pending', status: 'packed' })).toBe(true);
+  });
+  it('новый неоплаченный заказ → НЕ оплачен (накладная недоступна)', () => {
+    expect(isOrderPaidForShipment({ paymentStatus: 'pending', status: 'new' })).toBe(false);
+  });
+  it('сообщение про блокировку not_paid упоминает оплату', () => {
+    expect(shipmentBlockMessage('not_paid')).toMatch(/оплат/i);
   });
 });
 

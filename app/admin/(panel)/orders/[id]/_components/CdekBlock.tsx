@@ -59,11 +59,18 @@ export function CdekBlock({
   shipment,
   history,
   deliveryType,
+  paymentReady,
 }: {
   orderId: string;
   shipment: CdekShipmentView | null;
   history: CdekStatusLogView[];
   deliveryType: string;
+  /**
+   * Поступила ли оплата (FF.md): накладную формируем ТОЛЬКО после оплаты. Если
+   * false — кнопку создания скрываем и поясняем, что отправление появится после
+   * оплаты (сервер всё равно отклонит преждевременное создание — двойная защита).
+   */
+  paymentReady: boolean;
 }) {
   const router = useRouter();
 
@@ -174,9 +181,18 @@ export function CdekBlock({
             ) : null}
           </dl>
 
+          {/* Накладная — только после оплаты (FF.md). Пока оплата не поступила,
+              кнопку создания не показываем, поясняем автоматику. */}
+          {!hasShipment && !paymentReady ? (
+            <p className="mt-4 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+              Отправление СДЭК и накладная создаются <strong>после поступления оплаты</strong> —
+              автоматически, без ручных действий. Так заказ не уедет неоплаченным.
+            </p>
+          ) : null}
+
           {/* --- Кнопки управления --- */}
           <div className="mt-4 flex flex-wrap gap-2">
-            {!hasShipment ? (
+            {!hasShipment && paymentReady ? (
               <button
                 type="button"
                 disabled={pending}
@@ -187,7 +203,8 @@ export function CdekBlock({
               >
                 Создать отправление
               </button>
-            ) : (
+            ) : null}
+            {hasShipment ? (
               <>
                 <button
                   type="button"
@@ -242,7 +259,7 @@ export function CdekBlock({
                   Отменить отправление
                 </button>
               </>
-            )}
+            ) : null}
           </div>
 
           {/* --- История событий webhook --- */}

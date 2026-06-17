@@ -2,7 +2,7 @@
 
 import { z } from 'zod';
 
-import { defineAction } from '@/lib/server/action';
+import { defineAction, PublicActionError } from '@/lib/server/action';
 import { isModuleEnabled } from '@/lib/config/modules';
 import { OrderService } from './services/order';
 import { TrackingService } from './services/tracking';
@@ -35,6 +35,35 @@ function assertCdekEnabled(): void {
   }
 }
 
+/**
+ * Коды CdekError, чьё сообщение безопасно и полезно показать оператору в форме
+ * (бизнес-правило сознательно отклонило действие — это НЕ внутренняя ошибка).
+ * Главный кейс — `cdek_precondition_failed` при неоплаченном заказе (FF.md):
+ * без этого defineAction свернул бы CdekError в безликий `internal`.
+ */
+const USER_FACING_CDEK_CODES = new Set([
+  'cdek_precondition_failed',
+  'cdek_missing_pvz',
+  'cdek_invalid_phone',
+  'cdek_no_shipment',
+]);
+
+/**
+ * Выполняет операцию СДЭК, переводя «понятные» доменные CdekError в
+ * PublicActionError → форма покажет текст пользователю; прочие ошибки уходят в
+ * `internal` (детали — только в лог сервера).
+ */
+async function withUserFacingCdekError<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    if (err instanceof CdekError && USER_FACING_CDEK_CODES.has(err.code)) {
+      throw new PublicActionError(err.message);
+    }
+    throw err;
+  }
+}
+
 /** Путь инвалидации карточки заказа. */
 function orderPath(orderId: string): string {
   return `/admin/orders/${orderId}`;
@@ -64,7 +93,9 @@ export const createCdekShipment = defineAction({
   input: CreateShipmentSchema,
   handler: async ({ orderId, force }) => {
     assertCdekEnabled();
-    const shipment = await new OrderService().createShipment(orderId, { force });
+    const shipment = await withUserFacingCdekError(() =>
+      new OrderService().createShipment(orderId, { force }),
+    );
     return {
       result: {
         id: shipment.id,
@@ -92,7 +123,7 @@ export const cancelCdekShipment = defineAction({
   input: OrderIdSchema,
   handler: async ({ orderId }) => {
     assertCdekEnabled();
-    await new OrderService().cancelShipment(orderId);
+    await withUserFacingCdekError(() => new OrderService().cancelShipment(orderId));
     return {
       result: { orderId, cancelled: true },
       revalidate: [orderPath(orderId)],

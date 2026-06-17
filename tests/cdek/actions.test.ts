@@ -85,6 +85,7 @@ import {
   refreshCdekStatus,
   getCdekLabel,
 } from '@/lib/cdek/actions';
+import { CdekError } from '@/lib/cdek/errors';
 
 function makeUser(perms: PermissionCode[]): AuthUser {
   return {
@@ -194,5 +195,31 @@ describe('cdek actions — валидация и module-gate', () => {
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.error).toBe('internal');
     expect(createShipmentMock).not.toHaveBeenCalled();
+  });
+
+  it('заказ не оплачен (CdekError precondition) → validation с понятным сообщением (FF.md)', async () => {
+    // Сервис отклоняет создание накладной до оплаты — оператор должен увидеть
+    // ПОНЯТНЫЙ текст в форме, а не безликий «internal» (см. withUserFacingCdekError).
+    createShipmentMock.mockRejectedValueOnce(
+      new CdekError('cdek_precondition_failed', 'Заказ ещё не оплачен. Накладная создаётся только после оплаты.'),
+    );
+    const res = await createCdekShipment({ orderId: ORDER_ID });
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error).toBe('validation');
+      expect(res.message).toMatch(/не оплач/i);
+    }
+  });
+
+  it('неожиданная ошибка СДЭК (не из белого списка) → internal без утечки текста', async () => {
+    createShipmentMock.mockRejectedValueOnce(
+      new CdekError('cdek_http_500', 'СДЭК 500: internal details'),
+    );
+    const res = await createCdekShipment({ orderId: ORDER_ID });
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error).toBe('internal');
+      expect((res as { message?: string }).message).toBeUndefined();
+    }
   });
 });
