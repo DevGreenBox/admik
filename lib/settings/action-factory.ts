@@ -26,6 +26,7 @@ import {
   type ActionCtx,
 } from '@/lib/server/action';
 import { sql } from '@/lib/db/client';
+import { ALL_MODULES } from '@/lib/config/modules';
 import { toMinor } from '@/lib/orders/money';
 import {
   brandingSchema,
@@ -86,16 +87,18 @@ export const CatalogOrdersInputSchema = z.object({
  * или попытка переключить core, напр. `settings`) → validation-ошибка, а не тихий
  * `.strip()`. Merge-слой (lib/config/settings) использует мягкий `.strip()` для
  * толерантности к строкам БД; UI-ввод обязан быть точным.
+ *
+ * Набор переключаемых ключей выводится из ALL_MODULES (lib/config/modules) —
+ * единственного источника правды о составе модулей платформы. Это исключает
+ * рассинхрон input-схемы с ALL_MODULES/moduleOverridesSchema (раньше отсутствовал
+ * `payments` → его нельзя было включить/выключить через action).
  */
+const moduleOverridesShape = Object.fromEntries(
+  ALL_MODULES.map((m) => [m, z.boolean().optional()]),
+) as Record<(typeof ALL_MODULES)[number], z.ZodOptional<z.ZodBoolean>>;
+
 export const ModuleOverridesInputSchema = z.object({
-  moduleOverrides: z
-    .object({
-      catalog: z.boolean().optional(),
-      orders: z.boolean().optional(),
-      cdek: z.boolean().optional(),
-      cms: z.boolean().optional(),
-    })
-    .strict(),
+  moduleOverrides: z.object(moduleOverridesShape).strict(),
 });
 /** reset: ключ обязан быть известным разделом настроек (иначе validation). */
 export const ResetSettingInputSchema = z.object({

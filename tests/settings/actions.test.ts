@@ -5,10 +5,12 @@ import type { AuthUser } from '@/lib/auth/rbac';
 import type { PermissionCode } from '@/lib/auth/permissions';
 import {
   createSettingsActions,
+  ModuleOverridesInputSchema,
   type SettingsActionDeps,
 } from '@/lib/settings/action-factory';
 import { buildAdminNav } from '@/lib/admin/nav';
 import { legalEntitySchema } from '@/lib/settings/schemas';
+import { ALL_MODULES } from '@/lib/config/modules';
 
 /**
  * Тесты пакета 5.D-2 (docs/11 §5.4.6) — Server Actions настроек магазина.
@@ -272,6 +274,67 @@ describe('settings/actions — updateModuleOverrides', () => {
     const auditArg = (actionDeps.writeAudit as ReturnType<typeof vi.fn>).mock.calls[0]![0];
     expect(auditArg.action).toBe('settings.modules.update');
     expect(auditArg).toHaveProperty('after');
+  });
+
+  it('переключает payments (true/false) — модуль присутствует в input-схеме', async () => {
+    const actionDeps = makeActionDeps(makeUser(['settings.manage']));
+    const deps = makeSettingsDeps(actionDeps);
+    const { updateModuleOverrides } = createSettingsActions(deps);
+
+    const resOn = await updateModuleOverrides({ moduleOverrides: { payments: true } });
+    expect(resOn.ok).toBe(true);
+    if (!resOn.ok) throw new Error('ожидался успех (payments: true)');
+    expect(deps.upsertSetting).toHaveBeenCalledWith(
+      'module_overrides',
+      { payments: true },
+      'u-1',
+    );
+
+    const resOff = await updateModuleOverrides({ moduleOverrides: { payments: false } });
+    expect(resOff.ok).toBe(true);
+    if (!resOff.ok) throw new Error('ожидался успех (payments: false)');
+    expect(deps.upsertSetting).toHaveBeenCalledWith(
+      'module_overrides',
+      { payments: false },
+      'u-1',
+    );
+  });
+
+  it('принимает оверрайды для ВСЕХ модулей из ALL_MODULES', async () => {
+    const actionDeps = makeActionDeps(makeUser(['settings.manage']));
+    const deps = makeSettingsDeps(actionDeps);
+    const { updateModuleOverrides } = createSettingsActions(deps);
+
+    // Полный объект: каждый модуль платформы переключается через action.
+    const moduleOverrides = Object.fromEntries(
+      ALL_MODULES.map((m) => [m, true]),
+    ) as Record<(typeof ALL_MODULES)[number], boolean>;
+
+    const res = await updateModuleOverrides({ moduleOverrides });
+    expect(res.ok).toBe(true);
+    if (!res.ok) throw new Error('ожидался успех (все модули)');
+    expect(deps.upsertSetting).toHaveBeenCalledWith(
+      'module_overrides',
+      moduleOverrides,
+      'u-1',
+    );
+  });
+
+  it('input-схема module_overrides синхронна с ALL_MODULES (нет рассинхрона)', () => {
+    // Каждый модуль из ALL_MODULES обязан проходить строгую input-схему.
+    for (const m of ALL_MODULES) {
+      const parsed = ModuleOverridesInputSchema.safeParse({
+        moduleOverrides: { [m]: true },
+      });
+      expect(parsed.success, `модуль «${m}» должен приниматься input-схемой`).toBe(true);
+    }
+    // Полный объект всех модулей одновременно тоже валиден.
+    const all = Object.fromEntries(ALL_MODULES.map((m) => [m, false]));
+    expect(ModuleOverridesInputSchema.safeParse({ moduleOverrides: all }).success).toBe(true);
+    // А неизвестный/core-ключ по-прежнему отвергается (.strict()).
+    expect(
+      ModuleOverridesInputSchema.safeParse({ moduleOverrides: { settings: false } }).success,
+    ).toBe(false);
   });
 
   it('self-lock guard: «Настройки» в навигации при любом module_overrides', () => {
