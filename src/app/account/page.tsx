@@ -52,7 +52,12 @@ function OrderCard({
       const ret = `${window.location.origin}/account?order=${encodeURIComponent(order.number)}${
         payProof.token ? `&token=${encodeURIComponent(payProof.token)}` : ""
       }`;
-      const pay = await initPayment(order.number, { ...payProof, returnUrl: ret });
+      // initPayment ждёт accessToken|email (НЕ token) — маппим явно, иначе на
+      // token-пути авторизация заказа не уходит и init падает 404.
+      const pay = await initPayment(
+        order.number,
+        { accessToken: payProof.token, email: payProof.email, returnUrl: ret },
+      );
       if (pay?.paymentUrl) {
         window.location.href = pay.paymentUrl;
         return;
@@ -207,7 +212,7 @@ function AccountContent() {
       <div className="container-brand py-10 md:py-16 max-w-4xl relative z-10">
         {/* Отмена/неудача оплаты: заказ создан, но не оплачен — честно сообщаем и
             направляем к кнопке «Оплатить» в карточке ниже (не выдаём за успех). */}
-        {searchParams.get("payment") === "cancelled" && (
+        {(searchParams.get("payment") === "cancelled" || searchParams.get("payment") === "failed") && (
           <FadeIn>
             <div className="border border-accent/40 bg-accent/5 p-6 mb-8">
               <p className="text-[10px] uppercase tracking-[0.15em] text-accent mb-2">Оплата не завершена</p>
@@ -216,10 +221,9 @@ function AccountContent() {
           </FadeIn>
         )}
 
-        {/* Баннер «оформлен» — только когда заказ реально загрузился (карточка ниже
-            есть) И оплата не была отменена. Раньше показывался на голом orderParam и
-            при отсутствии/неверном token обещал карточку, которой нет. */}
-        {linkedOrder && searchParams.get("payment") !== "cancelled" && (
+        {/* Баннер «оформлен/оплачено» — когда заказ реально загрузился (карточка ниже)
+            И оплата не отменена/не провалена. */}
+        {linkedOrder && searchParams.get("payment") !== "cancelled" && searchParams.get("payment") !== "failed" && (
           <FadeIn>
             <div className="bg-surface border border-border p-6 mb-8">
               <p className="text-[10px] uppercase tracking-[0.15em] text-accent mb-2">
@@ -229,6 +233,19 @@ function AccountContent() {
             </div>
           </FadeIn>
         )}
+
+        {/* Нейтральное подтверждение оплаты, когда заказ НЕ загружен автоматически
+            (доплата по email — token в URL нет): иначе покупатель решит, что оплата
+            не прошла. Направляем к форме поиска заказа ниже. */}
+        {searchParams.get("paid") && !linkedOrder &&
+          searchParams.get("payment") !== "cancelled" && searchParams.get("payment") !== "failed" && (
+            <FadeIn>
+              <div className="bg-surface border border-border p-6 mb-8">
+                <p className="text-[10px] uppercase tracking-[0.15em] text-accent mb-2">Оплата получена</p>
+                <p className="text-sm">Заказ оплачен. Найдите его по номеру и email ниже, чтобы увидеть статус.</p>
+              </div>
+            </FadeIn>
+          )}
 
         <FadeIn>
           <h1 className="heading-lg heading-rule mb-10">Мои заказы</h1>
