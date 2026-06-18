@@ -104,17 +104,57 @@ export interface MockOfficeFilters {
  * Фикстуры непусты (docs/08 §11: 3–5 ПВЗ).
  */
 export function mockGetOffices(filters: MockOfficeFilters = {}): CdekOffice[] {
-  return MOCK_OFFICES.filter((o) => {
+  const matched = MOCK_OFFICES.filter((o) => {
     if (filters.cityCode !== undefined && o.cityCode !== filters.cityCode) return false;
     if (filters.type && o.type !== filters.type) return false;
     if (filters.code && o.code !== filters.code) return false;
     return true;
   });
+
+  // ДЕМО-fallback: для города без фикстурных ПВЗ (любой кроме Москвы/СПб) отдаём
+  // ОДИН синтетический ПВЗ, чтобы чекаут в mock-режиме доходил до конца для любого
+  // выбранного города (иначе пустой список ПВЗ = тупик оформления). С боевыми
+  // ключами СДЭК отдаёт реальные ПВЗ — этот fallback не задействуется.
+  if (matched.length === 0 && filters.cityCode !== undefined && !filters.code) {
+    const city = MOCK_CITIES.find((c) => c.code === filters.cityCode);
+    const type = filters.type === 'POSTAMAT' ? 'POSTAMAT' : 'PVZ';
+    return [
+      {
+        code: `MOCK-${filters.cityCode}`,
+        name: `Пункт выдачи СДЭК (демо) — ${city?.name ?? 'город'}`,
+        address: `${city?.name ?? 'Город'}, центральный пункт выдачи (демо-данные)`,
+        type,
+        cityCode: filters.cityCode,
+        location: { latitude: 55.75, longitude: 37.61 },
+        workTime: 'Пн-Пт 10:00-20:00, Сб-Вс 11:00-18:00',
+      },
+    ];
+  }
+
+  return matched;
 }
 
 /** Поиск ПВЗ по коду (positive/negative). */
 export function mockFindOfficeByCode(code: string): CdekOffice | null {
-  return MOCK_OFFICES.find((o) => o.code === code) ?? null;
+  const found = MOCK_OFFICES.find((o) => o.code === code);
+  if (found) return found;
+  // Синтетический демо-ПВЗ (MOCK-<cityCode>) из mockGetOffices-fallback — чтобы
+  // выбор такого ПВЗ при оформлении не возвращал «не найдено» в mock-режиме.
+  const m = /^MOCK-(\d+)$/.exec(code);
+  if (m) {
+    const cityCode = Number(m[1]);
+    const city = MOCK_CITIES.find((c) => c.code === cityCode);
+    return {
+      code,
+      name: `Пункт выдачи СДЭК (демо) — ${city?.name ?? 'город'}`,
+      address: `${city?.name ?? 'Город'}, центральный пункт выдачи (демо-данные)`,
+      type: 'PVZ',
+      cityCode,
+      location: { latitude: 55.75, longitude: 37.61 },
+      workTime: 'Пн-Пт 10:00-20:00, Сб-Вс 11:00-18:00',
+    };
+  }
+  return null;
 }
 
 /**

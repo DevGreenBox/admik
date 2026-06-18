@@ -78,6 +78,14 @@ describe('cdek/mock — ПВЗ (фикстуры §6)', () => {
     for (const o of postamats) expect(o.type).toBe('POSTAMAT');
   });
 
+  it('демо-fallback: город без фикстур (напр. Краснодар 435) всё равно даёт ≥1 ПВЗ', () => {
+    const offices = mockGetOffices({ cityCode: 435 });
+    expect(offices.length).toBeGreaterThan(0);
+    expect(offices[0]!.cityCode).toBe(435);
+    // и этот синтетический ПВЗ находится по коду (чтобы оформление не падало)
+    expect(mockFindOfficeByCode(offices[0]!.code)).not.toBeNull();
+  });
+
   it('каждый ПВЗ имеет код, адрес и координаты', () => {
     for (const o of MOCK_OFFICES) {
       expect(o.code).toBeTruthy();
