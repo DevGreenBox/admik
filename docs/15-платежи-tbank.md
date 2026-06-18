@@ -123,6 +123,10 @@ if (m.isMock) {
 - **Webhook-аутентификация:** у СДЭК — IP-whitelist + `?key=` секрет. У Т-Банка основной механизм —
   **проверка `Token` в теле** (HMAC-подобная подпись на `Password`). IP-whitelist оставляем как
   доп. слой (опц., `TBANK_WEBHOOK_IPS`), но **главная** проверка — `Token`.
+  **SECURITY (волна 4, баг B):** IP-whitelist аутентифицирует запрос **только за доверенным прокси**
+  (`TBANK_WEBHOOK_TRUST_PROXY=true`). Без trustProxy (дефолт) `extractIp` возвращает `''` сразу, НЕ
+  читая клиент-контролируемые `X-Forwarded-For`/`X-Real-IP`, — иначе подделкой заголовка из whitelist
+  атакующий обошёл бы IP-гейт. Эталон — порт CDEK-webhook (`extractIp` там тоже `if (!trustProxy) return ''`).
 - **Связь с заказом:** `Init.OrderId` = `orders.number` (человекочитаемый, уникальный), `Init.Amount` =
   `grand_total` в копейках. `PaymentId` Т-Банка сохраняем в `orders.payment_ref` (или в отдельную таблицу
   `tbank_payments`, см. §4.4).

@@ -14,7 +14,10 @@ const log = logger.child({ module: 'tbank.webhook' });
  * Server-to-server роут (Т-Банк → наш сервер), НЕ storefront: без runStorefront,
  * без CORS. Защита (docs/15 §4.2, §7):
  *   1) module-gate: модуль payments выключен → 404;
- *   2) (опц.) IP-whitelist (TBANK_WEBHOOK_IPS) — доп. слой; ГЛАВНАЯ защита — Token;
+ *   2) (опц.) IP-whitelist (TBANK_WEBHOOK_IPS) — доп. слой, аутентифицирует ТОЛЬКО
+ *      за доверенным прокси (TBANK_WEBHOOK_TRUST_PROXY=true). Без trustProxy
+ *      клиент-контролируемые X-Forwarded-For/X-Real-IP НЕ доверяются (см. extractIp),
+ *      поэтому подделка заголовков обхода не даёт; ГЛАВНАЯ защита — Token;
  *   3) ГЛАВНОЕ — проверка Token в теле (verifyNotificationToken на TBANK_PASSWORD);
  *      невалидный → 403, НЕ обрабатываем;
  *   4) идемпотентная обработка handleWebhook (UNIQUE (payment_id, status)).
@@ -40,20 +43,26 @@ function ok(): NextResponse {
   });
 }
 
-/** Извлекает клиентский IP (как cdek webhook): X-Forwarded-For (trustProxy) / X-Real-IP. */
+/**
+ * Извлекает клиентский IP источника запроса (порт cdek webhook).
+ *
+ * SECURITY (волна 4, баг B): X-Forwarded-For / X-Real-IP — клиент-контролируемые
+ * заголовки. Доверяем им ТОЛЬКО за доверенным прокси (trustProxy=true, Caddy
+ * пробрасывает реальный IP соединения). БЕЗ trustProxy возвращаем '' СРАЗУ, НЕ
+ * читая заголовки: иначе атакующий подделкой X-Forwarded-For/X-Real-IP из
+ * TBANK_WEBHOOK_IPS прошёл бы непустой whitelist. То есть IP-whitelist
+ * аутентифицирует запрос только за доверенным прокси (trustProxy=true);
+ * первичная защита webhook — проверка Token в теле (см. JSDoc роута).
+ */
 function extractIp(req: NextRequest, trustProxy: boolean): string {
+  if (!trustProxy) return '';
   const fwd = req.headers.get('x-forwarded-for');
-  if (trustProxy && fwd) {
-    const first = fwd.split(',')[0]?.trim();
-    if (first) return first;
-  }
-  const real = req.headers.get('x-real-ip')?.trim();
-  if (real) return real;
   if (fwd) {
     const first = fwd.split(',')[0]?.trim();
     if (first) return first;
   }
-  return '';
+  const real = req.headers.get('x-real-ip')?.trim();
+  return real ?? '';
 }
 
 /** Проверка IP по whitelist (CIDR/точные). Пустой whitelist → пропуск (главная защита — Token). */

@@ -14,7 +14,9 @@ import {
   checkStorefrontRate,
   registerStorefrontHit,
 } from '@/lib/auth/rate-limit';
+import { normalizeClientIp } from '@/lib/server/request-ip';
 import { authorizeStorefront, extractApiKey } from './auth';
+import type { AuthorizeResult } from './auth';
 import {
   STOREFRONT_METHODS,
   buildCorsHeaders,
@@ -80,15 +82,34 @@ export interface StorefrontContext {
   origin?: string;
 }
 
-/** Ключ rate-limit: предпочитаем API-ключ, иначе client IP, иначе 'anon'. */
-function rateKey(req: Request): string {
-  const apiKey = extractApiKey(req.headers);
-  if (apiKey) {
-    return `storefront:key:${apiKey}`;
+/**
+ * Ключ ведра rate-limit витрины.
+ *
+ * SECURITY (волна 4, баг A): идентификатор ведра НЕЛЬЗЯ выводить из СЫРОГО
+ * клиентского заголовка X-Api-Key/X-Storefront-Key. Прежде rateKey брал ЛЮБОЙ
+ * непустой ключ как ведро (`storefront:key:<ключ>`) БЕЗ сверки с STOREFRONT_API_KEYS,
+ * поэтому атакующий (авторизованный по разрешённому Origin) ротацией мусорного
+ * X-Api-Key на каждый запрос получал СВЕЖЕЕ ведро (count=0) → лимит публичного
+ * POST не срабатывал никогда. Поэтому:
+ *   • ведро по ключу — ТОЛЬКО когда ключ ВАЛИДЕН (auth.via==='key', т.е. совпал с
+ *     конфигом в authorizeStorefront); тогда extractApiKey даёт ровно тот ключ;
+ *   • иначе (origin/mock/невалидный ключ) — ведро по ВАЛИДИРОВАННОМУ IP через
+ *     normalizeClientIp (как auth/session/audit), мусорный X-Api-Key уже не влияет.
+ *
+ * `auth` уже вычислен в runStorefront ДО rateKey — просто прокидываем, чтобы не
+ * дёргать authorizeStorefront дважды.
+ */
+function rateKey(req: Request, auth: AuthorizeResult): string {
+  if (auth.via === 'key') {
+    // Ключ совпал с конфигом — лимитируем по нему (стабильный идентификатор витрины).
+    return `storefront:key:${extractApiKey(req.headers)}`;
   }
-  const fwd = req.headers.get('x-forwarded-for');
-  const ip = fwd ? fwd.split(',')[0]!.trim() : req.headers.get('x-real-ip');
-  return `storefront:ip:${ip || 'anon'}`;
+  // origin/mock/невалидный ключ → ведро по валидированному IP (формат проверен).
+  const ip = normalizeClientIp(
+    req.headers.get('x-forwarded-for'),
+    req.headers.get('x-real-ip'),
+  );
+  return `storefront:ip:${ip ?? 'unknown'}`;
 }
 
 /** Опции конвейера: требуемый модуль и список CORS-методов роута. */
@@ -190,7 +211,7 @@ export async function runStorefront(
   // 3) Rate-limit — ОТДЕЛЬНЫЙ щедрый лимит витрины (НЕ порог логина 10/15мин,
   //    иначе серверная витрина под одним ключом мгновенно ловит 429 и каталог
   //    на сайте пустеет). См. STOREFRONT_RATE_LIMIT.
-  const key = rateKey(req);
+  const key = rateKey(req, auth);
   const rate = await checkStorefrontRate(key);
   if (!rate.allowed) {
     return jsonError('rate_limited', 'Слишком много запросов.', cors, {
