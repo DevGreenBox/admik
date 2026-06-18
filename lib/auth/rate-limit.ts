@@ -53,13 +53,38 @@ interface MemEntry {
 }
 
 /**
+ * Верхний предел числа ключей в MemoryRateBackend.
+ *
+ * Защита от роста памяти/OOM в mock-режиме (без Redis): на storefront-пути ключ
+ * ведра = по IP, reset не вызывается, а истёкшая запись чистится лишь при
+ * повторном обращении к ТОМУ ЖЕ ключу. Атакующий ротацией X-Forwarded-For
+ * (валидные IP) вставляет лавину никогда-не-перечитываемых записей → Map растёт
+ * без границы. Прод с Redis не затронут (EXPIRE сам чистит ключи).
+ *
+ * При достижении предела сначала вычищаются истёкшие записи (по window-expiry),
+ * затем — если всё ещё переполнено — вытесняются НАИМЕНЕЕ опасные активные
+ * записи (с наименьшим count): флуд создаёт записи count=1, тогда как ключи у
+ * порога блокировки (count→maxAttempts) — именно то, что важно удержать. Так
+ * вытеснение не «амнистирует» реально лимитируемые ключи (жертву brute-force).
+ */
+export const MEMORY_RATE_MAX_ENTRIES = 10_000;
+
+/**
  * In-memory реализация на Map. Не масштабируется между процессами — годится
- * только для demo/mock-режима и тестов.
+ * только для demo/mock-режима и тестов. Размер Map ограничен сверху
+ * (MEMORY_RATE_MAX_ENTRIES) с ленивой очисткой истёкших и вытеснением, чтобы
+ * mock-режим нельзя было довести до OOM ротацией ключей.
  */
 export class MemoryRateBackend implements RateBackend {
   private readonly store = new Map<string, MemEntry>();
   /** Сдвиг «виртуального времени» для тестов истечения окна. */
   private clockSkewMs = 0;
+  /** Предел размера Map (для тестов — конструктором). */
+  private readonly maxEntries: number;
+
+  constructor(maxEntries: number = MEMORY_RATE_MAX_ENTRIES) {
+    this.maxEntries = maxEntries;
+  }
 
   private now(): number {
     return Date.now() + this.clockSkewMs;
@@ -70,6 +95,11 @@ export class MemoryRateBackend implements RateBackend {
     this.clockSkewMs += ms;
   }
 
+  /** Только для тестов: текущее число хранимых ключей. */
+  __size(): number {
+    return this.store.size;
+  }
+
   private live(key: string): MemEntry | undefined {
     const entry = this.store.get(key);
     if (!entry) return undefined;
@@ -78,6 +108,41 @@ export class MemoryRateBackend implements RateBackend {
       return undefined;
     }
     return entry;
+  }
+
+  /** Удаляет все истёкшие записи (ленивая очистка по window-expiry). */
+  private purgeExpired(): void {
+    const now = this.now();
+    for (const [key, entry] of this.store) {
+      if (entry.expiresAt <= now) this.store.delete(key);
+    }
+  }
+
+  /**
+   * Гарантирует место под новую запись: сперва чистит истёкшие, затем — если
+   * Map всё ещё на пределе — вытесняет наименее опасные активные записи (с
+   * наименьшим count). Так флуд (count=1) уступает место, а ключи у порога
+   * блокировки удерживаются (счётчик жертвы brute-force не сбрасывается).
+   */
+  private ensureCapacity(): void {
+    if (this.store.size < this.maxEntries) return;
+    this.purgeExpired();
+    if (this.store.size < this.maxEntries) return;
+    // Освобождаем минимум 1 слот: вытесняем запись с минимальным count.
+    // Map итерируется в порядке вставки → при равном count выселяется самая
+    // старая (FIFO-tie-break), что соответствует «наименее свежей».
+    while (this.store.size >= this.maxEntries) {
+      let victimKey: string | undefined;
+      let victimCount = Number.POSITIVE_INFINITY;
+      for (const [key, entry] of this.store) {
+        if (entry.count < victimCount) {
+          victimCount = entry.count;
+          victimKey = key;
+        }
+      }
+      if (victimKey === undefined) break;
+      this.store.delete(victimKey);
+    }
   }
 
   async get(key: string): Promise<{ count: number; ttlSec: number }> {
@@ -92,6 +157,8 @@ export class MemoryRateBackend implements RateBackend {
     if (entry) {
       entry.count += 1;
     } else {
+      // Перед вставкой НОВОГО ключа — ограничиваем рост Map.
+      this.ensureCapacity();
       this.store.set(key, {
         count: 1,
         expiresAt: this.now() + windowSec * 1000,

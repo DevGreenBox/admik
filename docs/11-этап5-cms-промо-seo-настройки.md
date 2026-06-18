@@ -178,6 +178,14 @@
   распарсенный `module_overrides` в `EffectiveSettings.modules.overrides` (мягкий `.strip()`-парс).
 - `getEffectiveSettings()` — читает БД один раз и мемоизирует (module-level memo); `invalidateSettingsCache()`
   вызывается в каждом settings-action (read-your-own-writes). Redis — задел на будущее.
+  - **Epoch/generation guard против TOCTOU (волна 6, баг A):** in-flight чтение захватывает
+    монотонный `cacheEpoch` ДО `await read()` и кеширует результат **только если** epoch не
+    сменился за время чтения. `invalidateSettingsCache()` инкрементирует `cacheEpoch`. Без этого
+    была гонка: пока зависший SELECT запроса A не зарезолвился, параллельный `updateModuleOverrides`
+    делал upsert + инвалидацию, после чего A резолвился СТАРЫМ снапшотом и перезаписывал `cached`
+    устаревшим значением — stale висел до следующей записи настроек. Критично после d1bc04b, т.к.
+    этот кэш авторитетен для ВСЕХ рантайм-гейтов модулей. Теперь A возвращает прочитанное вызывающему
+    (read-your-own-read), но не кеширует устаревшее → следующий вызов перечитывает БД.
 - `getEffectiveModules(env, dbOverrides)` — поверх `getEnabledModules(env)` накладывает `module_overrides`.
 - **`getEffectiveModuleSet()` / `isModuleEffectivelyEnabled(name)`** (волна 5, баг #1) — **АВТОРИТЕТНЫЙ
   рантайм-гейт** модулей (env⊕БД-оверрайд) через тот же memo-кэш. До фикса единственным потребителем

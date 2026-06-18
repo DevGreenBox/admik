@@ -196,6 +196,39 @@ describe('config/settings — кеш getEffectiveSettings / invalidate', () => {
     expect(reader).toHaveBeenCalledTimes(2);
     expect(after.branding.shopName).toBe('V2');
   });
+
+  it('TOCTOU: invalidate во время in-flight read НЕ оставляет stale в кеше (epoch-guard)', async () => {
+    // Управляемый отложенный резолв первого чтения (deferred), чтобы смоделировать
+    // зависший SELECT, снятый ДО коммита параллельной записи настроек.
+    let releaseRead!: (rows: { setting_key: string; value: Record<string, unknown> }[]) => void;
+    const firstRead = new Promise<{ setting_key: string; value: Record<string, unknown> }[]>((resolve) => {
+      releaseRead = resolve;
+    });
+
+    const reader = vi
+      .fn<() => Promise<{ setting_key: string; value: Record<string, unknown> }[]>>()
+      // 1-е чтение — зависший SELECT, видит СТАРЫЙ снапшот (V1).
+      .mockImplementationOnce(() => firstRead)
+      // 2-е чтение (после инвалидации) — уже видит НОВЫЙ снапшот (V2).
+      .mockImplementationOnce(async () => [{ setting_key: 'branding', value: { shopName: 'V2' } }]);
+
+    // Запрос A стартует чтение и подвисает на await read().
+    const pendingA = getEffectiveSettings({ readRows: reader, env: envWith() });
+
+    // Пока A ждёт — параллельная запись настроек инвалидирует кеш (cached=undefined).
+    invalidateSettingsCache();
+
+    // Теперь зависший SELECT запроса A резолвится УСТАРЕВШИМ снапшотом (V1).
+    releaseRead([{ setting_key: 'branding', value: { shopName: 'V1' } }]);
+    const resultA = await pendingA;
+    // Вызывающий получает то, что прочитал (merged), но кешировать stale нельзя.
+    expect(resultA.branding.shopName).toBe('V1');
+
+    // Следующий вызов ОБЯЗАН перечитать БД (а не вернуть закешированный stale V1).
+    const after = await getEffectiveSettings({ readRows: reader, env: envWith() });
+    expect(reader).toHaveBeenCalledTimes(2);
+    expect(after.branding.shopName).toBe('V2');
+  });
 });
 
 // =============================================================================

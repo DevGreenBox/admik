@@ -390,9 +390,19 @@ export async function checkLoginRate(key: string): Promise<{ allowed: boolean; r
 export async function registerLoginFailure(key: string): Promise<void>;
 export async function resetLoginFailures(key: string): Promise<void>;  // при успехе
 ```
-- **Mock-режим:** если `REDIS_URL` не задан (магазин без Redis на demo) — fallback на безопасную
-  заглушку с предупреждением (rate-limit «всегда allowed», логируется warn). Соответствует требованию
-  mock-режима зависимостей (`docs/02`, роадмап п.5).
+- **Mock-режим:** если `REDIS_URL` не задан (магазин без Redis на demo) — fallback на in-memory
+  бэкенд (`MemoryRateBackend`) с одноразовым warn. Это полноценный счётчик в памяти процесса
+  (а не «всегда allowed»): семантика fixed-window сохраняется, но не масштабируется между
+  инстансами. Соответствует требованию mock-режима зависимостей (`docs/02`, роадмап п.5).
+- **Защита от OOM в mock-режиме (волна 6, баг B):** `MemoryRateBackend` ограничивает размер Map
+  сверху (`MEMORY_RATE_MAX_ENTRIES`, по умолчанию 10 000). Без этого storefront-путь (ключ ведра
+  = по IP, `reset` не вызывается) уязвим: атакующий ротацией валидных `X-Forwarded-For` вставлял
+  лавину никогда-не-перечитываемых записей → неограниченный рост Map → OOM. Политика при
+  достижении предела: сначала ленивая очистка истёкших (по window-expiry), затем вытеснение
+  наименее опасных активных записей — с минимальным `count` (флуд создаёт `count=1`, тогда как
+  ключи у порога блокировки удерживаются, чтобы вытеснение не «амнистировало» жертву brute-force).
+  Прод с Redis не затронут (`EXPIRE` чистит ключи сам). Размер задаётся конструктором
+  `new MemoryRateBackend(maxEntries)` (используется в тестах для малого предела).
 
 ### 4.6. Cookie и сессии
 

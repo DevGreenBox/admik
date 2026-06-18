@@ -226,6 +226,16 @@ export interface EffectiveSettingsDeps {
 let cached: EffectiveSettings | undefined;
 /** In-flight промис, чтобы конкурентные вызовы дали ОДНО чтение БД. */
 let inflight: Promise<EffectiveSettings> | undefined;
+/**
+ * Монотонный счётчик поколений кеша (epoch/generation guard против TOCTOU).
+ *
+ * invalidateSettingsCache() инкрементирует его. In-flight IIFE захватывает epoch
+ * ДО `await read()` и кеширует результат ТОЛЬКО если epoch не сменился за время
+ * чтения. Иначе во время зависшего SELECT произошла запись настроек + инвалидация
+ * → прочитанный снапшот устарел, кешировать его нельзя (иначе перезапишет
+ * инвалидацию и сломает read-your-own-writes на всей поверхности рантайм-гейтов).
+ */
+let cacheEpoch = 0;
 
 /**
  * Возвращает эффективные настройки. Читает БД ОДИН раз и мемоизирует (module-level).
@@ -242,9 +252,13 @@ export async function getEffectiveSettings(
   const env = deps.env ?? getEnv();
 
   inflight = (async () => {
+    // Захватываем поколение кеша ДО зависающего чтения. Если за время await
+    // произошла инвалидация (cacheEpoch сменился) — снапшот устарел: возвращаем
+    // его вызывающему (read-your-own-read), но НЕ кешируем (не затираем инвалидацию).
+    const startEpoch = cacheEpoch;
     const rows = await read();
     const merged = mergeSettings(env, rows);
-    cached = merged;
+    if (startEpoch === cacheEpoch) cached = merged;
     return merged;
   })();
 
@@ -260,6 +274,9 @@ export async function getEffectiveSettings(
  * после успешной мутации (read-your-own-writes) и в тестах.
  */
 export function invalidateSettingsCache(): void {
+  // Инкремент поколения «отзывает» право любого in-flight чтения закешировать
+  // свой (уже устаревший) снапшот — см. epoch-guard в getEffectiveSettings.
+  cacheEpoch += 1;
   cached = undefined;
   inflight = undefined;
 }
