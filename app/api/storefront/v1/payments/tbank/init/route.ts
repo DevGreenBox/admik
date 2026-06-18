@@ -68,14 +68,14 @@ export async function POST(req: Request): Promise<Response> {
       const { orderNumber, accessToken, email } = parsed.data;
 
       const found = await getOrderByNumber(orderNumber);
-      if (!found) {
-        // Не раскрываем существование заказа без доказательства доступа.
-        return jsonError('not_found', 'Заказ не найден.', cors);
-      }
 
-      // Анти-перебор: доступ по токену заказа ИЛИ email покупателя (§4.2).
-      if (!verifyOrderAccess(found.order, { token: accessToken, email })) {
-        return jsonError('forbidden', 'Нет доступа к заказу.', cors);
+      // Единый ответ «не найдено» для несуществующего И для неавторизованного
+      // доступа (зеркалит GET /orders/:number, §4.2) — чтобы перебор номеров не
+      // отличал «нет заказа» (404) от «нет доступа» (403) и не раскрывал
+      // существование/диапазон заказов (enumeration oracle). Доступ по токену
+      // заказа ИЛИ email покупателя.
+      if (!found || !verifyOrderAccess(found.order, { token: accessToken, email })) {
+        return jsonError('not_found', 'Заказ не найден.', cors);
       }
 
       // Уже оплачен/возвращён — повторная инициация бессмысленна.
