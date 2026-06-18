@@ -36,7 +36,7 @@ import {
   BrandIdSchema,
   BrandLogoUploadSchema,
 } from './schemas';
-import { listCategoryEdges, countCategoryChildren } from './repository';
+import { countCategoryChildren } from './repository';
 import { CatalogError } from './errors';
 import { canMoveCategory } from './tree';
 import { rebuildProductAttributesCache } from './cache';
@@ -206,22 +206,37 @@ export const moveCategory = defineAction({
   input: CategoryMoveSchema,
   handler: async (data, _ctx) => {
     assertCatalogEnabled();
-    // Защита от цикла: новый родитель не должен входить в поддерево узла.
-    const edges = await listCategoryEdges();
-    if (!canMoveCategory(edges, data.id, data.parentId)) {
-      throw new CatalogError(
-        'cycle',
-        'Нельзя переместить категорию внутрь её собственного поддерева.',
-      );
-    }
-    const after = await sql<Record<string, unknown>[]>`
-      UPDATE categories SET
-        parent_id = ${data.parentId},
-        sort      = COALESCE(${data.sort ?? null}, sort),
-        updated_at = now()
-      WHERE id = ${data.id}
-      RETURNING id, parent_id, sort
-    `;
+    // TOCTOU-защита (баг #6): «прочитать рёбра → проверить цикл → записать» — в
+    // ОДНОЙ транзакции с сериализующей advisory-xact-блокировкой на всё дерево
+    // категорий. Без неё два параллельных перемещения (A→B и B→A) читали бы
+    // одинаковое ДО-состояние, оба проходили бы canMoveCategory и оба коммитили
+    // → многоузловой цикл A↔B (БД-CHECK categories_no_self_parent ловит только
+    // A→A). Один advisory-ключ на дерево сериализует любые конкурентные moveCategory:
+    // второй ждёт коммита первого и видит уже актуальные рёбра — окно TOCTOU закрыто.
+    const after = await sql.begin(async (tx: TransactionSql) => {
+      // Сериализующая блокировка (xact — снимается на коммите/откате транзакции).
+      await tx`SELECT pg_advisory_xact_lock(hashtext('categories_tree'))`;
+      // Рёбра дерева читаем ВНУТРИ транзакции (под блокировкой) — не через
+      // listCategoryEdges (тот ходит отдельным соединением вне tx).
+      const edgeRows = await tx<{ id: string; parent_id: string | null }[]>`
+        SELECT id, parent_id FROM categories
+      `;
+      const edges = edgeRows.map((r) => ({ id: r.id, parentId: r.parent_id ?? null }));
+      if (!canMoveCategory(edges, data.id, data.parentId)) {
+        throw new CatalogError(
+          'cycle',
+          'Нельзя переместить категорию внутрь её собственного поддерева.',
+        );
+      }
+      return tx<Record<string, unknown>[]>`
+        UPDATE categories SET
+          parent_id = ${data.parentId},
+          sort      = COALESCE(${data.sort ?? null}, sort),
+          updated_at = now()
+        WHERE id = ${data.id}
+        RETURNING id, parent_id, sort
+      `;
+    });
     if (!after[0]) {
       throw new CatalogError('not_found', 'Категория не найдена.');
     }
