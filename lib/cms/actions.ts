@@ -4,7 +4,7 @@ import type { TransactionSql } from 'postgres';
 
 import { defineAction, PublicActionError, type ActionCtx } from '@/lib/server/action';
 import { sql } from '@/lib/db/client';
-import { isModuleEnabled } from '@/lib/config/modules';
+import { isModuleEffectivelyEnabled } from '@/lib/config/settings';
 
 import {
   CmsPageCreateSchema,
@@ -26,9 +26,9 @@ import { sanitizeSectionContent } from './sanitize-section';
  * (cms.write) → Zod → handler (БД через sql, параметризовано) → revalidate →
  * audit ('cms.page.*'/'cms.section.*'). Доменные ошибки — через CmsError (errors.ts).
  *
- * Флаг модуля: КАЖДЫЙ handler начинается с assertCmsEnabled() — при выключенном
- * модуле cms бросает CmsError('module_disabled') (помимо скрытия в UI и гейта
- * Storefront-роутов через runStorefront(req, h, { module:'cms' })).
+ * Флаг модуля: КАЖДЫЙ handler начинается с await assertCmsEnabled() — авторитетный
+ * гейт (env ⊕ БД-оверрайд) при выключенном модуле cms бросает CmsError('module_disabled')
+ * (помимо скрытия в UI и гейта Storefront-роутов через runStorefront(req, h, { module:'cms' })).
  *
  * 'use server'-файл экспортирует ТОЛЬКО async-функции: классы ошибок (CmsError),
  * схемы и чистый санитайзер живут в отдельных модулях (errors/schemas/sanitize-section).
@@ -38,9 +38,9 @@ import { sanitizeSectionContent } from './sanitize-section';
 // Общие хелперы.
 // -----------------------------------------------------------------------------
 
-/** Бросает, если модуль CMS выключен (ADMIK_MODULES без 'cms'). */
-function assertCmsEnabled(): void {
-  if (!isModuleEnabled('cms')) {
+/** Бросает, если модуль CMS выключен (env ⊕ БД-оверрайд). */
+async function assertCmsEnabled(): Promise<void> {
+  if (!(await isModuleEffectivelyEnabled('cms'))) {
     throw new CmsError('module_disabled', 'Модуль «Контент» выключен.');
   }
 }
@@ -98,7 +98,7 @@ export const createCmsPage = defineAction({
   permission: 'cms.write',
   input: CmsPageCreateSchema,
   handler: async (data, ctx: ActionCtx) => {
-    assertCmsEnabled();
+    await assertCmsEnabled();
     const base = data.slug || slugify(data.title);
 
     const row = await insertWithUniqueSlug(base, async (slug) => {
@@ -137,7 +137,7 @@ export const updateCmsPage = defineAction({
   permission: 'cms.write',
   input: CmsPageUpdateSchema,
   handler: async (data, ctx) => {
-    assertCmsEnabled();
+    await assertCmsEnabled();
     const before = await sql<Record<string, unknown>[]>`
       SELECT * FROM cms_pages WHERE id = ${data.id} LIMIT 1
     `;
@@ -201,7 +201,7 @@ export const deleteCmsPage = defineAction({
   permission: 'cms.write',
   input: CmsPageIdSchema,
   handler: async (data, _ctx) => {
-    assertCmsEnabled();
+    await assertCmsEnabled();
     // CASCADE снимает cms_page_sections и cms_page_revisions (FK ON DELETE CASCADE).
     const rows = await sql<{ id: string; slug: string }[]>`
       DELETE FROM cms_pages WHERE id = ${data.id} RETURNING id, slug
@@ -226,7 +226,7 @@ export const publishCmsPage = defineAction({
   permission: 'cms.write',
   input: CmsPageIdSchema,
   handler: async (data, ctx) => {
-    assertCmsEnabled();
+    await assertCmsEnabled();
 
     // Транзакционно: status='published' + published_at=COALESCE(...,now()) и
     // снимок страницы+секций в cms_page_revisions (revision = max+1). Атомарность
@@ -289,7 +289,7 @@ export const unpublishCmsPage = defineAction({
   permission: 'cms.write',
   input: CmsPageIdSchema,
   handler: async (data, ctx) => {
-    assertCmsEnabled();
+    await assertCmsEnabled();
     // Снятие с публикации → черновик; published_at оставляем как историческую метку.
     const rows = await sql<{ id: string }[]>`
       UPDATE cms_pages SET
@@ -323,7 +323,7 @@ export const upsertCmsSection = defineAction({
   permission: 'cms.write',
   input: CmsSectionInputSchema,
   handler: async (data, _ctx) => {
-    assertCmsEnabled();
+    await assertCmsEnabled();
 
     // КЛЮЧЕВОЕ: content уже провалидирован дискриминированным union по type
     // (CmsSectionContentSchema в CmsSectionInputSchema). СЕРВЕРНАЯ санитизация
@@ -366,7 +366,7 @@ export const reorderCmsSections = defineAction({
   permission: 'cms.write',
   input: CmsSectionReorderSchema,
   handler: async (data, _ctx) => {
-    assertCmsEnabled();
+    await assertCmsEnabled();
     // Транзакционно: все секции страницы получают новый display_order атомарно
     // (частичный reorder не оставляет несогласованного порядка).
     await sql.begin(async (tx: TransactionSql) => {
@@ -395,7 +395,7 @@ export const setCmsSectionEnabled = defineAction({
   permission: 'cms.write',
   input: CmsSectionSetEnabledSchema,
   handler: async (data, _ctx) => {
-    assertCmsEnabled();
+    await assertCmsEnabled();
     const rows = await sql<{ id: string; page_id: string }[]>`
       UPDATE cms_page_sections
          SET enabled = ${data.enabled}, updated_at = now()
@@ -422,7 +422,7 @@ export const deleteCmsSection = defineAction({
   permission: 'cms.write',
   input: CmsSectionIdSchema,
   handler: async (data, _ctx) => {
-    assertCmsEnabled();
+    await assertCmsEnabled();
     const rows = await sql<{ id: string; page_id: string }[]>`
       DELETE FROM cms_page_sections WHERE id = ${data.id}
       RETURNING id, page_id

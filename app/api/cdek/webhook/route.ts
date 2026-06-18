@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 
 import { getCdekConfig, isCdekMock } from '@/lib/cdek/config';
 import { verifyWebhookIp, WebhookService } from '@/lib/cdek/services/webhook';
-import { isModuleEnabled } from '@/lib/config/modules';
+import { isModuleEffectivelyEnabled } from '@/lib/config/settings';
 import { logger } from '@/lib/logger';
 import { safeEqual } from '@/lib/storefront/order-dto';
 
@@ -115,15 +115,15 @@ function authenticate(req: NextRequest, cfg: ReturnType<typeof getCdekConfig>): 
 }
 
 /** GET — проверка доступности эндпоинта (верификация подписки/health). */
-export function GET(): NextResponse {
-  if (!isModuleEnabled('cdek')) {
+export async function GET(): Promise<NextResponse> {
+  if (!(await isModuleEffectivelyEnabled('cdek'))) {
     return NextResponse.json({ ok: false, error: 'not_found' }, { status: 404 });
   }
   return NextResponse.json({ ok: true, service: 'cdek-webhook' });
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  if (!isModuleEnabled('cdek')) {
+  if (!(await isModuleEffectivelyEnabled('cdek'))) {
     return NextResponse.json({ ok: false, error: 'not_found' }, { status: 404 });
   }
 

@@ -138,7 +138,7 @@
 - `catalog`: `{ newProductDays:int }` — оверрайд `SHOP_NEW_PRODUCT_DAYS`
 - `delivery`: `{ freeDeliveryThreshold:int (копейки) }` — оверрайд `SHOP_FREE_DELIVERY_THRESHOLD`
 - `orders`: `{ orderPrefix:string }` — оверрайд `SHOP_ORDER_PREFIX`
-- `module_overrides`: `{ catalog?:bool, orders?:bool, cdek?:bool, cms?:bool }` — частичный оверрайд `ADMIK_MODULES`; отсутствие поля → env
+- `module_overrides`: `{ catalog?:bool, orders?:bool, cdek?:bool, cms?:bool, payments?:bool }` — частичный оверрайд `ADMIK_MODULES`; отсутствие поля → env. Применяется **авторитетно в рантайме** через `getEffectiveModuleSet()`/`isModuleEffectivelyEnabled()` (волна 5), не только в `sitemap.ts`
 - `seo`: `{ site_name, site_url, title_template '%s — {site_name}', default_description, default_og_image_key, robots_extra, twitter_site, noindex_site }` (используется 5.3)
 
 **Семантика merge (инвариант):** `env-дефолт ⊕ строка БД`, частичный merge на уровне полей внутри
@@ -174,10 +174,21 @@
 - `resetSetting` — `DELETE` строки ключа → возврат к env-дефолту; audit `settings.reset`.
 
 **Слой эффективных настроек** (`lib/config/settings.ts`):
-- `mergeSettings(envDefaults, dbRows)` — **чистая** функция (env⊕БД), тестируется без БД.
+- `mergeSettings(envDefaults, dbRows)` — **чистая** функция (env⊕БД), тестируется без БД. Несёт также
+  распарсенный `module_overrides` в `EffectiveSettings.modules.overrides` (мягкий `.strip()`-парс).
 - `getEffectiveSettings()` — читает БД один раз и мемоизирует (module-level memo); `invalidateSettingsCache()`
   вызывается в каждом settings-action (read-your-own-writes). Redis — задел на будущее.
 - `getEffectiveModules(env, dbOverrides)` — поверх `getEnabledModules(env)` накладывает `module_overrides`.
+- **`getEffectiveModuleSet()` / `isModuleEffectivelyEnabled(name)`** (волна 5, баг #1) — **АВТОРИТЕТНЫЙ
+  рантайм-гейт** модулей (env⊕БД-оверрайд) через тот же memo-кэш. До фикса единственным потребителем
+  `getEffectiveModules` был `sitemap.ts`, а ВСЕ рантайм-гейты читали только `process.env` через синхронный
+  `isModuleEnabled` — выключение модуля из UI было почти no-op. Теперь на async-гейт переведены:
+  `runStorefront` (404 `module_disabled`), per-action asserts (`assertOrdersEnabled`/`assertCatalogEnabled`/
+  `assertCmsEnabled`/`assertCdekEnabled`), webhooks Т-Банк/СДЭК, cron СДЭК, `computeDeliveryCost`, дашборд,
+  карточка заказа (блок СДЭК), admin section-guards и `buildAdminNav` (через `layout.tsx`). Без оверрайда
+  поведение совпадает с env; при недоступности БД (нет `DATABASE_URL`) гейт мягко откатывается на env-набор.
+  Синхронный `isModuleEnabled`/`getEnabledModules` оставлены для чисто-env контекстов (напр. `settings/page.tsx`
+  показывает env-набор для дельты «по умолчанию vs оверрайд»).
 
 ### 5.4.4. Storefront API
 
@@ -195,9 +206,16 @@
 - `app/admin/(panel)/settings/page.tsx` — серверная страница (guard `settings.read`/`settings.manage`),
   вкладки. Пункт меню в `lib/admin/nav.ts`: `{ href:'/admin/settings', label:'Настройки',
   permission:'settings.manage' }` **без `module`** (core) — `buildAdminNav` отфильтрует по праву.
+  `buildAdminNav(user, enabledModules)` (волна 5) принимает **эффективный набор модулей** (env⊕БД),
+  который вычисляет `layout.tsx` через `getEffectiveModuleSet()` — меню реагирует на выключение модуля
+  из UI, а не только на `ADMIK_MODULES`. Функция остаётся чистой (не читает env/БД сама).
 - `_components/`: `BrandingForm` (логотип через S3-upload как в catalog `MediaSection`, цвета темы),
   `CurrencyUnitsForm`, `LegalContactsForm`, `CatalogOrdersForm`, `ModulesForm` (три состояния на модуль:
-  наследовать env / включить / выключить; показывает env-значение и оверрайд).
+  наследовать env / включить / выключить; показывает env-значение и оверрайд). Список модулей формы
+  и маппинг состояния вынесены в чистый `_components/modules-form-state.ts` (тестируется без DOM) и
+  **выводятся из `ALL_MODULES`** (включая `payments`). Волна 5, баг #2: раньше форма перечисляла модули
+  вручную без `payments`, из-за чего его оверрайд не читался и при каждом сохранении **молча затирался**;
+  деривация из `ALL_MODULES` устраняет рассинхрон и делает `payments` управляемым из UI.
 - Каркас-консьюмеры брендинга: `app/admin/(panel)/layout.tsx`, `app/admin/login/page.tsx` читают
   `getEffectiveSettings().branding` вместо `env.SHOP_NAME/SHOP_LOGO_URL` (login вне `(panel)` — прямое
   чтение БД с fallback на env). Тема через CSS-переменные из `branding.theme`.

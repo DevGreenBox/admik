@@ -4,7 +4,7 @@ import { requireUser } from '@/lib/auth/session';
 import { can } from '@/lib/auth/rbac';
 import { sql } from '@/lib/db/client';
 import { getDashboardSeries } from '@/lib/analytics/repository';
-import { isModuleEnabled } from '@/lib/config/modules';
+import { isModuleEffectivelyEnabled } from '@/lib/config/settings';
 import { MiniBarChart } from './_components/MiniBarChart';
 
 /**
@@ -45,7 +45,7 @@ export default async function DashboardPage() {
   // расходясь с моделью гейтинга (nav.ts / guardOrders) и собственным комментарием
   // карточек. Гейтим чтения orders флагом модуля; «Посещения» от модуля orders не
   // зависят и показываются всегда.
-  const ordersOn = isModuleEnabled('orders');
+  const ordersOn = await isModuleEffectivelyEnabled('orders');
 
   const [products, categories, ordersTotal, ordersToday, series] = await Promise.all([
     safeCount(sql<{ n: string }[]>`SELECT count(*)::text AS n FROM products`),

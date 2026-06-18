@@ -71,6 +71,9 @@ const settingsMock = {
   getEffectiveSettings: vi.fn(async () => ({
     seo: { title_template: '%s', noindex_site: false, site_url: 'https://shop.example' },
   })),
+  // Авторитетный гейт модуля (вызывается из runStorefront). Тест проверяет
+  // успешный путь cms → 200, поэтому модуль включён.
+  isModuleEffectivelyEnabled: vi.fn(async () => true),
 };
 
 async function loadSlugRoute() {

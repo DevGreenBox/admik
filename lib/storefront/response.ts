@@ -1,14 +1,14 @@
 /**
  * Единый формат ответов/ошибок Storefront API + общий конвейер обработки роута
  * (docs/06 §6, ADR-008). Держим здесь, чтобы 4 роута не дублировали:
- *  authorizeStorefront → 401/403; isModuleEnabled('catalog') → 404;
+ *  authorizeStorefront → 401/403; isModuleEffectivelyEnabled('catalog') → 404;
  *  rate-limit по ключу/ip → 429; CORS-заголовки в каждом ответе; preflight.
  *
  * Формат успеха: { data, ...meta }.  Формат ошибки: { error: { code, message } }.
  */
 
 import { NextResponse } from 'next/server';
-import { isModuleEnabled } from '@/lib/config/modules';
+import { isModuleEffectivelyEnabled } from '@/lib/config/settings';
 import type { ModuleName } from '@/lib/config/modules';
 import {
   checkStorefrontRate,
@@ -185,7 +185,8 @@ export async function runStorefront(
 
   // 1) Требуемый модуль (catalog для каталога, orders для заказов, §4.2).
   //    Для core-always-on (moduleName === null) проверка пропускается.
-  if (moduleName !== null && !isModuleEnabled(moduleName)) {
+  //    Авторитетный гейт (env ⊕ БД-оверрайд): выключение модуля из UI → 404.
+  if (moduleName !== null && !(await isModuleEffectivelyEnabled(moduleName))) {
     return jsonError(
       'module_disabled',
       `Модуль «${moduleName}» отключён.`,

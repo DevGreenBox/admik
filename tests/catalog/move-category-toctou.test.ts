@@ -88,7 +88,7 @@ vi.mock('next/headers', () => ({ headers: async () => ({ get: () => null }) }));
 vi.mock('@/lib/audit/log', () => ({
   writeAudit: (...args: unknown[]) => H.writeAuditSpy(...(args as [])),
 }));
-vi.mock('@/lib/config/modules', () => ({ isModuleEnabled: () => true }));
+vi.mock('@/lib/config/settings', () => ({ isModuleEffectivelyEnabled: async () => true }));
 vi.mock('@/lib/db/client', () => ({ sql: H.sqlMock }));
 
 // Импорт actions ПОСЛЕ моков.

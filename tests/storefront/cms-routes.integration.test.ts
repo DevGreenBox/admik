@@ -61,6 +61,17 @@ const settingsMock = {
   getEffectiveSettings: vi.fn(async () => ({
     seo: { title_template: '%s', noindex_site: false, site_url: 'https://shop.example' },
   })),
+  // Авторитетный гейт модуля теперь живёт в @/lib/config/settings и вызывается из
+  // runStorefront. Без БД-оверрайда он эквивалентен env-набору — отражаем
+  // process.env.ADMIK_MODULES, чтобы env-driven кейсы (выкл cms → 404) сохранились.
+  isModuleEffectivelyEnabled: vi.fn(async (name: string) => {
+    const raw = process.env.ADMIK_MODULES?.trim();
+    if (!raw) return true; // не задано → все модули включены (env-дефолт)
+    return raw
+      .split(',')
+      .map((m) => m.trim().toLowerCase())
+      .includes(name);
+  }),
 };
 
 async function loadSlugRoute() {

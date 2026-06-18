@@ -19,7 +19,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
 import { getCdekConfig } from '@/lib/cdek/config';
-import { isModuleEnabled } from '@/lib/config/modules';
+import { isModuleEffectivelyEnabled } from '@/lib/config/settings';
 import { runCreatePending, runRefreshActive, runNotifyStuck } from '@/lib/cdek/cron';
 
 export const dynamic = 'force-dynamic';
@@ -82,7 +82,8 @@ async function handle(
   }
 
   // Модуль выключен → no-op (docs/08 §9: воркеры — no-op при выключенном cdek).
-  if (!isModuleEnabled('cdek')) {
+  // Авторитетный гейт (env ⊕ БД-оверрайд): выключение из UI тоже останавливает воркер.
+  if (!(await isModuleEffectivelyEnabled('cdek'))) {
     return NextResponse.json({ ok: true, skipped: true, reason: 'module_disabled', task });
   }
 

@@ -2,7 +2,7 @@ import Link from 'next/link';
 
 import { sql } from '@/lib/db/client';
 import { can } from '@/lib/auth/rbac';
-import { isModuleEnabled } from '@/lib/config/modules';
+import { isModuleEffectivelyEnabled } from '@/lib/config/settings';
 import {
   getShipmentByOrderId,
   listStatusLogByOrderId,
@@ -166,7 +166,7 @@ export default async function OrderDetailPage({
 
   // Блок СДЭК: виден только при включённом модуле cdek и праве cdek.manage
   // (сервер всё равно проверяет право внутри каждого Server Action).
-  const showCdek = isModuleEnabled('cdek') && can(guard.user, 'cdek.manage');
+  const showCdek = (await isModuleEffectivelyEnabled('cdek')) && can(guard.user, 'cdek.manage');
   const cdek = showCdek ? await loadCdek(order.id) : null;
 
   return (

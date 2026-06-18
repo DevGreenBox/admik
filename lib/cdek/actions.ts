@@ -3,7 +3,7 @@
 import { z } from 'zod';
 
 import { defineAction, PublicActionError } from '@/lib/server/action';
-import { isModuleEnabled } from '@/lib/config/modules';
+import { isModuleEffectivelyEnabled } from '@/lib/config/settings';
 import { OrderService } from './services/order';
 import { TrackingService } from './services/tracking';
 import { PrintService } from './services/print';
@@ -17,8 +17,8 @@ import { CdekError } from './errors';
  * заказа → audit `cdek.*`. Доменные ошибки — CdekError из lib/cdek/errors.ts
  * (класс НЕ объявляется в этом 'use server'-файле, только импортируется).
  *
- * Флаг модуля: каждый handler проверяет isModuleEnabled('cdek') и отклоняет
- * вызов при выключенном модуле (помимо скрытия в UI).
+ * Флаг модуля: каждый handler await assertCdekEnabled() — авторитетный гейт
+ * (env ⊕ БД-оверрайд) отклоняет вызов при выключенном модуле (помимо скрытия в UI).
  *
  * Бизнес-логика (создание/отмена/трек/печать) — внутри сервисов
  * lib/cdek/services/* через getCdekManager(); здесь только оркестрация пайплайна.
@@ -28,9 +28,9 @@ import { CdekError } from './errors';
 // Общие хелперы.
 // -----------------------------------------------------------------------------
 
-/** Бросает, если модуль cdek выключен. */
-function assertCdekEnabled(): void {
-  if (!isModuleEnabled('cdek')) {
+/** Бросает, если модуль cdek выключен (env ⊕ БД-оверрайд). */
+async function assertCdekEnabled(): Promise<void> {
+  if (!(await isModuleEffectivelyEnabled('cdek'))) {
     throw new CdekError('module_disabled', 'Модуль «СДЭК» выключен.');
   }
 }
@@ -92,7 +92,7 @@ export const createCdekShipment = defineAction({
   permission: 'cdek.manage',
   input: CreateShipmentSchema,
   handler: async ({ orderId, force }) => {
-    assertCdekEnabled();
+    await assertCdekEnabled();
     const shipment = await withUserFacingCdekError(() =>
       new OrderService().createShipment(orderId, { force }),
     );
@@ -122,7 +122,7 @@ export const cancelCdekShipment = defineAction({
   permission: 'cdek.manage',
   input: OrderIdSchema,
   handler: async ({ orderId }) => {
-    assertCdekEnabled();
+    await assertCdekEnabled();
     await withUserFacingCdekError(() => new OrderService().cancelShipment(orderId));
     return {
       result: { orderId, cancelled: true },
@@ -145,7 +145,7 @@ export const refreshCdekStatus = defineAction({
   permission: 'cdek.manage',
   input: OrderIdSchema,
   handler: async ({ orderId }) => {
-    assertCdekEnabled();
+    await assertCdekEnabled();
     const res = await new TrackingService().refreshStatus(orderId);
     return {
       result: res,
@@ -172,7 +172,7 @@ export const getCdekLabel = defineAction({
   permission: 'cdek.manage',
   input: LabelSchema,
   handler: async ({ orderId, kind }) => {
-    assertCdekEnabled();
+    await assertCdekEnabled();
     const { url } = await new PrintService().getShipmentLabel(orderId, { kind });
     return {
       result: { url },

@@ -1,6 +1,6 @@
 import { requireUser } from '@/lib/auth/session';
 import { can } from '@/lib/auth/rbac';
-import { isModuleEnabled } from '@/lib/config/modules';
+import { isModuleEffectivelyEnabled } from '@/lib/config/settings';
 import type { AuthUser } from '@/lib/auth/rbac';
 import type { PermissionCode } from '@/lib/auth/permissions';
 
@@ -22,7 +22,7 @@ export type OrdersGuardResult =
 export async function guardOrders(
   permission: PermissionCode = 'orders.read',
 ): Promise<OrdersGuardResult> {
-  if (!isModuleEnabled('orders')) {
+  if (!(await isModuleEffectivelyEnabled('orders'))) {
     return { ok: false, reason: 'module_disabled' };
   }
   const user = await requireUser();

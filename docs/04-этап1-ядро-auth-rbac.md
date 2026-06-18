@@ -555,9 +555,14 @@ const NAV: NavItem[] = [
   { href: '/admin/audit',  label: 'Аудит',    permission: 'audit.read' },
 ];
 
-export function buildAdminNav(user: AuthUser): NavItem[] {
+// Волна 5: набор модулей — ЭФФЕКТИВНЫЙ (env⊕БД-оверрайд), передаётся параметром.
+export function buildAdminNav(
+  user: AuthUser,
+  enabledModules: ReadonlySet<ModuleName> | readonly ModuleName[],
+): NavItem[] {
+  const enabled = enabledModules instanceof Set ? enabledModules : new Set(enabledModules);
   return NAV.filter(i =>
-    (!i.module || isModuleEnabled(i.module)) &&   // выключенный модуль скрыт
+    (!i.module || enabled.has(i.module)) &&         // выключенный модуль скрыт
     (!i.permission || can(user, i.permission))     // нет права — пункт скрыт
   );
 }
@@ -565,6 +570,9 @@ export function buildAdminNav(user: AuthUser): NavItem[] {
 
 - На Этапе 1 реально существуют только `Дашборд`, `Пользователи`, `Роли`, `Аудит`. Пункты модулей —
   заготовки, появятся в Этапах 2–5 (но логика фильтрации по модулю/праву уже готова и тестируется).
+- **Волна 5:** `buildAdminNav` больше не читает `process.env` сам — `layout.tsx` передаёт эффективный
+  набор модулей из `getEffectiveModuleSet()` (env⊕БД). Так меню реагирует на выключение модуля из UI
+  (`module_overrides`), а не только на `ADMIK_MODULES`. Функция остаётся чистой и детерминированной.
 
 ### 6.4. Страница логина и дашборд
 

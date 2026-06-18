@@ -4,11 +4,18 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
 import type { ActionResult } from '@/lib/server/action';
-import type { ModuleName } from '@/lib/config/modules';
+import { type ModuleName } from '@/lib/config/modules';
 import type { ModuleOverrides } from '@/lib/settings/schemas';
 
 import { updateModulesAction } from './form-actions';
 import { errorMessage } from './action-result';
+import {
+  FORM_MODULES as MODULES,
+  initialModuleState as initialState,
+  buildModuleOverridesPayload,
+  modulesBeingTurnedOff,
+  type TriState,
+} from './modules-form-state';
 
 /**
  * Форма оверрайда модулей (docs/11 §5.4.5). Три состояния на модуль:
@@ -17,26 +24,12 @@ import { errorMessage } from './action-result';
  *   off     — принудительно выключить.
  * Показывает env-значение (включён ли модуль env-набором). «Настройки» — core,
  * в список НЕ входит (self-lock guard, §5.4.5).
+ *
+ * Список модулей/начальное состояние/payload — из modules-form-state.ts (чистая
+ * логика, тестируемая без DOM). Список выводится из ALL_MODULES (включая payments),
+ * поэтому существующий оверрайд читается и сохраняется целиком — затирания нет.
  */
 type Fail = Extract<ActionResult<unknown>, { ok: false }>;
-
-const MODULES: { name: ModuleName; label: string }[] = [
-  { name: 'catalog', label: 'Каталог' },
-  { name: 'orders', label: 'Заказы и промокоды' },
-  { name: 'cdek', label: 'Доставка СДЭК' },
-  { name: 'cms', label: 'Контент (CMS)' },
-];
-
-type TriState = 'inherit' | 'on' | 'off';
-
-function initialState(overrides: ModuleOverrides): Record<ModuleName, TriState> {
-  const map = {} as Record<ModuleName, TriState>;
-  for (const { name } of MODULES) {
-    const v = overrides[name];
-    map[name] = v === undefined ? 'inherit' : v ? 'on' : 'off';
-  }
-  return map;
-}
 
 export function ModulesForm({
   overrides,
@@ -58,7 +51,7 @@ export function ModulesForm({
   async function save() {
     // Подтверждение при выключении модулей: выключение «Каталога»/«Заказов» и т.п.
     // скрывает разделы и может «сломать» витрину — предупреждаем заранее.
-    const turningOff = MODULES.filter(({ name }) => state[name] === 'off').map((m) => m.label);
+    const turningOff = modulesBeingTurnedOff(state);
     if (turningOff.length > 0) {
       const ok = window.confirm(
         `Выключить модули: ${turningOff.join(', ')}? Соответствующие разделы админки и функции на сайте станут недоступны. Продолжить?`,
@@ -69,13 +62,8 @@ export function ModulesForm({
     setError(null);
     setWarnings([]);
     setSuccess(null);
-    const moduleOverrides: Record<string, boolean> = {};
-    for (const { name } of MODULES) {
-      const s = state[name];
-      if (s === 'on') moduleOverrides[name] = true;
-      else if (s === 'off') moduleOverrides[name] = false;
-      // inherit → поле отсутствует (берётся env).
-    }
+    // Включает ВСЕ модули формы (в т.ч. payments) → ранее заданный оверрайд не теряется.
+    const moduleOverrides = buildModuleOverridesPayload(state);
     const result = await updateModulesAction({ moduleOverrides });
     setPending(false);
     if (result.ok) {

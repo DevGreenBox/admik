@@ -4,7 +4,7 @@ import type { TransactionSql } from 'postgres';
 
 import { defineAction, type ActionCtx } from '@/lib/server/action';
 import { sql } from '@/lib/db/client';
-import { isModuleEnabled } from '@/lib/config/modules';
+import { isModuleEffectivelyEnabled } from '@/lib/config/settings';
 
 import { z } from 'zod';
 
@@ -44,16 +44,17 @@ import type { Order, OrderItem, PromoCode } from './types';
  *   • → shipped   → commitReservation (списание остатка);
  *   • → refunded  → release (если ещё зарезервировано) / возврат на склад опц.
  *
- * Флаг модуля: каждый handler в начале проверяет isModuleEnabled('orders').
+ * Флаг модуля: каждый handler в начале await assertOrdersEnabled() — авторитетный
+ * гейт (env ⊕ БД-оверрайд): выключение из UI отклоняет вызов, а не только скрывает.
  */
 
 // -----------------------------------------------------------------------------
 // Общие хелперы.
 // -----------------------------------------------------------------------------
 
-/** Бросает, если модуль заказов выключен. */
-function assertOrdersEnabled(): void {
-  if (!isModuleEnabled('orders')) {
+/** Бросает, если модуль заказов выключен (env ⊕ БД-оверрайд). */
+async function assertOrdersEnabled(): Promise<void> {
+  if (!(await isModuleEffectivelyEnabled('orders'))) {
     throw new OrderError('module_disabled', 'Модуль «Заказы» выключен.');
   }
 }
@@ -263,7 +264,7 @@ export const getOrder = defineAction({
   permission: 'orders.read',
   input: PromoIdSchema, // { id: uuid } — та же форма «по id»
   handler: async (data, _ctx: ActionCtx) => {
-    assertOrdersEnabled();
+    await assertOrdersEnabled();
     const detail = await getOrderById(data.id);
     if (!detail) {
       throw new OrderError('not_found', 'Заказ не найден.');
@@ -280,7 +281,7 @@ export const changeOrderStatus = defineAction({
   permission: 'orders.write',
   input: ChangeOrderStatusSchema,
   handler: async (data, ctx) => {
-    assertOrdersEnabled();
+    await assertOrdersEnabled();
     const { before, after } = await applyOrderStatusTransition({
       id: data.id,
       to: data.to,
@@ -306,7 +307,7 @@ export const cancelOrder = defineAction({
   permission: 'orders.write',
   input: CancelOrderSchema,
   handler: async (data, ctx) => {
-    assertOrdersEnabled();
+    await assertOrdersEnabled();
     const { before, after } = await applyOrderStatusTransition({
       id: data.id,
       to: 'cancelled',
@@ -331,7 +332,7 @@ export const refundOrder = defineAction({
   permission: 'orders.write',
   input: RefundOrderSchema,
   handler: async (data, ctx) => {
-    assertOrdersEnabled();
+    await assertOrdersEnabled();
     const { before, after } = await applyOrderStatusTransition({
       id: data.id,
       to: 'refunded',
@@ -364,7 +365,7 @@ export const setPaymentStatus = defineAction({
   permission: 'orders.write',
   input: SetPaymentStatusSchema,
   handler: async (data, ctx) => {
-    assertOrdersEnabled();
+    await assertOrdersEnabled();
     const current = await getOrderById(data.id);
     if (!current) {
       throw new OrderError('not_found', 'Заказ не найден.');
@@ -433,7 +434,7 @@ export const setDeliveryStatus = defineAction({
   permission: 'orders.write',
   input: SetDeliveryStatusSchema,
   handler: async (data, ctx) => {
-    assertOrdersEnabled();
+    await assertOrdersEnabled();
     const current = await getOrderById(data.id);
     if (!current) {
       throw new OrderError('not_found', 'Заказ не найден.');
@@ -492,7 +493,7 @@ export const createManualOrder = defineAction({
   permission: 'orders.write',
   input: ManualOrderSchema,
   handler: async (data, ctx) => {
-    assertOrdersEnabled();
+    await assertOrdersEnabled();
     // Та же серверная ре-валидация цен/остатков/резерв, что у витрины (ADR-010),
     // но с источником 'admin' и actorUserId для истории.
     const created = await createOrder(data, {
@@ -592,7 +593,7 @@ export const createPromoCode = defineAction({
   permission: 'orders.write',
   input: PromoCreateSchema,
   handler: async (data, _ctx) => {
-    assertOrdersEnabled();
+    await assertOrdersEnabled();
     let rows: Record<string, unknown>[];
     try {
       rows = await sql.begin(async (tx: TransactionSql) => {
@@ -646,7 +647,7 @@ export const updatePromoCode = defineAction({
   permission: 'orders.write',
   input: PromoUpdateSchema,
   handler: async (data, _ctx) => {
-    assertOrdersEnabled();
+    await assertOrdersEnabled();
     const before = await sql<Record<string, unknown>[]>`
       SELECT * FROM promo_codes WHERE id = ${data.id} LIMIT 1
     `;
@@ -772,7 +773,7 @@ export const deactivatePromoCode = defineAction({
   permission: 'orders.write',
   input: PromoIdSchema,
   handler: async (data, _ctx) => {
-    assertOrdersEnabled();
+    await assertOrdersEnabled();
     const rows = await sql<{ id: string }[]>`
       UPDATE promo_codes SET is_active = false, updated_at = now()
       WHERE id = ${data.id}
@@ -802,7 +803,7 @@ export const deletePromoCode = defineAction({
   permission: 'orders.write',
   input: PromoIdSchema,
   handler: async (data, _ctx) => {
-    assertOrdersEnabled();
+    await assertOrdersEnabled();
     const rows = await sql<{ id: string }[]>`
       DELETE FROM promo_codes WHERE id = ${data.id} RETURNING id
     `;

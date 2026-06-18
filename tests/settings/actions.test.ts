@@ -10,7 +10,7 @@ import {
 } from '@/lib/settings/action-factory';
 import { buildAdminNav } from '@/lib/admin/nav';
 import { legalEntitySchema } from '@/lib/settings/schemas';
-import { ALL_MODULES } from '@/lib/config/modules';
+import { ALL_MODULES, getEnabledModules } from '@/lib/config/modules';
 
 /**
  * Тесты пакета 5.D-2 (docs/11 §5.4.6) — Server Actions настроек магазина.
@@ -346,16 +346,19 @@ describe('settings/actions — updateModuleOverrides', () => {
       'cdek.manage',
     ]);
     // Всё выключено через env → «Настройки» (core, без module) обязан остаться.
-    const nav = buildAdminNav(user, { ADMIK_MODULES: '' });
+    // env='' → getEnabledModules даёт все модули; для self-lock берём ПУСТОЙ набор,
+    // чтобы доказать: даже когда ни одного модуля нет, «Настройки» (core) остаётся.
+    const nav = buildAdminNav(user, []);
     const settingsItem = nav.find((i) => i.href === '/admin/settings');
     expect(settingsItem).toBeDefined();
     expect(settingsItem?.module).toBeUndefined();
   });
 
   it('«Настройки» виден только при наличии settings.manage', () => {
-    const withRight = buildAdminNav(makeUser(['settings.manage']));
+    const allModules = getEnabledModules({});
+    const withRight = buildAdminNav(makeUser(['settings.manage']), allModules);
     expect(withRight.some((i) => i.href === '/admin/settings')).toBe(true);
-    const withoutRight = buildAdminNav(makeUser(['catalog.read']));
+    const withoutRight = buildAdminNav(makeUser(['catalog.read']), allModules);
     expect(withoutRight.some((i) => i.href === '/admin/settings')).toBe(false);
   });
 });

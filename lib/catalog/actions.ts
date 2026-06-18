@@ -4,7 +4,7 @@ import type { TransactionSql } from 'postgres';
 
 import { defineAction, type ActionCtx } from '@/lib/server/action';
 import { sql } from '@/lib/db/client';
-import { isModuleEnabled } from '@/lib/config/modules';
+import { isModuleEffectivelyEnabled } from '@/lib/config/settings';
 import { getStorage } from '@/lib/storage';
 import { validateUpload } from '@/lib/storage/validate';
 import { generatePreviews } from '@/lib/storage/image';
@@ -49,17 +49,18 @@ import { slugify, slugifyOrFallback, uniquifySlug } from './slug';
  * (catalog.write) → Zod → handler (БД через sql, параметризовано) → revalidate
  * → audit. Чувствительных полей у каталога нет, но паттерн соблюдается полностью.
  *
- * Флаг модуля: каждый handler в начале проверяет isModuleEnabled('catalog') и
- * отклоняет вызов при выключенном модуле (помимо скрытия в UI, docs/05 §4).
+ * Флаг модуля: каждый handler в начале await assertCatalogEnabled() — авторитетный
+ * гейт (env ⊕ БД-оверрайд) отклоняет вызов при выключенном модуле (помимо скрытия
+ * в UI, docs/05 §4).
  */
 
 // -----------------------------------------------------------------------------
 // Общие хелперы.
 // -----------------------------------------------------------------------------
 
-/** Бросает, если модуль каталога выключен. */
-function assertCatalogEnabled(): void {
-  if (!isModuleEnabled('catalog')) {
+/** Бросает, если модуль каталога выключен (env ⊕ БД-оверрайд). */
+async function assertCatalogEnabled(): Promise<void> {
+  if (!(await isModuleEffectivelyEnabled('catalog'))) {
     throw new CatalogError('module_disabled', 'Модуль «Каталог» выключен.');
   }
 }
@@ -122,7 +123,7 @@ export const createCategory = defineAction({
   permission: 'catalog.write',
   input: CategoryCreateSchema,
   handler: async (data, _ctx: ActionCtx) => {
-    assertCatalogEnabled();
+    await assertCatalogEnabled();
     // slugifyOrFallback: имя без латиницы/кириллицы/цифр (эмодзи/иероглифы) не
     // должно давать пустой slug → товар/категория остались бы без рабочего ЧПУ.
     const base = data.slug || slugifyOrFallback(data.name);
@@ -158,7 +159,7 @@ export const updateCategory = defineAction({
   permission: 'catalog.write',
   input: CategoryUpdateSchema,
   handler: async (data, _ctx) => {
-    assertCatalogEnabled();
+    await assertCatalogEnabled();
     const before = await sql<Record<string, unknown>[]>`
       SELECT * FROM categories WHERE id = ${data.id} LIMIT 1
     `;
@@ -205,7 +206,7 @@ export const moveCategory = defineAction({
   permission: 'catalog.write',
   input: CategoryMoveSchema,
   handler: async (data, _ctx) => {
-    assertCatalogEnabled();
+    await assertCatalogEnabled();
     // TOCTOU-защита (баг #6): «прочитать рёбра → проверить цикл → записать» — в
     // ОДНОЙ транзакции с сериализующей advisory-xact-блокировкой на всё дерево
     // категорий. Без неё два параллельных перемещения (A→B и B→A) читали бы
@@ -257,7 +258,7 @@ export const deleteCategory = defineAction({
   permission: 'catalog.write',
   input: CategoryDeleteSchema,
   handler: async (data, _ctx) => {
-    assertCatalogEnabled();
+    await assertCatalogEnabled();
     // RESTRICT: запрет удаления категории с детьми (понятная ошибка до БД-уровня).
     const children = await countCategoryChildren(data.id);
     if (children > 0) {
@@ -312,7 +313,7 @@ export const createProduct = defineAction({
   permission: 'catalog.write',
   input: ProductCreateSchema,
   handler: async (data, _ctx) => {
-    assertCatalogEnabled();
+    await assertCatalogEnabled();
     // hint=sku: для имени из эмодзи/иероглифов фолбэк возьмёт читаемый артикул.
     const base = data.slug || slugifyOrFallback(data.name, data.sku ?? '');
 
@@ -362,7 +363,7 @@ export const updateProduct = defineAction({
   permission: 'catalog.write',
   input: ProductUpdateSchema,
   handler: async (data, _ctx) => {
-    assertCatalogEnabled();
+    await assertCatalogEnabled();
     const before = await sql<Record<string, unknown>[]>`
       SELECT * FROM products WHERE id = ${data.id} LIMIT 1
     `;
@@ -433,7 +434,7 @@ export const archiveProduct = defineAction({
   permission: 'catalog.write',
   input: ProductIdSchema,
   handler: async (data, _ctx) => {
-    assertCatalogEnabled();
+    await assertCatalogEnabled();
     const rows = await sql<{ id: string; status: string }[]>`
       UPDATE products SET status = 'archived', updated_at = now()
       WHERE id = ${data.id}
@@ -469,7 +470,7 @@ export const deleteProduct = defineAction({
   permission: 'catalog.write',
   input: ProductIdSchema,
   handler: async (data, _ctx) => {
-    assertCatalogEnabled();
+    await assertCatalogEnabled();
     // Ключи медиа собираем ДО удаления (каскад снесёт строки product_media).
     const mediaKeys = await sql<{ storage_key: string }[]>`
       SELECT storage_key FROM product_media WHERE product_id = ${data.id}
@@ -503,7 +504,7 @@ export const bulkSetProductStatus = defineAction({
   permission: 'catalog.write',
   input: BulkSetProductStatusSchema,
   handler: async (data, _ctx) => {
-    assertCatalogEnabled();
+    await assertCatalogEnabled();
     // Один UPDATE по ANY(ids) — без цикла; status параметризован (CHECK в БД).
     const rows = await sql<{ id: string }[]>`
       UPDATE products SET status = ${data.status}, updated_at = now()
@@ -544,7 +545,7 @@ export const duplicateProduct = defineAction({
   permission: 'catalog.write',
   input: DuplicateProductSchema,
   handler: async (data, _ctx) => {
-    assertCatalogEnabled();
+    await assertCatalogEnabled();
 
     const srcRows = await sql<
       {
@@ -696,7 +697,7 @@ export const createVariant = defineAction({
   permission: 'catalog.write',
   input: VariantCreateSchema,
   handler: async (data, _ctx) => {
-    assertCatalogEnabled();
+    await assertCatalogEnabled();
     // Артикул варианта: если не задан — генерируем уникальный из названия/размера
     // (insertWithUniqueSlug ретраит любой unique-конфликт, включая sku).
     const skuBase = data.sku || slugify(data.name ?? '') || 'variant';
@@ -740,7 +741,7 @@ export const updateVariant = defineAction({
   permission: 'catalog.write',
   input: VariantUpdateSchema,
   handler: async (data, _ctx) => {
-    assertCatalogEnabled();
+    await assertCatalogEnabled();
     const before = await sql<Record<string, unknown>[]>`
       SELECT * FROM product_variants WHERE id = ${data.id} LIMIT 1
     `;
@@ -788,7 +789,7 @@ export const deleteVariant = defineAction({
   permission: 'catalog.write',
   input: VariantIdSchema,
   handler: async (data, _ctx) => {
-    assertCatalogEnabled();
+    await assertCatalogEnabled();
     const rows = await sql<{ id: string; product_id: string }[]>`
       DELETE FROM product_variants WHERE id = ${data.id}
       RETURNING id, product_id
@@ -816,7 +817,7 @@ export const createAttribute = defineAction({
   permission: 'catalog.write',
   input: AttributeCreateSchema,
   handler: async (data, _ctx) => {
-    assertCatalogEnabled();
+    await assertCatalogEnabled();
     const rows = await sql<{ id: string }[]>`
       INSERT INTO attributes
         (code, name, type, unit, is_variant, is_filterable, is_required, sort)
@@ -844,7 +845,7 @@ export const updateAttribute = defineAction({
   permission: 'catalog.write',
   input: AttributeUpdateSchema,
   handler: async (data, _ctx) => {
-    assertCatalogEnabled();
+    await assertCatalogEnabled();
     const before = await sql<Record<string, unknown>[]>`
       SELECT * FROM attributes WHERE id = ${data.id} LIMIT 1
     `;
@@ -883,7 +884,7 @@ export const addAttributeValue = defineAction({
   permission: 'catalog.write',
   input: AttributeValueSchema,
   handler: async (data, _ctx) => {
-    assertCatalogEnabled();
+    await assertCatalogEnabled();
     const rows = await sql<{ id: string }[]>`
       INSERT INTO attribute_values (attribute_id, value, slug, sort)
       VALUES (${data.attributeId}, ${data.value}, ${data.slug ?? null}, ${data.sort ?? 0})
@@ -906,7 +907,7 @@ export const setProductAttributes = defineAction({
   permission: 'catalog.write',
   input: SetProductAttributesSchema,
   handler: async (data, _ctx) => {
-    assertCatalogEnabled();
+    await assertCatalogEnabled();
     // Полная замена привязок уровня товара (variant_id IS NULL) и переданных вариантов.
     // Уровень товара чистим всегда; привязки переданных вариантов — тоже, иначе
     // INSERT ... ON CONFLICT DO NOTHING (uniq включает value_id) НЕ перезапишет
@@ -963,7 +964,7 @@ export const attachMedia = defineAction({
   permission: 'catalog.write',
   input: MediaUploadSchema,
   handler: async (data, _ctx) => {
-    assertCatalogEnabled();
+    await assertCatalogEnabled();
 
     // (2) Валидация magic-bytes + лимиты (storage/validate).
     const validation = await validateUpload(data.bytes, data.filename);
@@ -1034,7 +1035,7 @@ export const deleteMedia = defineAction({
   permission: 'catalog.write',
   input: MediaDeleteSchema,
   handler: async (data, _ctx) => {
-    assertCatalogEnabled();
+    await assertCatalogEnabled();
     const rows = await sql<{ id: string; product_id: string; storage_key: string }[]>`
       DELETE FROM product_media WHERE id = ${data.id}
       RETURNING id, product_id, storage_key
@@ -1060,7 +1061,7 @@ export const reorderMedia = defineAction({
   permission: 'catalog.write',
   input: MediaReorderSchema,
   handler: async (data, _ctx) => {
-    assertCatalogEnabled();
+    await assertCatalogEnabled();
     // Назначаем sort по индексу в массиве.
     for (let i = 0; i < data.order.length; i++) {
       await sql`
@@ -1100,7 +1101,7 @@ export const setInventory = defineAction({
   permission: 'catalog.write',
   input: StockSetSchema,
   handler: async (data, _ctx) => {
-    assertCatalogEnabled();
+    await assertCatalogEnabled();
     // UPSERT по (product, variant, warehouse). COALESCE variant_id для конфликта.
     // Защита от нарушения inventory_reserved_le_qty (0010): новое quantity не
     // должно опускаться ниже уже зарезервированного (иначе сырой CHECK 23514).
@@ -1142,7 +1143,7 @@ export const adjustInventory = defineAction({
   permission: 'catalog.write',
   input: StockAdjustSchema,
   handler: async (data, _ctx) => {
-    assertCatalogEnabled();
+    await assertCatalogEnabled();
     // Атомарная корректировка: итог не уходит ниже 0 И не ниже зарезервированного
     // (inventory_reserved_le_qty, 0010) — иначе сырой CHECK 23514. Условие в WHERE
     // `quantity+delta >= reserved` покрывает обе границы (reserved >= 0): при
@@ -1193,7 +1194,7 @@ export const createBrand = defineAction({
   permission: 'catalog.write',
   input: BrandCreateSchema,
   handler: async (data, _ctx) => {
-    assertCatalogEnabled();
+    await assertCatalogEnabled();
     const base = data.slug || slugifyOrFallback(data.name);
 
     const row = await insertWithUniqueSlug(base, async (slug) => {
@@ -1227,7 +1228,7 @@ export const updateBrand = defineAction({
   permission: 'catalog.write',
   input: BrandUpdateSchema,
   handler: async (data, _ctx) => {
-    assertCatalogEnabled();
+    await assertCatalogEnabled();
     const before = await sql<Record<string, unknown>[]>`
       SELECT * FROM brands WHERE id = ${data.id} LIMIT 1
     `;
@@ -1274,7 +1275,7 @@ export const deleteBrand = defineAction({
   permission: 'catalog.write',
   input: BrandIdSchema,
   handler: async (data, _ctx) => {
-    assertCatalogEnabled();
+    await assertCatalogEnabled();
     // ON DELETE SET NULL: товары не удаляются, у них обнуляется brand_id (docs/06 §3.3).
     const rows = await sql<{ id: string; logo_key: string | null }[]>`
       DELETE FROM brands WHERE id = ${data.id}
@@ -1303,7 +1304,7 @@ export const uploadBrandLogo = defineAction({
   permission: 'catalog.write',
   input: BrandLogoUploadSchema,
   handler: async (data, _ctx) => {
-    assertCatalogEnabled();
+    await assertCatalogEnabled();
 
     // Бренд должен существовать (иначе осиротевший объект в хранилище).
     const brand = await sql<{ id: string; logo_key: string | null }[]>`

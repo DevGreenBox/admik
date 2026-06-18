@@ -1,6 +1,6 @@
 import { requireUser } from '@/lib/auth/session';
 import { can } from '@/lib/auth/rbac';
-import { isModuleEnabled } from '@/lib/config/modules';
+import { isModuleEffectivelyEnabled } from '@/lib/config/settings';
 import type { AuthUser } from '@/lib/auth/rbac';
 import type { PermissionCode } from '@/lib/auth/permissions';
 
@@ -19,7 +19,7 @@ export type CdekGuardResult =
 export async function guardCdek(
   permission: PermissionCode = 'cdek.manage',
 ): Promise<CdekGuardResult> {
-  if (!isModuleEnabled('cdek')) {
+  if (!(await isModuleEffectivelyEnabled('cdek'))) {
     return { ok: false, reason: 'module_disabled' };
   }
   const user = await requireUser();

@@ -2,20 +2,23 @@
  * Чистая логика состава меню админки = f(включённые модули, права) — docs/04 §6.3.
  *
  * Меню скрывает пункты по двум независимым причинам:
- *   - модуль выключен (`isModuleEnabled`) — раздел физически отсутствует в магазине;
+ *   - модуль выключен — раздел физически отсутствует в магазине;
  *   - у пользователя нет права (`can`) — доступа к разделу нет.
  *
  * Это лишь UI-фильтр для удобства; настоящее решение о доступе принимает сервер
  * (гварды Server Actions/роутов, §5.3 «двойная защита»). Скрытие в меню защитой
  * не является.
  *
- * Функция чистая и тестируемая: окружение передаётся параметром `env`, поэтому
- * фильтрация по модулям не зависит от глобального `process.env`.
+ * Функция чистая и тестируемая: набор ЭФФЕКТИВНЫХ модулей (env ⊕ БД-оверрайд)
+ * передаётся параметром `enabledModules`, поэтому фильтрация по модулям не зависит
+ * ни от глобального `process.env`, ни от чтения БД внутри функции. Сам набор
+ * вычисляет вызывающий (layout: getEffectiveModuleSet()) — так меню реагирует на
+ * выключение модуля из UI, а не только на ADMIK_MODULES.
  */
 
 import { can, type AuthUser } from '@/lib/auth/rbac';
 import type { PermissionCode } from '@/lib/auth/permissions';
-import { isModuleEnabled, type ModuleName } from '@/lib/config/modules';
+import { type ModuleName } from '@/lib/config/modules';
 
 /** Пункт навигации админки. */
 export interface NavItem {
@@ -56,19 +59,24 @@ export const NAV: NavItem[] = [
  * Строит видимое для пользователя меню.
  *
  * Пункт показывается, если выполнены ОБА условия:
- *   - нет модуля ИЛИ модуль включён (`isModuleEnabled(module, env)`);
+ *   - нет модуля ИЛИ модуль входит в эффективный набор (`enabledModules.has(module)`);
  *   - нет права ИЛИ пользователь им обладает (`can(user, permission)`).
  *
- * `env` пробрасывается в `isModuleEnabled`, чтобы функция была детерминированной
- * и тестируемой (по умолчанию — `process.env`).
+ * `enabledModules` — ЭФФЕКТИВНЫЙ набор модулей (env ⊕ БД-оверрайд), вычисленный
+ * вызывающим (layout: getEffectiveModuleSet()). Функция остаётся чистой/детерми-
+ * нированной: она не читает ни process.env, ни БД. Принимает Set или массив имён.
  */
 export function buildAdminNav(
   user: AuthUser,
-  env?: Record<string, string | undefined>,
+  enabledModules: ReadonlySet<ModuleName> | readonly ModuleName[],
 ): NavItem[] {
+  const enabled =
+    enabledModules instanceof Set
+      ? enabledModules
+      : new Set<ModuleName>(enabledModules as readonly ModuleName[]);
   return NAV.filter(
     (item) =>
-      (!item.module || isModuleEnabled(item.module, env)) &&
+      (!item.module || enabled.has(item.module)) &&
       (!item.permission || can(user, item.permission)),
   );
 }

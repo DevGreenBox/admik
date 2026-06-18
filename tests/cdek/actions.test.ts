@@ -50,9 +50,10 @@ vi.mock('@/lib/cdek/services/print', () => ({
 }));
 
 // --- Модуль cdek включён по умолчанию; отдельный тест выключит его. -----------
-const isModuleEnabledMock = vi.fn(() => true);
-vi.mock('@/lib/config/modules', () => ({
-  isModuleEnabled: (...a: unknown[]) => isModuleEnabledMock(...(a as [])),
+// Гейт теперь авторитетный (env ⊕ БД) и живёт в @/lib/config/settings.
+const isModuleEnabledMock = vi.fn(async () => true);
+vi.mock('@/lib/config/settings', () => ({
+  isModuleEffectivelyEnabled: (...a: unknown[]) => isModuleEnabledMock(...(a as [])),
 }));
 
 // --- Пайплайн defineAction: подменяем auth/audit/cache/headers. --------------
@@ -105,7 +106,7 @@ beforeEach(() => {
   getShipmentLabelMock.mockClear();
   writeAuditMock.mockClear();
   revalidatePathMock.mockClear();
-  isModuleEnabledMock.mockReturnValue(true);
+  isModuleEnabledMock.mockResolvedValue(true);
   currentUser = makeUser(['cdek.manage']);
 });
 
@@ -190,7 +191,7 @@ describe('cdek actions — валидация и module-gate', () => {
   });
 
   it('модуль cdek выключен → internal (handler бросает CdekError), сервис не вызван', async () => {
-    isModuleEnabledMock.mockReturnValue(false);
+    isModuleEnabledMock.mockResolvedValue(false);
     const res = await createCdekShipment({ orderId: ORDER_ID });
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.error).toBe('internal');

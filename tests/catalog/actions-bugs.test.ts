@@ -17,7 +17,7 @@ import type { PermissionCode } from '@/lib/auth/permissions';
  *   • @/lib/storage             → getStorage().put/.delete (mock);
  *   • @/lib/storage/validate    → validateUpload (ok);
  *   • @/lib/storage/image       → generatePreviews (фиктивный main);
- *   • @/lib/config/modules      → isModuleEnabled → true;
+ *   • @/lib/config/settings     → isModuleEffectivelyEnabled → true;
  *   • @/lib/auth/session        → getCurrentUser (owner, проходит guard);
  *   • next/cache, next/headers, @/lib/audit/log → no-op/спай.
  *
@@ -128,7 +128,7 @@ vi.mock('next/headers', () => ({ headers: async () => ({ get: () => null }) }));
 vi.mock('@/lib/audit/log', () => ({
   writeAudit: (...args: unknown[]) => H.writeAuditSpy(...(args as [])),
 }));
-vi.mock('@/lib/config/modules', () => ({ isModuleEnabled: () => true }));
+vi.mock('@/lib/config/settings', () => ({ isModuleEffectivelyEnabled: async () => true }));
 vi.mock('@/lib/db/client', () => ({ sql: H.sqlMock }));
 vi.mock('@/lib/catalog/cache', () => ({
   rebuildProductAttributesCache: H.rebuildCacheMock,

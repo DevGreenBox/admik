@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 
 import { requireUser } from '@/lib/auth/session';
 import { buildAdminNav } from '@/lib/admin/nav';
-import { getEffectiveSettings } from '@/lib/config/settings';
+import { getEffectiveSettings, getEffectiveModuleSet } from '@/lib/config/settings';
 
 import { Sidebar } from './_components/Sidebar';
 import { Topbar } from './_components/Topbar';
@@ -30,8 +30,12 @@ export default async function AdminLayout({
   // Полная валидация сессии (БД): нет/невалидна → redirect на /admin/login.
   const user = await requireUser();
 
+  // Эффективный набор модулей (env ⊕ БД-оверрайд) — авторитетный, как у рантайм-
+  // гейтов. Меню реагирует на выключение модуля из UI, а не только на ADMIK_MODULES.
+  const enabledModules = await getEffectiveModuleSet();
+
   // Меню = f(включённые модули, права пользователя) — §6.3.
-  const nav = buildAdminNav(user);
+  const nav = buildAdminNav(user, enabledModules);
 
   // Брендинг — из эффективных настроек (env ⊕ БД), docs/11 §5.4.5.
   const { branding } = await getEffectiveSettings();

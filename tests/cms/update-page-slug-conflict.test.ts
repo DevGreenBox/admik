@@ -14,7 +14,7 @@ import type { AuthUser } from '@/lib/auth/rbac';
  *
  * Тест прогоняет реальный updateCmsPage (defineAction + default deps), мокая
  * только листовые модули: auth/session, audit, next-headers (через getRequestMeta
- * default), config/modules и db/client (sql бросает 23505 на UPDATE).
+ * default), config/settings (гейт модуля) и db/client (sql бросает 23505 на UPDATE).
  */
 
 const OWNER: AuthUser = {
@@ -54,8 +54,8 @@ function makeSqlMock() {
 
 async function loadActions() {
   vi.resetModules();
-  vi.doMock('@/lib/config/modules', () => ({
-    isModuleEnabled: () => true,
+  vi.doMock('@/lib/config/settings', () => ({
+    isModuleEffectivelyEnabled: async () => true,
   }));
   vi.doMock('@/lib/db/client', () => ({ sql: makeSqlMock() }));
   vi.doMock('@/lib/auth/session', () => ({
@@ -76,7 +76,7 @@ describe('updateCmsPage — коллизия slug (баг #4)', () => {
     vi.resetModules();
   });
   afterEach(() => {
-    vi.doUnmock('@/lib/config/modules');
+    vi.doUnmock('@/lib/config/settings');
     vi.doUnmock('@/lib/db/client');
     vi.doUnmock('@/lib/auth/session');
     vi.doUnmock('@/lib/audit/log');

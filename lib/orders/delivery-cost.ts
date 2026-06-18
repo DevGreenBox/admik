@@ -5,7 +5,7 @@
  * модуль cdek опционален (флаг в lib/config/modules) и может быть выключен на
  * деплое. Поэтому здесь нет статического `import … from '@/lib/cdek'`: cdek
  * подключается ЛЕНИВЫМ динамическим import-ом ТОЛЬКО когда:
- *   1) модуль cdek включён (isModuleEnabled('cdek')), И
+ *   1) модуль cdek включён (isModuleEffectivelyEnabled('cdek') — env ⊕ БД-оверрайд), И
  *   2) тип доставки требует расчёта (не pickup), И
  *   3) есть назначение (cityCode | postalCode | pvzCode).
  * Иначе работает дефолтный stub-провайдер (0.00) — поведение Этапа 3 сохранено,
@@ -22,7 +22,7 @@
  * ПОВЕРХ — в calculateQuote (lib/orders/pricing), не здесь.
  */
 
-import { isModuleEnabled } from '@/lib/config/modules';
+import { isModuleEffectivelyEnabled } from '@/lib/config/settings';
 import { DeliveryCalculationError } from './errors';
 import type { DeliveryType } from './types';
 
@@ -162,7 +162,7 @@ export async function computeDeliveryCost(
   options: ComputeDeliveryCostOptions = {},
 ): Promise<DeliveryCostResult> {
   const useCdek = needsCdekProvider({
-    cdekEnabled: isModuleEnabled('cdek'),
+    cdekEnabled: await isModuleEffectivelyEnabled('cdek'),
     deliveryType: input.deliveryType,
     hasDestination: hasDestination(input.destination),
   });

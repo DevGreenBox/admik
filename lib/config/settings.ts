@@ -80,6 +80,16 @@ export interface EffectiveSettings {
     title_template: string;
     noindex_site: boolean;
   };
+  /**
+   * Распарсенный module_overrides из БД (частичный оверрайд ADMIK_MODULES).
+   * Несётся в эффективных настройках, чтобы рантайм-гейты (getEffectiveModuleSet)
+   * получали авторитетный набор модулей через тот же memo-кэш, что и остальные
+   * настройки (read-your-own-writes после updateModuleOverrides). Пустой объект
+   * = «нет оверрайда» → берётся env-набор.
+   */
+  modules: {
+    overrides: ModuleOverrides;
+  };
 }
 
 // -----------------------------------------------------------------------------
@@ -115,6 +125,9 @@ export function mergeSettings(env: Env, dbRows: SettingRow[]): EffectiveSettings
   const delivery = parseSettingValue('delivery', rows.get('delivery')) ?? {};
   const orders = parseSettingValue('orders', rows.get('orders')) ?? {};
   const seo: SeoSettings = parseSettingValue('seo', rows.get('seo')) ?? {};
+  // module_overrides — мягкий парс (.strip): кривая строка БД → {} (нет оверрайда).
+  const moduleOverrides: ModuleOverrides =
+    parseSettingValue('module_overrides', rows.get('module_overrides')) ?? {};
 
   return {
     branding: {
@@ -163,6 +176,9 @@ export function mergeSettings(env: Env, dbRows: SettingRow[]): EffectiveSettings
       robots_extra: seo.robots_extra ?? undefined,
       twitter_site: seo.twitter_site ?? undefined,
       noindex_site: seo.noindex_site ?? false,
+    },
+    modules: {
+      overrides: moduleOverrides,
     },
   };
 }
@@ -246,4 +262,52 @@ export async function getEffectiveSettings(
 export function invalidateSettingsCache(): void {
   cached = undefined;
   inflight = undefined;
+}
+
+// -----------------------------------------------------------------------------
+// АВТОРИТЕТНЫЙ рантайм-гейт модулей: env-набор ⊕ module_overrides из БД.
+// -----------------------------------------------------------------------------
+
+/**
+ * Возвращает ЭФФЕКТИВНЫЙ набор включённых модулей (env ⊕ БД-оверрайд) как Set.
+ *
+ * Это авторитетный гейт для рантайма: в отличие от синхронного isModuleEnabled
+ * (читает только process.env), он учитывает module_overrides из shop_settings —
+ * именно то, что пишет updateModuleOverrides из UI. Использует тот же memo-кэш
+ * getEffectiveSettings (read-your-own-writes уже работает через invalidateCache).
+ *
+ * Контракт обратной совместимости: при ОТСУТСТВИИ оверрайда (пустой module_overrides)
+ * результат совпадает с env-набором (getEnabledModules). Если чтение БД невозможно
+ * (DATABASE_URL не задан / БД недоступна — сборка, ранний старт, тесты без БД), гейт
+ * НЕ роняет вызывающего, а мягко откатывается на чистый env-набор — поведение тогда
+ * идентично прежнему синхронному isModuleEnabled.
+ *
+ * @param deps - инъекция readRows/env для тестов без БД (как у getEffectiveSettings).
+ */
+export async function getEffectiveModuleSet(
+  deps: EffectiveSettingsDeps = {},
+): Promise<Set<ModuleName>> {
+  const env = deps.env ?? getEnv();
+  // getEffectiveModules читает только ADMIK_MODULES — отдаём строковую проекцию
+  // (типизированный Env с boolean/number полями не присваивается Record<string,string>).
+  const envProjection: Record<string, string | undefined> = { ADMIK_MODULES: env.ADMIK_MODULES };
+  try {
+    const eff = await getEffectiveSettings(deps);
+    return new Set(getEffectiveModules(envProjection, eff.modules.overrides));
+  } catch {
+    // БД недоступна/не сконфигурирована → авторитетен только env (как раньше).
+    return new Set(getEffectiveModules(envProjection, {}));
+  }
+}
+
+/**
+ * Включён ли модуль с учётом БД-оверрайда (авторитетная рантайм-проверка).
+ * Async-аналог isModuleEnabled: без оверрайда поведение совпадает с env.
+ */
+export async function isModuleEffectivelyEnabled(
+  name: ModuleName,
+  deps: EffectiveSettingsDeps = {},
+): Promise<boolean> {
+  const set = await getEffectiveModuleSet(deps);
+  return set.has(name);
 }

@@ -11,6 +11,7 @@ import type { EffectiveSettings } from '@/lib/config/settings';
 
 function makeEffective(): EffectiveSettings {
   return {
+    modules: { overrides: {} },
     branding: {
       shopName: 'Gang Auto',
       logoUrl: 'https://cdn/logo.png',

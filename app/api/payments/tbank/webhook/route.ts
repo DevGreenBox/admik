@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 
 import { getTbankConfig } from '@/lib/payments/tbank/config';
 import { PaymentService } from '@/lib/payments/tbank/service';
-import { isModuleEnabled } from '@/lib/config/modules';
+import { isModuleEffectivelyEnabled } from '@/lib/config/settings';
 import { logger } from '@/lib/logger';
 
 /** Структурный логгер webhook Т-Банк (docs/15 §7, порт cdek.webhook). */
@@ -98,15 +98,15 @@ function ipInCidr(ip: string, cidr: string): boolean {
 }
 
 /** GET — проверка доступности эндпоинта (верификация/health). */
-export function GET(): NextResponse {
-  if (!isModuleEnabled('payments')) {
+export async function GET(): Promise<NextResponse> {
+  if (!(await isModuleEffectivelyEnabled('payments'))) {
     return NextResponse.json({ ok: false, error: 'not_found' }, { status: 404 });
   }
   return NextResponse.json({ ok: true, service: 'tbank-webhook' });
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  if (!isModuleEnabled('payments')) {
+  if (!(await isModuleEffectivelyEnabled('payments'))) {
     return NextResponse.json({ ok: false, error: 'not_found' }, { status: 404 });
   }
 

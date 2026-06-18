@@ -111,8 +111,10 @@ vi.mock('@/lib/audit/log', () => ({
   writeAudit: (...args: unknown[]) => H.writeAuditSpy(...(args as [])),
 }));
 
-vi.mock('@/lib/config/modules', () => ({
-  isModuleEnabled: () => true,
+// Гейт модуля теперь авторитетный (env ⊕ БД) и живёт в @/lib/config/settings.
+// Мокаем его как «модуль включён», чтобы тестировать бизнес-логику без БД.
+vi.mock('@/lib/config/settings', () => ({
+  isModuleEffectivelyEnabled: async () => true,
 }));
 
 // next/headers недоступен в node-окружении vitest — мокаем getRequestMeta косвенно
