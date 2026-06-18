@@ -30,13 +30,13 @@ async function bodyText(res: Response): Promise<string> {
 describe('app/robots — NODE_ENV=test (non-prod)', () => {
   it('NODE_ENV=test → Disallow / (закрыт)', async () => {
     // vitest выставляет NODE_ENV=test по умолчанию.
-    const { GET } = await import('@/app/robots');
+    const { GET } = await import('@/app/robots.txt/route');
     const text = await bodyText(await GET());
     expect(text).toContain('Disallow: /');
   });
 
   it('домен Sitemap берётся из shop_settings.seo.site_url', async () => {
-    const { GET } = await import('@/app/robots');
+    const { GET } = await import('@/app/robots.txt/route');
     const text = await bodyText(await GET());
     expect(text).toContain('Sitemap: https://shop.example/sitemap.xml');
   });
@@ -46,7 +46,7 @@ describe('app/robots — fallback', () => {
   it('ошибка настроек → закрытый сайт (Disallow /)', async () => {
     mocks.effective.mockRejectedValue(new Error('no settings'));
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const { GET } = await import('@/app/robots');
+    const { GET } = await import('@/app/robots.txt/route');
     const text = await bodyText(await GET());
     expect(text).toContain('Disallow: /');
     errSpy.mockRestore();
@@ -68,7 +68,7 @@ describe('app/robots — GET plain-text (баг #5: robots_extra)', () => {
         robots_extra: 'Crawl-delay: 10\nDisallow: /search',
       },
     });
-    const { GET } = await import('@/app/robots');
+    const { GET } = await import('@/app/robots.txt/route');
     const res = await GET();
     const text = await bodyText(res);
     // robots_extra строки присутствуют дословно
@@ -87,7 +87,7 @@ describe('app/robots — GET plain-text (баг #5: robots_extra)', () => {
     mocks.effective.mockResolvedValue({
       seo: { site_url: 'https://shop.example', noindex_site: false, robots_extra: null },
     });
-    const { GET } = await import('@/app/robots');
+    const { GET } = await import('@/app/robots.txt/route');
     const text = await bodyText(await GET());
     expect(text).toContain('Allow: /');
     expect(text).toContain('Allow: /api/storefront');
@@ -100,7 +100,7 @@ describe('app/robots — GET plain-text (баг #5: robots_extra)', () => {
     mocks.effective.mockResolvedValue({
       seo: { site_url: 'https://shop.example', noindex_site: true, robots_extra: null },
     });
-    const { GET } = await import('@/app/robots');
+    const { GET } = await import('@/app/robots.txt/route');
     const text = await bodyText(await GET());
     expect(text).toContain('User-agent: *');
     expect(text).toContain('Disallow: /');
@@ -111,7 +111,7 @@ describe('app/robots — GET plain-text (баг #5: robots_extra)', () => {
   it('ошибка настроек → закрытый сайт в теле GET (Disallow /)', async () => {
     mocks.effective.mockRejectedValue(new Error('no settings'));
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const { GET } = await import('@/app/robots');
+    const { GET } = await import('@/app/robots.txt/route');
     const text = await bodyText(await GET());
     expect(text).toContain('User-agent: *');
     expect(text).toContain('Disallow: /');
