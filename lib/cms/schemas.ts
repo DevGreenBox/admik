@@ -231,16 +231,27 @@ const pageSeoFields = {
   sitemapChangefreq: sitemapChangefreqSchema,
 };
 
-/** Статус страницы — триада из CHECK БД. */
+/** Статус страницы — триада из CHECK БД (для фильтра списка). */
 export const cmsPageStatusSchema = z.enum(
   CMS_PAGE_STATUSES as unknown as [string, ...string[]],
 );
+
+/**
+ * Редактируемый статус для create/update — ТОЛЬКО 'draft'/'archived' (баг B
+ * волны 5). Публикация ('published') нарушает инвариант миграций 0022/0023, если
+ * выполняется через обычный UPDATE: published_at остаётся NULL и не пишется снимок
+ * в cms_page_revisions. Корректную публикацию делает ТОЛЬКО publishCmsPage
+ * (транзакция status + published_at=COALESCE(...,now()) + ревизия). Снятие с
+ * публикации / архивирование через 'draft'/'archived' безопасно — published_at
+ * остаётся как историческая метка.
+ */
+export const cmsPageEditableStatusSchema = z.enum(['draft', 'archived']);
 
 /** Создание страницы: title обязателен, slug опционален (→ slugify(title)). */
 export const CmsPageCreateSchema = z.object({
   title: shortTextSchema,
   slug: slugSchema.optional(),
-  status: cmsPageStatusSchema.optional(),
+  status: cmsPageEditableStatusSchema.optional(),
   ...pageSeoFields,
 });
 
@@ -249,7 +260,7 @@ export const CmsPageUpdateSchema = z.object({
   id: uuidSchema,
   title: shortTextSchema.optional(),
   slug: slugSchema.optional(),
-  status: cmsPageStatusSchema.optional(),
+  status: cmsPageEditableStatusSchema.optional(),
   ...pageSeoFields,
 });
 

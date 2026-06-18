@@ -286,6 +286,13 @@ canonical/sitemap/og:url. **Никаких `process.env`-доменов в пр�
   default_og_image_key), noindex, jsonLd (Product/BreadcrumbList/Organization — опц. MVP) }`. Мапперы
   чистые: `seoCtx` (домен/шаблон) передаётся **параметром**, не читается внутри. Наружу — `ogImageUrl`,
   **никогда** `og_image_key`.
+  - **Безопасность подстановки в `title_template` (фикс волны 5):** контент-контролируемый текст
+    (`seoTitle`/`name`) подставляется в `String.prototype.replace` через **функцию-замену**
+    (`template.replace('%s', () => base)`), а НЕ строкой. Строковый аргумент раскрывает доллар-
+    последовательности (`$$`→`$`, `$&`→весь матч, `` $` ``/`$'`/`$n`) как спец-паттерны замены и портит
+    публичный SEO/OG title. Function-replacer подставляет текст буквально. Остальные поля meta
+    (canonical/ogImageUrl/description) собираются конкатенацией/`??`-fallback — `replace` с контентом там
+    не используется.
 - **`GET /sitemap.xml`** — `app/sitemap.ts` (`MetadataRoute.Sitemap`). Базовые URL (`site_url`) + при
   `isModuleEnabled('catalog')`: active products/categories/brands; при `isModuleEnabled('cms')`:
   published cms_pages. Исключает `noindex`. `revalidate=3600`. Fallback при недоступности БД — только
@@ -420,6 +427,15 @@ UNIQUE(page_id, revision). Закрывает gap «версионировани
 - `createCmsPage` — `slug` опц. → `slugify(title)`; `insertWithUniqueSlug` (ретрай на 23505, паттерн
   `catalog/actions.ts`); audit `cms.page.create`; revalidate `['/admin/cms','/admin/cms/'+id]`.
 - `updateCmsPage` — partial поля + SEO; `updated_by`/`updated_at`; audit `cms.page.update` (before/after).
+- **Публикация — ТОЛЬКО через `publishCmsPage` (фикс волны 5, вариант Б).** `CmsPageCreateSchema`/
+  `CmsPageUpdateSchema` принимают `status` лишь из `cmsPageEditableStatusSchema = enum(['draft',
+  'archived'])`; `'published'` отвергается схемой. Иначе `create`/`update` делали страницу публичной
+  обычным UPDATE — с `published_at=NULL` и БЕЗ ревизии (нарушение инварианта 0022/0023; `ORDER BY
+  published_at DESC NULLS LAST` ставил бы её в конец навигации). `cmsPageStatusSchema` (полная триада)
+  сохранена для `CmsPageListFilterSchema`. В `PageForm.tsx` убран `<option value="published">` (для уже
+  опубликованной страницы — `disabled`-вариант, чтобы select не сбрасывался); `save()` не отправляет
+  `status='published'` (публикация/снятие — выделенными кнопками). Архивирование/снятие через
+  `'archived'`/`'draft'` безопасно — `published_at` остаётся исторической меткой.
 - `deleteCmsPage` — DELETE (CASCADE снимает секции/ревизии); audit `cms.page.delete`; Storefront-инвалидация slug.
 - `publishCmsPage`/`unpublishCmsPage` — `status='published'`, `published_at = COALESCE(published_at,
   now())`; транзакционно (`sql.begin`, образец `createOrder`) пишет снимок в `cms_page_revisions`
@@ -538,6 +554,18 @@ UNIQUE(page_id, revision). Закрывает gap «версионировани
 
 GRANT `SELECT,INSERT,UPDATE,DELETE ON promo_targets TO admik_app`.
 
+> **Инвариант scope↔targets (волна 5, баг B).** Для `apply_scope ∈ {category,brand,set}` нужна ≥1
+> строка `promo_targets` (требует `refinePromo`, `lib/orders/schemas.ts`). Но FK таргетов на каталог —
+> `ON DELETE CASCADE`, поэтому жёсткое удаление товара/варианта/категории/бренда
+> (`deleteProduct`/`deleteVariant`/`deleteCategory`/`deleteBrand`) могло снести **последнюю** цель и
+> оставить scoped-промокод активным с пустым набором — `scopeDiscountMinor=0`, скидка молча не
+> применялась («мёртвая» акция). Миграция **`0029_promo_scope_deactivate_on_empty`** добавляет
+> `AFTER DELETE`-триггер на `promo_targets`: если у затронутого промокода `apply_scope ∈ {category,brand,set}`
+> и целей не осталось — в той же транзакции переводит его в `is_active=false` (промокод не удаляется —
+> история/аудит сохраняются). Функция `SECURITY DEFINER` + фиксированный `search_path=public` (UPDATE
+> срабатывает независимо от инициатора каскада). Миграция идемпотентна
+> (`CREATE OR REPLACE FUNCTION`; `DROP TRIGGER IF EXISTS` + `CREATE TRIGGER`) и аддитивна.
+
 **`promo_redemptions`** (БЕЗ изменений, `0015`): вся скидка акции по заказу — одна строка
 `discount_applied` (как сейчас для percent/fixed). **`order_items` БЕЗ изменений** — N×M-скидка идёт
 агрегатом в `order.discount_total`, позиции остаются по своей цене (anti-tamper снимок). Помарочная
@@ -564,7 +592,8 @@ GRANT `SELECT,INSERT,UPDATE,DELETE ON promo_targets TO admik_app`.
 - `createPromoCode`/`updatePromoCode` (`lib/orders/actions.ts`, тот же `defineAction(orders.write)`):
   внутри `sql.begin(tx)` — INSERT/UPDATE promo_codes + bulk INSERT (или DELETE+INSERT) promo_targets;
   audit `promo.create`/`promo.update` (before/after). `assertOrdersEnabled()`.
-- `deactivatePromoCode`/`deletePromoCode`/`getPromoCode` — без изменений (CASCADE снимает таргеты).
+- `deactivatePromoCode`/`deletePromoCode`/`getPromoCode` — без изменений (CASCADE снимает таргеты; для
+  scoped-акций утрата последней цели через каскад каталога гасит промокод триггером `0029`, см. выше).
 - Новый repository-хелпер `getPromoWithTargets(code, customerEmail?)` — расширяет `getPromoWithCounts`:
   догружает promo_targets + резолвит множества `productId`/`variantId` под акцию (категории через
   `product_categories`, бренды через `products.brand_id`). Возвращается в `quoteCart`/`createOrder`.
@@ -609,6 +638,11 @@ GRANT `SELECT,INSERT,UPDATE,DELETE ON promo_targets TO admik_app`.
   — `quoteCart` с bogo возвращает корректный `quote.promo.discount`; `createOrder` пишет реальный
   `discount_applied` (в рублях через `fromMinor`), increment `used_count` атомарно; идемпотентность;
   ре-валидация anti-tamper.
+- `tests/db/promo-scope-deactivate-migration.test.ts` (NEW, волна 5, баг B) — юнит: `0029` существует,
+  идемпотентна (`CREATE OR REPLACE FUNCTION` + `DROP TRIGGER IF EXISTS`/`CREATE TRIGGER`), триггер
+  `AFTER DELETE FOR EACH ROW ON promo_targets`, `SECURITY DEFINER` + `search_path=public`; интеграция
+  (`describe.skipIf(!DATABASE_URL)`) — каскадное удаление единственной цели scoped-промокода →
+  `is_active=false`; при нескольких целях удаление одной не гасит; `apply_scope='cart'` триггер не трогает.
 
 > **Граница «с БД / без БД» для 5.2 (DoD §1.4).** Unit-слой — чистый и **обязан быть зелёным без БД**:
 > `pricing-bogo`, `pricing-scope`, `promo-combine`, `schemas`/`promo` (refine) не касаются sql. Только

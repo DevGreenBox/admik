@@ -71,10 +71,16 @@ function trimmed(v: string | null | undefined): string | null {
  * Прогоняет базовый заголовок через title_template. Голый '%s' (без суффикса) ⇒
  * возвращает заголовок как есть. Если в шаблоне нет '%s' — он используется как
  * есть (валидация шаблона — на уровне action, здесь билдер толерантен).
+ *
+ * ВАЖНО (баг A волны 5): `base` — контент-контролируемый текст (seoTitle/name).
+ * Передаём его ФУНКЦИЕЙ-заменой `() => base`, а не строкой: строковый аргумент
+ * String.prototype.replace раскрывает доллар-последовательности ($$, $&, $`, $',
+ * $n) как спец-паттерны и портит публичный SEO/OG title. Function-replacer
+ * подставляет текст буквально, без раскрытия $-паттернов.
  */
 function applyTitleTemplate(base: string, template: string): string {
   if (!template.includes('%s')) return base;
-  return template.replace('%s', base);
+  return template.replace('%s', () => base);
 }
 
 /** Собирает canonical: явный (абсолютный как есть / path → достраивается) или автоген. */

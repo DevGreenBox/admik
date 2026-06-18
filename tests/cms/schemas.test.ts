@@ -275,9 +275,14 @@ describe('cms/schemas — секция/страница', () => {
     expect(bad.success).toBe(false);
   });
 
-  it('CmsPageCreateSchema: статус только из триады', () => {
+  it("CmsPageCreateSchema: статус только 'draft'/'archived' (публикация — через publishCmsPage)", () => {
     const ok = CmsPageCreateSchema.safeParse({ title: 'X', status: 'draft' });
     expect(ok.success).toBe(true);
+    const archived = CmsPageCreateSchema.safeParse({ title: 'X', status: 'archived' });
+    expect(archived.success).toBe(true);
+    // 'published' через create/update запрещён (баг B волны 5).
+    const published = CmsPageCreateSchema.safeParse({ title: 'X', status: 'published' });
+    expect(published.success).toBe(false);
     const bad = CmsPageCreateSchema.safeParse({ title: 'X', status: 'live' });
     expect(bad.success).toBe(false);
   });

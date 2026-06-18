@@ -44,6 +44,52 @@ describe('seo/meta — buildSeoMeta (title через title_template)', () => {
     );
     expect(meta.title).toBe('T');
   });
+
+  // --- Защита от $-паттернов замены (баг A волны 5). ---------------------------
+  // Контент-контролируемый текст (seoTitle/name) идёт АРГУМЕНТОМ-заменой в
+  // String.prototype.replace. Со строковым аргументом доллар-последовательности
+  // ($$, $&, $`, $') трактуются как спец-паттерны и портят публичный title.
+  // Function-replacer (() => base) не подвержен раскрытию $-паттернов: текст
+  // подставляется буквально.
+  it("seoTitle с '$$' → в title остаётся '$$' буквально (а не '$')", () => {
+    const meta = buildSeoMeta(
+      { slug: 'p1', name: 'X', seoTitle: 'Цена $$ за товар' },
+      makeCtx(),
+    );
+    expect(meta.title).toBe('Цена $$ за товар — Магазин');
+  });
+
+  it("seoTitle с '$&' → буквально '$&' (а не подстановка всего матча '%s')", () => {
+    const meta = buildSeoMeta(
+      { slug: 'p1', name: 'X', seoTitle: 'A $& B' },
+      makeCtx(),
+    );
+    expect(meta.title).toBe('A $& B — Магазин');
+  });
+
+  it("seoTitle с '$`' и \"$'\" → буквально (а не префикс/суффикс матча)", () => {
+    const meta = buildSeoMeta(
+      { slug: 'p1', name: 'X', seoTitle: "пред $` пост $' край" },
+      makeCtx(),
+    );
+    expect(meta.title).toBe("пред $` пост $' край — Магазин");
+  });
+
+  it("fallback name с '$&' тоже не раскрывается (контент-контролируемый name)", () => {
+    const meta = buildSeoMeta(
+      { slug: 'p1', name: 'Товар $& скидка', seoTitle: null },
+      makeCtx(),
+    );
+    expect(meta.title).toBe('Товар $& скидка — Магазин');
+  });
+
+  it("'$1' (нумерованная группа) остаётся буквально", () => {
+    const meta = buildSeoMeta(
+      { slug: 'p1', name: 'X', seoTitle: 'Артикул $1' },
+      makeCtx(),
+    );
+    expect(meta.title).toBe('Артикул $1 — Магазин');
+  });
 });
 
 describe('seo/meta — canonical', () => {

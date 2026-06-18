@@ -97,10 +97,14 @@ export function PageForm({ page }: { page: CmsPageWithSections | null }) {
     setPending(true);
     setError(null);
     setSuccess(null);
+    // 'published' через create/update запрещён схемой (баг B волны 5): публикация
+    // идёт только через кнопку «Опубликовать» (publishCmsPage). При сохранении уже
+    // опубликованной страницы статус не трогаем (undefined → COALESCE сохраняет
+    // 'published' и published_at в БД); отправляем лишь редактируемый 'draft'/'archived'.
     const base = {
       title: title.trim(),
       slug: slug.trim() || undefined,
-      status,
+      status: status === 'published' ? undefined : status,
       ...pageSeoPayload(),
     };
     const result = isEdit
@@ -216,7 +220,15 @@ export function PageForm({ page }: { page: CmsPageWithSections | null }) {
             className={inputCls}
           >
             <option value="draft">Черновик</option>
-            <option value="published">Опубликована</option>
+            {/* «Опубликована» НЕ выбирается вручную (баг B волны 5): публикация —
+                только через кнопку «Опубликовать» (publishCmsPage: published_at +
+                ревизия). Если страница уже опубликована — показываем статус как
+                disabled-вариант, чтобы select не сбрасывался на «Черновик». */}
+            {status === 'published' ? (
+              <option value="published" disabled>
+                Опубликована
+              </option>
+            ) : null}
             <option value="archived">В архиве</option>
           </select>
         </div>
