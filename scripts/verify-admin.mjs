@@ -574,15 +574,25 @@ async function runE2E(browser, adminPage) {
       if (hasTotals) PASS('e2e чекаут: серверный итог показан (товары/доставка/итого)');
       else FAIL('e2e чекаут итог', 'нет блока сумм на шаге оплаты');
       await sp.getByRole('button', { name: /Подтвердить заказ/ }).first().click();
-      await sp.waitForURL(/\/account/, { timeout: 20000 });
-      const acc = (await sp.locator('body').innerText().catch(() => '')) || '';
-      const m = acc.match(/№?\s*([A-Z0-9-]{4,})/);
+      // Онлайн-оплата (волна 9): заказ создан → redirect на demo-страницу оплаты
+      // (домен Admik), там «Оплатить (демо)» → возврат в ЛК витрины с ?paid=1.
+      await sp.waitForURL(/\/mock\/tbank\/pay/, { timeout: 25000 });
+      const payUrl = new URL(sp.url());
+      orderNumber = payUrl.searchParams.get('orderId');
+      PASS('e2e оплата: redirect на платёжную страницу', `№${orderNumber}`);
+      await sp.getByRole('button', { name: /Оплатить/ }).first().click();
+      await sp.waitForURL(/\/account/, { timeout: 25000 });
       const url = new URL(sp.url());
-      orderNumber = url.searchParams.get('order');
-      if (orderNumber) PASS('e2e чекаут: заказ оформлен', `№${orderNumber}`);
-      else FAIL('e2e чекаут оформление', `редирект на ${sp.url()}, тело: ${acc.slice(0, 100)}`);
+      const paid = url.searchParams.get('paid');
+      if (orderNumber && paid === '1') PASS('e2e оплата: вернулись в ЛК как оплаченный', `№${orderNumber} paid=1`);
+      else FAIL('e2e оплата возврат', `url=${sp.url()} order=${orderNumber} paid=${paid}`);
+      // Карточка заказа в ЛК должна показать статус оплаты «Оплачен».
+      await sp.waitForTimeout(1500);
+      const accTxt = (await sp.locator('body').innerText().catch(() => '')) || '';
+      if (/Оплачен/i.test(accTxt)) PASS('e2e ЛК: статус оплаты «Оплачен»');
+      else INFO('e2e ЛК статус', 'карточка без явного «Оплачен» (могла не успеть подгрузиться)');
     } catch (e) {
-      FAIL('e2e чекаут', e.message);
+      FAIL('e2e чекаут/оплата', e.message);
     }
 
     // 8. Заказ виден в админке
