@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { Heart, Minus, Plus } from "lucide-react";
 import { formatPrice } from "@/lib/format";
+import { productCtaLabel } from "@/lib/product-cta";
 import { useStore } from "@/lib/store";
 import type { StorefrontProduct, StorefrontVariant } from "@/lib/admik";
 import { Button } from "@/components/ui/Button";
@@ -45,6 +46,14 @@ export function ProductDetailClient({ product, related }: ProductDetailClientPro
   // Товар БЕЗ вариантов (один SKU): покупаем по productId, если есть остаток.
   const canBuySimple = !hasVariants && product.inStock && Boolean(product.id);
   const canBuy = hasVariants ? Boolean(selectedVariant) : canBuySimple;
+  // Единая подпись кнопки покупки — общая для основной и плавающей кнопки.
+  const ctaLabel = productCtaLabel({
+    added,
+    hasVariants,
+    canBuySimple,
+    hasAvailableVariants,
+    hasSelectedVariant: Boolean(selectedVariant),
+  });
 
   const handleAddToCart = () => {
     if (!canBuy) return;
@@ -159,15 +168,7 @@ export function ProductDetailClient({ product, related }: ProductDetailClientPro
                   onClick={handleAddToCart}
                   className="flex-1"
                 >
-                  {added
-                    ? "Добавлено"
-                    : !hasVariants && !canBuySimple
-                      ? "Нет в наличии"
-                      : hasVariants && !hasAvailableVariants
-                        ? "Нет в наличии"
-                        : hasVariants && !selectedVariant
-                          ? "Выберите размер"
-                          : "В корзину"}
+                  {ctaLabel}
                 </Button>
                 <button
                   onClick={() => toggleWishlist(product.slug)}
@@ -219,6 +220,7 @@ export function ProductDetailClient({ product, related }: ProductDetailClientPro
         name={product.name}
         price={product.price}
         selectedSize={selectedSize}
+        ctaLabel={ctaLabel}
         onAddToCart={handleAddToCart}
         disabled={!canBuy}
       />

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { Minus, Plus, Trash2, ShoppingBag } from "lucide-react";
-import { useStore, selectCartTotal } from "@/lib/store";
+import { useStore, useHydrated, selectCartTotal } from "@/lib/store";
 import { formatPrice } from "@/lib/format";
 import { Button } from "@/components/ui/Button";
 import { FadeIn } from "@/components/ui/Animations";
@@ -13,6 +13,13 @@ export default function CartPage() {
   const updateQuantity = useStore((s) => s.updateQuantity);
   const removeFromCart = useStore((s) => s.removeFromCart);
   const total = useStore(selectCartTotal);
+  const hydrated = useHydrated();
+
+  // До завершения регидрации не показываем «Корзина пуста» (иначе мерцает пустотой
+  // при наличии сохранённой корзины).
+  if (!hydrated) {
+    return <div className="page-transition pt-16 md:pt-20 min-h-[60vh]" />;
+  }
 
   if (cart.length === 0) {
     return (

@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { CartItem, User, Order } from "@/types";
@@ -102,6 +103,26 @@ export const useStore = create<StoreState>()(
     }
   )
 );
+
+/**
+ * True после завершения регидрации persist-хранилища (store создан со
+ * skipHydration:true, регидрация запускается в Providers). Гейтит редиректы и
+ * пустые состояния, чтобы они не срабатывали ДО восстановления корзины из
+ * localStorage: иначе refresh/прямой заход на /checkout выкидывал на /cart, а
+ * /cart и /wishlist мерцали «пусто» при наличии сохранённых данных.
+ */
+export function useHydrated(): boolean {
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => {
+    if (useStore.persist.hasHydrated()) {
+      setHydrated(true);
+      return;
+    }
+    const unsub = useStore.persist.onFinishHydration(() => setHydrated(true));
+    return unsub;
+  }, []);
+  return hydrated;
+}
 
 export function selectCartCount(state: StoreState) {
   return state.cart.reduce((sum, item) => sum + item.quantity, 0);

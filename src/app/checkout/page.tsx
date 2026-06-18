@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { useStore } from "@/lib/store";
+import { useStore, useHydrated } from "@/lib/store";
 import { formatPrice } from "@/lib/format";
 import { PAYMENT_METHODS } from "@/lib/payment";
 import {
@@ -30,6 +30,7 @@ import { FadeIn } from "@/components/ui/Animations";
 export default function CheckoutPage() {
   const router = useRouter();
   const { cart, clearCart, addOrder } = useStore();
+  const hydrated = useHydrated();
 
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -59,9 +60,11 @@ export default function CheckoutPage() {
         : `idem-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   }
 
+  // Редирект на /cart ТОЛЬКО после регидрации хранилища: иначе на жёсткой загрузке
+  // /checkout корзина ещё пуста (skipHydration) и покупателя ошибочно выкидывало.
   useEffect(() => {
-    if (cart.length === 0) router.push("/cart");
-  }, [cart, router]);
+    if (hydrated && cart.length === 0) router.push("/cart");
+  }, [hydrated, cart, router]);
 
   // Автокомплит города: debounce 300мс → cdekCities.
   useEffect(() => {
@@ -79,7 +82,12 @@ export default function CheckoutPage() {
     return () => clearTimeout(t);
   }, [cityQuery, selectedCity]);
 
+  // Токен последовательности: при быстром переключении городов применяем только
+  // результаты ПОСЛЕДНЕГО выбора (иначе ответ по предыдущему городу мог перезаписать
+  // ПВЗ/стоимость уже выбранного — рассинхрон city↔pvzCode).
+  const citySeqRef = useRef(0);
   const handleCitySelect = async (city: AdmikCdekCityDto) => {
+    const seq = ++citySeqRef.current;
     setSelectedCity(city);
     setCityQuery(city.name);
     setCities([]);
@@ -97,14 +105,16 @@ export default function CheckoutPage() {
           items: cartToItems(cart),
         }),
       ]);
+      if (seq !== citySeqRef.current) return; // выбран другой город — игнорируем устаревший ответ
       setPickupPoints(points);
       setDeliveryCost(calc.cost);
       setDeliveryEta(formatEta(calc.periodMin, calc.periodMax));
     } catch (e) {
+      if (seq !== citySeqRef.current) return;
       setPickupPoints([]);
       setError(e instanceof AdmikApiError ? e.message : "Не удалось рассчитать доставку");
     } finally {
-      setLoading(false);
+      if (seq === citySeqRef.current) setLoading(false);
     }
   };
 
@@ -161,6 +171,8 @@ export default function CheckoutPage() {
     }
   };
 
+  // До завершения регидрации не рендерим/не редиректим (корзина ещё не восстановлена).
+  if (!hydrated) return null;
   if (cart.length === 0) return null;
 
   const fulfillable = quote?.fulfillable ?? false;

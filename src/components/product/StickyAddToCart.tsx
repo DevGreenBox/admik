@@ -9,6 +9,8 @@ interface StickyAddToCartProps {
   name: string;
   price: number;
   selectedSize: string | null;
+  /** Готовая подпись кнопки (та же логика, что у основной кнопки карточки). */
+  ctaLabel: string;
   onAddToCart: () => void;
   disabled: boolean;
 }
@@ -17,6 +19,7 @@ export function StickyAddToCart({
   name,
   price,
   selectedSize,
+  ctaLabel,
   onAddToCart,
   disabled,
 }: StickyAddToCartProps) {
@@ -60,7 +63,7 @@ export function StickyAddToCart({
               onClick={onAddToCart}
               className="w-full sm:w-auto sm:min-w-[200px]"
             >
-              {selectedSize ? "В корзину" : "Выберите размер"}
+              {ctaLabel}
             </Button>
           </div>
         </motion.div>

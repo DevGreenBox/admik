@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Heart } from "lucide-react";
-import { useStore } from "@/lib/store";
+import { useStore, useHydrated } from "@/lib/store";
 import { getProduct, fromDetail, type StorefrontProduct } from "@/lib/admik";
 import { Button } from "@/components/ui/Button";
 import { FadeIn } from "@/components/ui/Animations";
@@ -13,6 +13,7 @@ import { formatPrice } from "@/lib/format";
 export default function WishlistPage() {
   const wishlist = useStore((s) => s.wishlist);
   const toggleWishlist = useStore((s) => s.toggleWishlist);
+  const hydrated = useHydrated();
   const [products, setProducts] = useState<StorefrontProduct[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -37,6 +38,11 @@ export default function WishlistPage() {
       cancelled = true;
     };
   }, [wishlist]);
+
+  // До регидрации (восстановления избранного) не показываем «Избранное пусто».
+  if (!hydrated) {
+    return <div className="page-transition pt-16 md:pt-20 min-h-[60vh]" />;
+  }
 
   if (!loading && products.length === 0) {
     return (

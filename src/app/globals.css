@@ -238,14 +238,19 @@
   html { scroll-behavior: auto; }
 }
 
+/*
+ * Только opacity, без translate: иначе .page-transition (animation-fill-mode:
+ * forwards) сохраняет transform: translateY(0) после анимации, а ненулевой
+ * transform создаёт containing block для position:fixed → fixed-оверлеи карточки
+ * товара (лайтбокс галереи, sticky-кнопка, таблица размеров) ловились внутрь
+ * страницы и «опускались вниз» вместо центрирования по вьюпорту.
+ */
 @keyframes fadeIn {
   from {
     opacity: 0;
-    transform: translateY(8px);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
   }
 }
 
