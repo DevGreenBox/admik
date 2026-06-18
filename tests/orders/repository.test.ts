@@ -128,7 +128,7 @@ describe.skipIf(!INTEGRATION_DB_URL)('orders/repository (интеграция, �
     for (const id of created.orderIds) {
       await sql`DELETE FROM orders WHERE id = ${id}`;
     }
-    await sql`DELETE FROM orders WHERE customer_email IN ('buyer@example.com','race@example.com','limit@example.com','percust@example.com','percustrace@example.com','gift@example.com')`;
+    await sql`DELETE FROM orders WHERE customer_email IN ('buyer@example.com','race@example.com','limit@example.com','percust@example.com','percustrace@example.com','gift@example.com','scopemin@example.com')`;
     for (const id of created.promoIds) {
       await sql`DELETE FROM promo_codes WHERE id = ${id}`;
     }
@@ -253,6 +253,88 @@ describe.skipIf(!INTEGRATION_DB_URL)('orders/repository (интеграция, �
       SELECT used_count FROM promo_codes WHERE id = ${promoId}
     `;
     expect(Number(pc!.used_count)).toBe(1);
+  });
+
+  // БАГ A волны 7: scoped percent-промокод minQty=3, в scope 2 единицы (+5 вне
+  // scope). Раньше validatePromo брал кол-во ВСЕЙ корзины (7 ≥ 3) → valid, но
+  // pricing считал minQty по SCOPED-кол-ву (2 < 3) → discount=0, при этом
+  // used_count бампался и писался redemption с '0.00'. Теперь minQty сверяется со
+  // scoped-кол-вом → valid=false, заказ отказывает, лимит НЕ потребляется.
+  it('createOrder: scoped minQty не достигнут по scope → invalid_promo, used_count и redemption НЕ пишутся (баг A)', async () => {
+    const categoryId = await makeCategory();
+    const inCat = await makeProduct({ basePrice: '1000.00', quantity: 10 });
+    const outCat = await makeProduct({ basePrice: '1000.00', quantity: 10 });
+    await linkProductCategory(inCat, categoryId);
+    const promoId = await makePromo({
+      code: 'SCOPEMIN3',
+      kind: 'percent',
+      value: '10',
+      applyScope: 'category',
+      minQty: 3,
+    });
+    await addCategoryTarget(promoId, categoryId);
+
+    // 2 единицы в scope + 5 вне scope: корзина = 7, scope = 2 < minQty=3.
+    const r = await repo.createOrder({
+      items: [
+        { productId: inCat, qty: 2 },
+        { productId: outCat, qty: 5 },
+      ],
+      customer: customer('scopemin@example.com'),
+      delivery: { type: 'courier' },
+      paymentMethod: 'cod',
+      promoCode: 'SCOPEMIN3',
+    });
+    expect(r.ok).toBe(false);
+    if (r.ok) {
+      created.orderIds.push(r.order.id);
+      return;
+    }
+    expect(r.code).toBe('invalid_promo');
+
+    // Лимит НЕ потреблён: used_count остался 0, redemption не вставлен.
+    const [pc] = await sql<{ used_count: number }[]>`
+      SELECT used_count FROM promo_codes WHERE id = ${promoId}
+    `;
+    expect(Number(pc!.used_count)).toBe(0);
+    const reds = await sql<{ n: string }[]>`
+      SELECT count(*)::text AS n FROM promo_redemptions WHERE promo_code_id = ${promoId}
+    `;
+    expect(Number(reds[0]!.n)).toBe(0);
+  });
+
+  // Регресс: scope=cart minQty считается по totalQty (всей корзине) — поведение
+  // не изменилось. Корзина 3 ед. ⇒ minQty=3 достигнут ⇒ скидка применяется.
+  it('createOrder: cart-scope minQty по totalQty работает как раньше (баг A — регресс)', async () => {
+    const productId = await makeProduct({ basePrice: '1000.00', quantity: 10 });
+    const promoId = await makePromo({
+      code: 'CARTMIN3',
+      kind: 'percent',
+      value: '10',
+      applyScope: 'cart',
+      minQty: 3,
+    });
+    const r = await repo.createOrder({
+      items: [{ productId, qty: 3 }],
+      customer: customer('scopemin@example.com'),
+      delivery: { type: 'courier' },
+      paymentMethod: 'cod',
+      promoCode: 'CARTMIN3',
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    created.orderIds.push(r.order.id);
+
+    // 10% от 3000 = 300; лимит потреблён (реальный эффект).
+    expect(r.order.discountTotal).toBe('300.00');
+    const [pc] = await sql<{ used_count: number }[]>`
+      SELECT used_count FROM promo_codes WHERE id = ${promoId}
+    `;
+    expect(Number(pc!.used_count)).toBe(1);
+    const [red] = await sql<{ discount_applied: string }[]>`
+      SELECT discount_applied FROM promo_redemptions WHERE order_id = ${r.order.id}
+    `;
+    expect(red!.discount_applied).toBe('300.00');
   });
 
   it('anti-tamper: scope определяется сервером из каталога (товар вне категории не дисконтируется)', async () => {

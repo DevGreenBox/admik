@@ -604,6 +604,20 @@ GRANT `SELECT,INSERT,UPDATE,DELETE ON promo_targets TO admik_app`.
 > копейки в `numeric(14,2)`-поля напрямую. Чистый pricing-слой остаётся в копейках; конвертация — на
 > границе репозитория (`createOrder`).
 
+> **Инвариант `min_qty` по scope (волна 7, баг A).** `validatePromo` сверяет `min_qty` с кол-вом единиц
+> **В SCOPE** промокода, а не со всей корзиной. Репозиторий (`quoteCart`/`createOrder`) считает это число
+> единым хелпером `scopedQty(lines, applyScope, scopeTargets)` (та же разметка `lineInScope`, что и
+> фактический расчёт скидки `promoScopeDiscountMinor`). Раньше валидация брала Σqty всей корзины, а скидка —
+> только scoped-кол-во, из-за чего scoped-промокод (`apply_scope ∈ {category,brand,set}`) проходил
+> валидацию, но давал **нулевую скидку** и зря потреблял `used_count`/слот `per_customer_limit`. Для
+> `apply_scope='cart'` `scopedQty == Σqty` — поведение не изменилось.
+>
+> **Защита целостности лимита (волна 7, баг A, доп.).** `createOrder` инкрементирует `used_count` и пишет
+> `promo_redemptions` ТОЛЬКО при реальном эффекте промокода (`promoHadEffect = quote.promo.applied ||
+> giftLine != null` — денежная скидка / применённая бесплатная доставка / прикреплённый подарок).
+> Промокод с нулевым эффектом не «съедает» слот лимита. Сам код по-прежнему пишется в `orders.promo_code`
+> (факт ввода), но без потребления лимита.
+
 ### 5.2.2. Миграции
 
 - **`0024_promo_mechanics_nxm.sql`** — `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` для promo_codes +

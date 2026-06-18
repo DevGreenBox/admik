@@ -111,6 +111,27 @@ export function lineInScope(
 }
 
 /**
+ * Суммарное кол-во единиц в линиях scope (для сравнения с minQty). Переиспользует
+ * lineInScope (та же разметка scope, что в promoScopeDiscountMinor), чтобы
+ * валидация minQty (validatePromo) и фактический расчёт скидки опирались на ОДНО И
+ * ТО ЖЕ число (баг A волны 7: validatePromo раньше брал кол-во ВСЕЙ корзины, а
+ * скидка — только scoped, из-за чего scoped-промокод проходил валидацию, но давал
+ * нулевую скидку и зря потреблял лимит). Для scope='cart' это совпадает с Σqty.
+ */
+export function scopedQty(
+  lines: PricedLine[],
+  scope: PromoApplyScope,
+  targets: PromoScopeTargets,
+): number {
+  const scoped =
+    scope === 'cart' ? lines : lines.filter((l) => lineInScope(l, scope, targets));
+  return scoped.reduce(
+    (acc, l) => acc + (Number.isInteger(l.qty) && l.qty >= 1 ? l.qty : 0),
+    0,
+  );
+}
+
+/**
  * Скидка применённого промокода в копейках с учётом scope/N×M (docs/11 §5.2).
  * Компонует чистые bogoDiscountMinor/scopeDiscountMinor поверх ПОДМНОЖЕСТВА линий,
  * отфильтрованного по lineInScope (сервер размечает scope, anti-tamper). Для
@@ -132,11 +153,11 @@ export function promoScopeDiscountMinor(
 
   // minQty (по единицам scope) — если задан и не достигнут, скидки нет.
   if (promo.minQty != null) {
-    const scopedQty = scoped.reduce(
+    const scopedUnits = scoped.reduce(
       (acc, l) => acc + (Number.isInteger(l.qty) && l.qty >= 1 ? l.qty : 0),
       0,
     );
-    if (scopedQty < promo.minQty) return 0;
+    if (scopedUnits < promo.minQty) return 0;
   }
 
   let discount: number;

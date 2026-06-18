@@ -26,6 +26,7 @@ import {
   effectiveUnitPriceMinor,
   emptyScopeTargets,
   giftQuoteLine,
+  scopedQty,
   type AppliedPromo,
   type PricedLine,
   type PromoScopeTargets,
@@ -613,9 +614,8 @@ export async function quoteCart(
     lines.push(res.line);
   }
 
-  // Промокод (валидируем по itemsTotal + кол-ву единиц, копейки).
+  // Промокод (валидируем по itemsTotal + кол-ву единиц В SCOPE, копейки).
   const itemsMinor = lines.reduce((acc, l) => acc + toMinor(l.unitPrice) * l.qty, 0);
-  const itemsQty = lines.reduce((acc, l) => acc + l.qty, 0);
   let promoResult: PromoValidationResult | null = null;
   let appliedPromo: AppliedPromo | null = null;
   let scopeTargets: PromoScopeTargets = emptyScopeTargets();
@@ -629,9 +629,17 @@ export async function quoteCart(
         message: 'Промокод не найден.',
       };
     } else {
+      // minQty сверяем с кол-вом единиц В SCOPE промокода (та же разметка
+      // lineInScope, что и в фактическом расчёте скидки) — баг A волны 7. Для
+      // scope='cart' это равно itemsQty (всей корзине), поведение не меняется.
+      const qtyForMinQty = scopedQty(
+        lines,
+        found.promo.applyScope ?? 'cart',
+        found.scopeTargets,
+      );
       promoResult = validatePromo(found.promo, {
         itemsTotal: fromMinor(itemsMinor),
-        itemsQty,
+        itemsQty: qtyForMinQty,
         now: input.now,
         usedCount: found.promo.usedCount,
         customerRedemptions: found.customerRedemptions,
@@ -842,7 +850,6 @@ export async function createOrder(
 
   // Расчёт итога (промокод валидируем заново внутри по актуальным счётчикам).
   const itemsMinor = resolved.reduce((a, l) => a + toMinor(l.unitPrice) * l.qty, 0);
-  const itemsQty = resolved.reduce((a, l) => a + l.qty, 0);
   let appliedPromo: AppliedPromo | null = null;
   let promoRow: PromoCode | null = null;
   let scopeTargets: PromoScopeTargets = emptyScopeTargets();
@@ -851,9 +858,17 @@ export async function createOrder(
     if (!found) {
       return { ok: false, code: 'invalid_promo', message: 'Промокод не найден.' };
     }
+    // minQty сверяем с кол-вом единиц В SCOPE (та же разметка lineInScope, что и
+    // расчёт скидки) — баг A волны 7: иначе scoped-промокод проходил валидацию,
+    // но давал 0-скидку и зря потреблял used_count/слот лимита покупателя.
+    const qtyForMinQty = scopedQty(
+      resolved,
+      found.promo.applyScope ?? 'cart',
+      found.scopeTargets,
+    );
     const v = validatePromo(found.promo, {
       itemsTotal: fromMinor(itemsMinor),
-      itemsQty,
+      itemsQty: qtyForMinQty,
       now,
       usedCount: found.promo.usedCount,
       customerRedemptions: found.customerRedemptions,
@@ -902,6 +917,12 @@ export async function createOrder(
   // Резерв и вставка — в транзакции ниже (best-effort: нет остатка → без подарка).
   const giftLine: ResolvedLine | null = promoRow ? await resolveGiftLine(promoRow) : null;
 
+  // Слот лимита промокода (used_count + promo_redemptions) потребляется ТОЛЬКО при
+  // реальном применении (баг A волны 7, доп. защита целостности): есть денежная
+  // скидка / применена бесплатная доставка (quote.promo.applied) ЛИБО прикрепляется
+  // подарок. Промокод с нулевым эффектом (например 0-скидка) не «съедает» лимит.
+  const promoHadEffect = Boolean(promoRow) && (quote.promo.applied || giftLine != null);
+
   try {
     const order = await sql.begin(async (tx) => {
       // Повторная проверка идемпотентности внутри транзакции (гонка двух запросов).
@@ -931,7 +952,9 @@ export async function createOrder(
       //    promo_codes, поэтому конкурентные чекауты ТОГО ЖЕ промокода
       //    сериализуются здесь — второй ждёт коммита/отката первого. На этом и
       //    строится атомарная проверка per_customer_limit ниже (2b).
-      if (promoRow) {
+      //    Только при реальном эффекте промокода (promoHadEffect) — 0-эффект не
+      //    потребляет слот лимита (баг A волны 7, доп. защита целостности).
+      if (promoRow && promoHadEffect) {
         const inc = await tx<{ used_count: number }[]>`
           UPDATE promo_codes
              SET used_count = used_count + 1, updated_at = now()
@@ -1006,7 +1029,9 @@ export async function createOrder(
       }
 
       // 6) Учёт применения промокода (идемпотентность по UNIQUE(promo,order)).
-      if (promoRow) {
+      //    Только при реальном эффекте (promoHadEffect) — слот per-customer-лимита
+      //    не расходуется на промокод с нулевым эффектом (баг A волны 7).
+      if (promoRow && promoHadEffect) {
         await tx`
           INSERT INTO promo_redemptions (promo_code_id, order_id, customer_email, discount_applied)
           VALUES (${promoRow.id}, ${orderId}, ${input.customer.email}, ${quote.discount})

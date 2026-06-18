@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { scopeDiscountMinor, type PricedLine } from '@/lib/orders/pricing';
+import {
+  emptyScopeTargets,
+  scopeDiscountMinor,
+  scopedQty,
+  type PricedLine,
+  type PromoScopeTargets,
+} from '@/lib/orders/pricing';
 
 /**
  * Скидка percent/fixed по ПОДМНОЖЕСТВУ линий scope (docs/11 §5.2, Пакет 5.P-1).
@@ -17,6 +23,10 @@ function line(over: Partial<PricedLine> = {}): PricedLine {
     unitPrice: over.unitPrice ?? '100.00',
     compareAt: over.compareAt ?? null,
     qty: over.qty ?? 1,
+    productId: over.productId,
+    variantId: over.variantId,
+    categoryIds: over.categoryIds,
+    brandId: over.brandId,
   };
 }
 
@@ -49,6 +59,36 @@ describe('scopeDiscountMinor — percent по scope', () => {
     expect(
       scopeDiscountMinor(lines, { kind: 'percent', value: '10', minQty: 3 }),
     ).toBe(3000); // 10% от 300
+  });
+});
+
+describe('scopedQty — кол-во единиц в scope (баг A волны 7)', () => {
+  function targetsWithCategory(categoryId: string): PromoScopeTargets {
+    const t = emptyScopeTargets();
+    t.categoryIds.add(categoryId);
+    return t;
+  }
+
+  it('scope=cart → сумма qty ВСЕХ линий (как раньше)', () => {
+    const lines = [
+      line({ qty: 2, categoryIds: ['c1'] }),
+      line({ qty: 5 }),
+    ];
+    expect(scopedQty(lines, 'cart', emptyScopeTargets())).toBe(7);
+  });
+
+  it('scope=category → только qty линий в категории-таргете (а не всей корзины)', () => {
+    const lines = [
+      line({ qty: 2, categoryIds: ['c1'] }), // в scope
+      line({ qty: 5, categoryIds: ['c2'] }), // вне scope
+    ];
+    // Корзина 7 единиц, но в scope только 2 → minQty=3 НЕ достигнут (баг A).
+    expect(scopedQty(lines, 'category', targetsWithCategory('c1'))).toBe(2);
+  });
+
+  it('scope=category без совпадений → 0', () => {
+    const lines = [line({ qty: 3, categoryIds: ['c9'] })];
+    expect(scopedQty(lines, 'category', targetsWithCategory('c1'))).toBe(0);
   });
 });
 
