@@ -115,6 +115,40 @@ describe('check-migrations.sh — запрещённый деструктивн�
     );
     expect(runLint(f).code).not.toBe(0);
   });
+
+  // --- MAJOR (волна 5): DROP INDEX снимает инвариант уникальности/идемпотентности.
+  // В Admik уникальность держится на UNIQUE-индексах (orders_idempotency_uniq,
+  // orders_number_uniq, uq_tbank_payment_log_idem и т.д.), часть — partial (только
+  // индекс, не constraint), поэтому DROP INDEX не ловится правилом DROP CONSTRAINT. ---
+
+  it('DROP INDEX → fail', () => {
+    const f = fixture('bad_drop_index.sql', 'DROP INDEX orders_idempotency_uniq;\n');
+    expect(runLint(f).code).not.toBe(0);
+  });
+
+  it('DROP INDEX IF EXISTS → fail', () => {
+    const f = fixture(
+      'bad_drop_index_ine.sql',
+      'DROP INDEX IF EXISTS orders_number_uniq;\n',
+    );
+    expect(runLint(f).code).not.toBe(0);
+  });
+
+  it('DROP INDEX CONCURRENTLY → fail', () => {
+    const f = fixture(
+      'bad_drop_index_conc.sql',
+      'DROP INDEX CONCURRENTLY uq_tbank_payment_log_idem;\n',
+    );
+    expect(runLint(f).code).not.toBe(0);
+  });
+
+  it('многострочный DROP INDEX (DROP\\n INDEX) → fail', () => {
+    const f = fixture(
+      'bad_drop_index_multiline.sql',
+      'DROP\n  INDEX IF EXISTS customers_email_uniq;\n',
+    );
+    expect(runLint(f).code).not.toBe(0);
+  });
 });
 
 describe('check-migrations.sh — аддитивный DDL → exit 0', () => {
@@ -173,6 +207,16 @@ describe('check-migrations.sh — аддитивный DDL → exit 0', () => {
     const f = fixture(
       'ok_comment_multiline.sql',
       '-- сначала мы рассматривали DROP\n-- COLUMN email, но отказались\nCREATE INDEX IF NOT EXISTS i ON t (id);\n',
+    );
+    expect(runLint(f).code).toBe(0);
+  });
+
+  // КОНТРОЛЬ к правилу №10 (DROP INDEX): добавление индексов остаётся аддитивным —
+  // CREATE INDEX и CREATE UNIQUE INDEX правилом 'drop index' ловиться НЕ должны.
+  it('CREATE UNIQUE INDEX IF NOT EXISTS → ok (не путать с DROP INDEX)', () => {
+    const f = fixture(
+      'ok_create_unique_index.sql',
+      'CREATE UNIQUE INDEX IF NOT EXISTS t_email_uniq ON t (email);\n',
     );
     expect(runLint(f).code).toBe(0);
   });

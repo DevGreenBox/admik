@@ -279,12 +279,21 @@ healthy, переключить `reverse_proxy` Caddy на `app2`, погаси�
 Поэтому:
 - **Разрешено:** `ADD COLUMN` (nullable/с дефолтом), `CREATE TABLE/INDEX IF NOT EXISTS`, новые seed
   `ON CONFLICT DO NOTHING`, расширяющие `CHECK` через `NOT VALID` + позднее `VALIDATE`.
-- **Запрещено в одном релизе:** `DROP COLUMN`, `DROP TABLE`, `RENAME`, сужение типа, `NOT NULL` без
-  дефолта, удаление значения enum. Деструктивные изменения — только **многошаговым expand/contract**
+- **Запрещено в одном релизе:** `DROP COLUMN`, `DROP TABLE`, `DROP CONSTRAINT`, `DROP DEFAULT`,
+  `DROP NOT NULL`, `RENAME`, сужение/смена типа, `NOT NULL` без дефолта, удаление/переименование
+  значения enum, **`DROP INDEX`**. Деструктивные изменения — только **многошаговым expand/contract**
   через несколько релизов (сначала добавить новое и писать в оба, затем переключить чтение, и лишь в
   будущем релизе удалить старое).
-- Все существующие миграции `0001–0024` уже аддитивны (`ADD COLUMN IF NOT EXISTS`, `CREATE ...`) —
-  правило закрепляет статус-кво.
+- **`DROP INDEX` (волна 5):** снятие индекса убирает инвариант, а в Admik уникальность и
+  идемпотентность держатся именно на UNIQUE-индексах (`orders_idempotency_uniq`, `orders_number_uniq`,
+  `uq_tbank_payment_log_idem`, `uq_cdek_status_idem`, `inventory_unit_uniq`,
+  `promo_redemptions_order_uniq`, `customers_email_uniq`, `users_email_uniq`), часть — partial-индексы
+  (только индекс, не constraint, поэтому правило `DROP CONSTRAINT` их не покрывало). Снятие такого
+  индекса в релизе молча возвращает дубли/двойные списания. Правило ловит `DROP INDEX [IF EXISTS]` и
+  `DROP INDEX CONCURRENTLY`; `CREATE [UNIQUE] INDEX` остаётся аддитивным и не блокируется.
+- Все существующие миграции `0001–0029` уже аддитивны (`ADD COLUMN IF NOT EXISTS`, `CREATE ...`,
+  `CREATE OR REPLACE FUNCTION` + `DROP TRIGGER IF EXISTS`/`CREATE TRIGGER`) — правило закрепляет
+  статус-кво.
 
 **Файлы.**
 - `scripts/update.sh` (новый):

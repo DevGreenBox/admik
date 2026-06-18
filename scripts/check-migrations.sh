@@ -39,6 +39,16 @@
 #   9. ALTER TYPE ... DROP VALUE / RENAME VALUE — удаление/переименование значения
 #                          enum: старый код, пишущий это значение, упадёт. (Postgres
 #                          и так не умеет DROP VALUE напрямую, но ловим явный запрет.)
+#  10. DROP INDEX        — снятие индекса УБИРАЕТ инвариант. В Admik уникальность и
+#                          идемпотентность держатся именно на UNIQUE-индексах
+#                          (orders_idempotency_uniq, orders_number_uniq,
+#                          uq_tbank_payment_log_idem, uq_cdek_status_idem,
+#                          inventory_unit_uniq, promo_redemptions_order_uniq,
+#                          customers_email_uniq, users_email_uniq), часть — partial
+#                          (только индекс, не constraint). Снятие такого индекса в
+#                          одном релизе молча возвращает дубли/двойные списания —
+#                          только expand/contract. Ловит DROP INDEX [IF EXISTS] и
+#                          DROP INDEX CONCURRENTLY (оба идут после токенов DROP INDEX).
 #
 # РАЗРЕШЕНО (НЕ ловится, проверено на реальных 0001–0024):
 #   ADD COLUMN [IF NOT EXISTS] ... [NOT NULL DEFAULT ...]  — аддитивно;
@@ -248,6 +258,14 @@ for f in "${FILES[@]}"; do
   check_rule "${content}" "${f}" \
     'alter[[:space:]]+type[[:space:]]+.*(drop|rename)[[:space:]]+value|drop[[:space:]]+value' \
     'запрещено удаление/переименование значения enum (ломает запись старым кодом)'
+
+  # 10. DROP INDEX — снятие индекса убирает инвариант уникальности/идемпотентности.
+  #     'drop INDEX' покрывает обе формы: DROP INDEX [IF EXISTS] foo и
+  #     DROP INDEX CONCURRENTLY foo (модификаторы идут ПОСЛЕ слов DROP INDEX).
+  #     ВАЖНО: CREATE [UNIQUE] INDEX правилом НЕ ловится (нет токена 'drop index').
+  check_rule "${content}" "${f}" \
+    'drop[[:space:]]+index' \
+    'запрещён DROP INDEX (снятие индекса убирает инвариант уникальности/идемпотентности; expand/contract)'
 
   # 8. SET NOT NULL без DEFAULT в той же ИНСТРУКЦИИ — особый случай: ловим
   #    SET NOT NULL, но пропускаем инструкции, где есть и DEFAULT (тогда вставка
