@@ -8,11 +8,11 @@ import { CategoryInfographics } from "@/components/home/CategoryInfographic";
 import { IMAGES, EDITORIAL_HOVER, categoryViewHover } from "@/lib/images";
 import { LuxuryImageSwap } from "@/components/ui/LuxuryImageSwap";
 
-/** Full-width banner — первый блок под меню */
+/** Full-width banner — первый блок под меню (+ CTA «смотреть коллекцию») */
 export function HomeBanner() {
   return (
     <section className={HEADER_OFFSET}>
-      <Link href="/catalog" className="group relative block w-full">
+      <div className="relative block w-full">
         <Image
           src={IMAGES.home.banner}
           alt="THE CASE — Medical Uniform"
@@ -22,7 +22,16 @@ export function HomeBanner() {
           className="block w-full h-auto object-contain"
           sizes="100vw"
         />
-      </Link>
+        {/* CTA на обложке (правка клиента) */}
+        <div className="absolute inset-x-0 bottom-[6%] flex justify-center md:bottom-[8%]">
+          <Link
+            href="/catalog"
+            className="bg-white/90 px-8 py-3 text-[10px] uppercase tracking-[0.22em] text-graphite backdrop-blur-sm transition-colors duration-500 hover:bg-white md:px-10 md:py-4 md:text-[11px]"
+          >
+            Смотреть коллекцию
+          </Link>
+        </div>
+      </div>
     </section>
   );
 }
@@ -194,7 +203,7 @@ function CategoryViews({
         </div>
       </FadeIn>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 lg:gap-8">
+      <div className="mx-auto grid max-w-3xl grid-cols-1 gap-4 md:grid-cols-3 md:gap-6 lg:gap-8">
         {views.map((src, i) => (
           <FadeIn key={src} delay={i * 0.1}>
             <Link href={`/catalog?category=${slug}`} className="group block">
@@ -261,12 +270,12 @@ export function ShopCategories() {
 /** Philosophy — pivot before About */
 export function EditorialStatement() {
   return (
-    <section className="bg-graphite text-white py-28 md:py-36 lg:py-40">
+    <section className="bg-graphite text-white py-16 md:py-20 lg:py-24">
       <div className="container-brand">
         <FadeIn>
           <div className="max-w-2xl">
             <p className="eyebrow text-white/45 mb-8">Philosophy</p>
-            <h2 className="heading-lg heading-rule text-white mb-10 leading-[1.1]">Fashion meets medicine</h2>
+            <h2 className="heading-lg heading-rule text-white mb-10 leading-[1.1]">Comforts + Medicine = THE CASE</h2>
             <p className="body-editorial text-white/65 max-w-lg mb-12">
               Премиальная медицинская форма для тех, кто ценит эстетику,
               функциональность и уверенность в профессии.

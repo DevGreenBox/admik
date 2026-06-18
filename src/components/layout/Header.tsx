@@ -7,14 +7,22 @@ import { Search, ShoppingBag, Heart, User, Menu, X } from "lucide-react";
 import { Logo } from "@/components/ui/Logo";
 import { selectCartCount, useStore } from "@/lib/store";
 
-const NAV_LEFT = [
+type NavItem = { href: string; label: string; children?: { href: string; label: string }[] };
+
+const NAV_LEFT: NavItem[] = [
   { href: "/catalog", label: "Каталог" },
-  { href: "/#shop", label: "Коллекция" },
+  {
+    href: "/catalog",
+    label: "Коллекция",
+    children: [
+      { href: "/catalog?category=women", label: "Для женщин" },
+      { href: "/catalog?category=men", label: "Для мужчин" },
+    ],
+  },
   { href: "/#about", label: "О бренде" },
-  { href: "/#materials", label: "Материалы" },
 ];
 
-const NAV_RIGHT = [
+const NAV_RIGHT: NavItem[] = [
   { href: "/#delivery", label: "Доставка" },
   { href: "/#contacts", label: "Контакты" },
 ];
@@ -34,13 +42,6 @@ export function Header() {
   return (
     <>
       <header className="fixed top-0 left-0 right-0 z-50 bg-white border-b border-border">
-        {/* Announcement bar — Jil Sander / brandbook */}
-        <div className="hidden md:flex items-center justify-center border-b border-border/60 bg-surface py-2.5">
-          <p className="text-[9px] uppercase tracking-[0.36em] text-muted">
-            Форма / Функция / Дисциплина — премиальная медицинская униформа
-          </p>
-        </div>
-
         <div className="container-brand">
           <div className="grid grid-cols-[1fr_auto_1fr] items-center h-16 md:h-[72px]">
             <div className="flex items-center gap-6 md:gap-10">
@@ -52,11 +53,32 @@ export function Header() {
                 <Menu className="h-5 w-5" strokeWidth={1} />
               </button>
               <nav className="hidden md:flex items-center gap-8 lg:gap-10">
-                {NAV_LEFT.map((link) => (
-                  <Link key={link.href} href={link.href} className="eyebrow text-graphite link-underline">
-                    {link.label}
-                  </Link>
-                ))}
+                {NAV_LEFT.map((link) =>
+                  link.children ? (
+                    <div key={link.label} className="relative group/nav">
+                      <Link href={link.href} className="eyebrow text-graphite link-underline">
+                        {link.label}
+                      </Link>
+                      <div className="invisible absolute left-0 top-full pt-4 opacity-0 transition-opacity duration-300 group-hover/nav:visible group-hover/nav:opacity-100">
+                        <div className="flex min-w-[170px] flex-col gap-3 border border-border bg-white px-5 py-4">
+                          {link.children.map((child) => (
+                            <Link
+                              key={child.href}
+                              href={child.href}
+                              className="eyebrow whitespace-nowrap text-graphite transition-colors duration-300 hover:text-muted"
+                            >
+                              {child.label}
+                            </Link>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <Link key={link.href} href={link.href} className="eyebrow text-graphite link-underline">
+                      {link.label}
+                    </Link>
+                  ),
+                )}
               </nav>
             </div>
 
@@ -115,7 +137,7 @@ export function Header() {
             >
               {[...NAV_LEFT, ...NAV_RIGHT].map((link, i) => (
                 <motion.div
-                  key={link.href}
+                  key={link.label}
                   initial={{ opacity: 0, y: 12 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.15 + i * 0.06 }}
@@ -123,6 +145,20 @@ export function Header() {
                   <Link href={link.href} onClick={() => setMenuOpen(false)} className="heading-lg text-graphite">
                     {link.label}
                   </Link>
+                  {link.children ? (
+                    <div className="mt-4 flex flex-col gap-3 pl-1">
+                      {link.children.map((child) => (
+                        <Link
+                          key={child.href}
+                          href={child.href}
+                          onClick={() => setMenuOpen(false)}
+                          className="link-editorial self-start"
+                        >
+                          {child.label}
+                        </Link>
+                      ))}
+                    </div>
+                  ) : null}
                 </motion.div>
               ))}
               <div className="mt-8 pt-10 border-t border-border flex flex-col gap-5">
@@ -138,5 +174,5 @@ export function Header() {
   );
 }
 
-/** Total fixed header height for page offset */
-export const HEADER_OFFSET = "pt-[104px] md:pt-[116px]";
+/** Total fixed header height for page offset (без announcement-полоски) */
+export const HEADER_OFFSET = "pt-16 md:pt-[72px]";
