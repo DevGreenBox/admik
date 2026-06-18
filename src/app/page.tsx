@@ -1,5 +1,6 @@
 import {
   HomeBanner,
+  CoverSlides,
   ValuesStrip,
   CollectionWomen,
   CollectionMen,
@@ -19,6 +20,7 @@ export default async function HomePage() {
   return (
     <>
       <HomeBanner />
+      <CoverSlides />
       <CollectionWomen />
       <ValuesStrip />
       <CollectionMen />

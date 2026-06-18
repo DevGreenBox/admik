@@ -1,7 +1,9 @@
 "use client";
 
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import Image from "next/image";
+import { AnimatePresence, motion } from "framer-motion";
 import { FadeIn, TextReveal } from "@/components/ui/Animations";
 import { HEADER_OFFSET } from "@/components/layout/Header";
 import { CategoryInfographics } from "@/components/home/CategoryInfographic";
@@ -30,6 +32,108 @@ export function HomeBanner() {
           >
             Смотреть коллекцию
           </Link>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+const FABRIC_FEATURES = [
+  "Сохраняет глубину и яркость цвета",
+  "Устойчива к образованию катышков и зацепок",
+  "Эргономичная, повторяет каждое движение",
+  "Невесомая и приятная на ощупь",
+];
+
+/**
+ * Слайды на обложке (правки клиента): «О бренде» (форма создаётся на основе
+ * предпочтений реальных докторов; место под эскизы) + «Качество ткани» (фактура +
+ * характеристики). Точки + автопрокрутка. Серая фактура и эскизы — плейсхолдеры
+ * до получения фото от клиента (см. TODO).
+ */
+export function CoverSlides() {
+  const slides = ["about", "fabric"] as const;
+  const [i, setI] = useState(0);
+  const go = useCallback(
+    (n: number) => setI(((n % slides.length) + slides.length) % slides.length),
+    [slides.length],
+  );
+
+  useEffect(() => {
+    const t = setInterval(() => setI((p) => (p + 1) % slides.length), 7000);
+    return () => clearInterval(t);
+  }, [slides.length]);
+
+  return (
+    <section className="section-space-sm">
+      <div className="container-brand">
+        <div className="relative overflow-hidden">
+          <AnimatePresence mode="wait">
+            {slides[i] === "about" ? (
+              <motion.div
+                key="about"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.6 }}
+                className="grid grid-cols-1 items-center gap-10 bg-surface p-8 md:p-14 lg:grid-cols-2 lg:gap-16"
+              >
+                <div>
+                  <p className="eyebrow mb-6">О бренде</p>
+                  <h2 className="heading-lg heading-rule mb-6">Создано вместе с врачами</h2>
+                  <p className="body-editorial">
+                    Каждая модель THE CASE создаётся на основе предпочтений реальных докторов —
+                    от посадки и карманов до тканей, выдерживающих долгие смены.
+                  </p>
+                </div>
+                {/* TODO(контент клиента): заменить плейсхолдеры на фото эскизов */}
+                <div className="grid grid-cols-3 gap-3">
+                  {[0, 1, 2].map((n) => (
+                    <div key={n} className="flex aspect-[3/4] items-center justify-center bg-white">
+                      <span className="text-[10px] uppercase tracking-[0.2em] text-muted">Эскиз</span>
+                    </div>
+                  ))}
+                </div>
+              </motion.div>
+            ) : (
+              <motion.div
+                key="fabric"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.6 }}
+                className="relative flex min-h-[420px] items-center md:min-h-[520px]"
+                style={{ background: "linear-gradient(135deg,#9a9da1,#7e8186 40%,#6f7277)" }}
+              >
+                {/* TODO(контент клиента): заменить серый градиент на фото фактуры ткани */}
+                <div
+                  className="absolute inset-0 opacity-[0.12]"
+                  style={{ backgroundImage: "repeating-linear-gradient(45deg,#000 0 1px,transparent 1px 4px)" }}
+                />
+                <div className="relative container-brand py-14 text-white md:py-20">
+                  <p className="eyebrow mb-6 text-white/60">Качество ткани</p>
+                  <ul className="max-w-xl space-y-4">
+                    {FABRIC_FEATURES.map((f) => (
+                      <li key={f} className="body-editorial border-l border-white/40 pl-5 text-white/90">
+                        {f}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        <div className="mt-6 flex justify-center gap-2">
+          {slides.map((s, n) => (
+            <button
+              key={s}
+              onClick={() => go(n)}
+              aria-label={`Слайд ${n + 1}`}
+              className={`h-1.5 rounded-full transition-all duration-500 ${i === n ? "w-8 bg-graphite" : "w-2 bg-border"}`}
+            />
+          ))}
         </div>
       </div>
     </section>
