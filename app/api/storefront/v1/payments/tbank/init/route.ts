@@ -41,8 +41,16 @@ const InitSchema = z
   })
   .strip();
 
-/** Origin для абсолютного mock-PaymentURL (по своему домену, без хардкода). */
+/** Origin для абсолютного mock-PaymentURL (по своему ПУБЛИЧНОМУ домену, без хардкода).
+ *  За реверс-прокси (Caddy) req.url несёт ВНУТРЕННИЙ origin (http://app:3000) —
+ *  непригоден для редиректа браузера. Берём публичный origin из X-Forwarded-Host/
+ *  Proto (их проставляет доверенный прокси), c фолбэком на req.url. */
 function requestOrigin(req: Request): string | undefined {
+  const host = req.headers.get('x-forwarded-host');
+  if (host) {
+    const proto = (req.headers.get('x-forwarded-proto') ?? 'https').split(',')[0]!.trim();
+    return `${proto}://${host.split(',')[0]!.trim()}`;
+  }
   try {
     return new URL(req.url).origin;
   } catch {
