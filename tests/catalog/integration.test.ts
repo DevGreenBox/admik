@@ -3,6 +3,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { sql, closeSql } from '@/lib/db/client';
 import {
   listProducts,
+  categorySubtreeIds,
   getProductById,
   getCategoryTree,
   listInventory,
@@ -274,6 +275,54 @@ describe.skipIf(!hasDb)('каталог 0011 — цена/флаги/бренд�
 
     await sql`DELETE FROM products WHERE id IN (${saleId}, ${noSaleId})`;
     await sql`DELETE FROM brands WHERE id = ${brandId}`;
+  });
+});
+
+// ИНТЕГРАЦИЯ: рекурсивный фильтр по категории (#9) — товар в ПОДкатегории виден
+// при фильтре по РОДИТЕЛЬСКОЙ категории (вкладка верхнего уровня каталога).
+describe.skipIf(!hasDb)('каталог — рекурсивный фильтр категории (родитель→потомки)', () => {
+  afterAll(async () => {
+    await closeSql();
+  });
+
+  it('товар в дочерней категории попадает в выборку по родительской', async () => {
+    const suffix = Date.now().toString(36);
+    const [{ id: parent }] = await sql<{ id: string }[]>`
+      INSERT INTO categories (slug, name) VALUES (${'rec-parent-' + suffix}, 'Верхняя')
+      RETURNING id
+    `;
+    const [{ id: child }] = await sql<{ id: string }[]>`
+      INSERT INTO categories (parent_id, slug, name)
+      VALUES (${parent}, ${'rec-child-' + suffix}, 'Дочерняя')
+      RETURNING id
+    `;
+    const [{ id: pid }] = await sql<{ id: string }[]>`
+      INSERT INTO products (sku, slug, name, status, base_price)
+      VALUES (${'rec-sku-' + suffix}, ${'rec-slug-' + suffix}, 'Товар в дочерней', 'active', '500.00')
+      RETURNING id
+    `;
+    await sql`
+      INSERT INTO product_categories (product_id, category_id, is_primary)
+      VALUES (${pid}, ${child}, true)
+    `;
+
+    // Поддерево родителя включает обе категории.
+    const subtree = await categorySubtreeIds(parent);
+    expect(subtree).toContain(parent);
+    expect(subtree).toContain(child);
+
+    // Фильтр по РОДИТЕЛЮ отдаёт товар, назначенный только на ребёнка.
+    const byParent = await listProducts({ categoryId: parent, page: 1, pageSize: 50 });
+    expect(byParent.rows.map((r) => r.id)).toContain(pid);
+
+    // Фильтр по ребёнку — тоже (сам товар).
+    const byChild = await listProducts({ categoryId: child, page: 1, pageSize: 50 });
+    expect(byChild.rows.map((r) => r.id)).toContain(pid);
+
+    // cleanup (product_categories каскадно по FK; затем товар, дети, родитель).
+    await sql`DELETE FROM products WHERE id = ${pid}`;
+    await sql`DELETE FROM categories WHERE id = ${child}`;
+    await sql`DELETE FROM categories WHERE id = ${parent}`;
   });
 });
 

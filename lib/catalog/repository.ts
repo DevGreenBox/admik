@@ -339,8 +339,29 @@ export interface ProductListFilter {
 }
 
 /**
+ * Все id поддерева категории (сама категория + все потомки по parent_id).
+ * Нужно для фильтра товаров по категории: товары назначаются на ЛИСТЬЯ дерева, а
+ * пользователь часто выбирает РОДИТЕЛЬСКУЮ категорию (вкладка верхнего уровня) —
+ * без поддерева такой выбор отдавал бы 0 товаров (баг каталога). Для категории
+ * без потомков поддерево = [сама категория], т.е. поведение плоского каталога не
+ * меняется. Несуществующая категория → пустой список → 0 товаров.
+ */
+export async function categorySubtreeIds(categoryId: string): Promise<string[]> {
+  const rows = await sql<{ id: string }[]>`
+    WITH RECURSIVE subtree AS (
+      SELECT id FROM categories WHERE id = ${categoryId}::uuid
+      UNION ALL
+      SELECT c.id FROM categories c JOIN subtree s ON c.parent_id = s.id
+    )
+    SELECT id FROM subtree
+  `;
+  return rows.map((r) => r.id);
+}
+
+/**
  * Список товаров с фильтром/поиском(pg_trgm)/пагинацией (§4.1, §5.2).
  * Все условия параметризованы. Поиск — ILIKE по name/sku (GIN/pg_trgm индексы).
+ * Фильтр по категории — РЕКУРСИВНЫЙ (включает товары подкатегорий).
  */
 export async function listProducts(
   f: ProductListFilter,
@@ -350,6 +371,8 @@ export async function listProducts(
   const offset = (page - 1) * pageSize;
 
   const searchTerm = f.search?.trim() ? `%${f.search.trim()}%` : null;
+  // Поддерево категории (сама + потомки) для рекурсивного фильтра. null = без фильтра.
+  const categoryIds = f.categoryId ? await categorySubtreeIds(f.categoryId) : null;
 
   // Условия фильтрации — каждое значение параметризовано.
   // onSale/isFeatured/isNew — булевы фасеты витрины (docs/06 §3.1–§3.2):
@@ -364,9 +387,9 @@ export async function listProducts(
       AND (${f.isNew ?? null}::boolean IS NULL OR p.is_new = ${f.isNew ?? null})
       AND (${f.onSale ?? null}::boolean IS NULL
            OR (${f.onSale ?? null} = (p.compare_at_price IS NOT NULL AND p.compare_at_price > p.base_price)))
-      AND (${f.categoryId ?? null}::uuid IS NULL OR EXISTS (
+      AND (${categoryIds === null}::boolean OR EXISTS (
             SELECT 1 FROM product_categories pc
-            WHERE pc.product_id = p.id AND pc.category_id = ${f.categoryId ?? null}
+            WHERE pc.product_id = p.id AND pc.category_id = ANY(${categoryIds ?? []}::uuid[])
           ))
   `;
 

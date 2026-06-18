@@ -36,8 +36,13 @@ describe('cdek/city — mock-путь (фикстуры)', () => {
     expect(await svc.searchCities('  ')).toEqual([]);
   });
 
-  it('нет совпадений → пусто', async () => {
-    expect(await svc.searchCities('зззнет')).toEqual([]);
+  it('нет фикстурного совпадения → один синтетический город (демо-fallback, не тупик чекаута)', async () => {
+    // mock-режим (нет ключей СДЭК): город вне фикстур не должен давать пустой
+    // автокомплит — иначе нельзя выбрать город → недостижимы ПВЗ/расчёт (#12).
+    const cities = await svc.searchCities('Зззнетово');
+    expect(cities.length).toBe(1);
+    expect(cities[0]!.code).toBeGreaterThanOrEqual(1_000_000);
+    expect(cities[0]!.name).toMatch(/Зззнетово/i);
   });
 });
 

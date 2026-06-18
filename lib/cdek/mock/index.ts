@@ -164,7 +164,28 @@ export function mockFindOfficeByCode(code: string): CdekOffice | null {
 export function mockSearchCities(query: string): CdekCity[] {
   const q = (query ?? '').trim().toLowerCase();
   if (q.length < 2) return [];
-  return MOCK_CITIES.filter((c) => c.name.toLowerCase().includes(q));
+  const matched = MOCK_CITIES.filter((c) => c.name.toLowerCase().includes(q));
+  if (matched.length > 0) return matched;
+
+  // ДЕМО-fallback: город вне фикстур → ОДИН синтетический результат, чтобы
+  // автокомплит не был пустым (иначе нечего выбрать → нет cityCode → недостижимы
+  // ПВЗ/расчёт = тупик оформления в mock-режиме). По аналогии с PVZ-fallback в
+  // mockGetOffices. Код детерминирован (стабильный hash) и в высоком диапазоне,
+  // чтобы не пересечься с фикстурными кодами; ПВЗ для него отдаёт mockGetOffices
+  // (MOCK-<cityCode>). С боевыми/тестовыми ключами СДЭК fallback не задействуется.
+  return [{ code: syntheticCityCode(q), name: titleCaseCity(query.trim()), region: 'Демо (СДЭК mock)' }];
+}
+
+/** Стабильный положительный код города из нормализованного имени (вне диапазона фикстур). */
+function syntheticCityCode(normalized: string): number {
+  let h = 0;
+  for (let i = 0; i < normalized.length; i++) h = (h * 31 + normalized.charCodeAt(i)) >>> 0;
+  return 1_000_000 + (h % 9_000_000);
+}
+
+/** Приведение названия города к Title Case (первая буква каждого слова — заглавная). */
+function titleCaseCity(s: string): string {
+  return s.replace(/(^|[\s-])(\p{L})/gu, (_m, sep, ch) => sep + ch.toUpperCase());
 }
 
 /** Результат mock-создания отправления (фейковые uuid/трек, is_mock). */
