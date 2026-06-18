@@ -2,14 +2,21 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 /**
  * Юнит-тесты обработки webhook Т-Банка (docs/15 §4.2, §7). БД и orders-репозиторий
- * замоканы — проверяем связку проверки Token + идемпотентности + маппинга статуса
- * БЕЗ живой БД (репозиторий-зависимое — под мок, как webhook-route.test СДЭК).
+ * замоканы — проверяем связку проверки Token + АТОМАРНОЙ обработки события + маппинга
+ * статуса БЕЗ живой БД (репозиторий-зависимое — под мок, как webhook-route.test СДЭК).
+ *
+ * После фикса critical-бага неатомарности handleWebhook делегирует запись лога,
+ * применение статуса и пометку processed ОДНОМУ атомарному вызову recordWebhookEvent
+ * (одна sql.begin в репозитории). Поэтому здесь мокается ровно ОДНА функция.
  *
  * Проверяется:
- *   • невалидный Token → verified:false, лог НЕ пишется, переход НЕ применяется;
- *   • валидный Token + CONFIRMED → applyPaymentStatus('paid') вызывается, processed:true;
- *   • дубликат (insertPaymentLog → inserted:false) → duplicate:true, переход НЕ повторяется;
- *   • заказ не найден → processed:false без падения;
+ *   • невалидный Token → verified:false, recordWebhookEvent НЕ вызвана;
+ *   • подмена Amount → verified:false;
+ *   • валидный CONFIRMED → recordWebhookEvent(nextStatus='paid'), processed:true;
+ *   • дубликат (recordWebhookEvent → inserted:false) → duplicate:true, processed:false;
+ *   • REJECTED → nextStatus 'failed';
+ *   • заказ не найден → recordWebhookEvent НЕ вызвана, processed:false;
+ *   • неизвестный Status → recordWebhookEvent(nextStatus=null), processed:false;
  *   • parseNotification/sanitizeNotification — чистые.
  */
 
@@ -17,18 +24,15 @@ import { signToken } from '@/lib/payments/tbank/token';
 
 const PASSWORD = 'webhook-test-pw';
 
-// --- Моки репозиториев (без БД) ---
-// Rest-сигнатуры (...a: unknown[]), чтобы обёртки в vi.mock могли спредить
-// аргументы внутрь (иначе TS2556 — спред в функцию без rest-параметра).
-const insertPaymentLogMock = vi.fn();
-const markPaymentLogProcessedMock = vi.fn((..._a: unknown[]) => Promise.resolve());
-const applyPaymentStatusMock = vi.fn((..._a: unknown[]) => Promise.resolve(true));
+// --- Мок репозитория (без БД): ОДНА атомарная функция recordWebhookEvent. ---
+// Rest-сигнатуры (...a: unknown[]), чтобы обёртки в vi.mock могли спредить аргументы.
+const recordWebhookEventMock = vi.fn((..._a: unknown[]) =>
+  Promise.resolve({ inserted: true, processed: true }),
+);
 const setPaymentRefAndProviderMock = vi.fn((..._a: unknown[]) => Promise.resolve());
 
 vi.mock('@/lib/payments/tbank/repository', () => ({
-  insertPaymentLog: (...a: unknown[]) => insertPaymentLogMock(...a),
-  markPaymentLogProcessed: (...a: unknown[]) => markPaymentLogProcessedMock(...a),
-  applyPaymentStatus: (...a: unknown[]) => applyPaymentStatusMock(...a),
+  recordWebhookEvent: (...a: unknown[]) => recordWebhookEventMock(...a),
   setPaymentRefAndProvider: (...a: unknown[]) => setPaymentRefAndProviderMock(...a),
 }));
 
@@ -71,11 +75,8 @@ function signedBody(extra: Record<string, unknown>): Record<string, unknown> {
 }
 
 beforeEach(() => {
-  insertPaymentLogMock.mockReset();
-  insertPaymentLogMock.mockResolvedValue({ inserted: true, id: 'log-1' });
-  markPaymentLogProcessedMock.mockClear();
-  applyPaymentStatusMock.mockReset();
-  applyPaymentStatusMock.mockResolvedValue(true);
+  recordWebhookEventMock.mockReset();
+  recordWebhookEventMock.mockResolvedValue({ inserted: true, processed: true });
   getOrderByNumberMock.mockReset();
   getOrderByNumberMock.mockResolvedValue({ order: { id: 'order-uuid-1' }, items: [] });
 });
@@ -115,13 +116,12 @@ describe('tbank/service — parseNotification / sanitizeNotification (чисты
 });
 
 describe('tbank/service — handleWebhook проверка Token', () => {
-  it('невалидный Token → verified:false, лог не пишется, переход не применяется', async () => {
+  it('невалидный Token → verified:false, событие НЕ записывается', async () => {
     const body = signedBody({ Status: 'CONFIRMED' });
     body.Token = 'tampered';
     const res = await service().handleWebhook(body);
     expect(res.verified).toBe(false);
-    expect(insertPaymentLogMock).not.toHaveBeenCalled();
-    expect(applyPaymentStatusMock).not.toHaveBeenCalled();
+    expect(recordWebhookEventMock).not.toHaveBeenCalled();
   });
 
   it('подмена суммы после подписи ломает Token (anti-tamper)', async () => {
@@ -129,79 +129,82 @@ describe('tbank/service — handleWebhook проверка Token', () => {
     body.Amount = 1;
     const res = await service().handleWebhook(body);
     expect(res.verified).toBe(false);
+    expect(recordWebhookEventMock).not.toHaveBeenCalled();
   });
 });
 
 describe('tbank/service — handleWebhook маппинг и идемпотентность', () => {
-  it('валидный CONFIRMED → payment_status paid, processed:true', async () => {
+  it('валидный CONFIRMED → recordWebhookEvent(nextStatus=paid), processed:true', async () => {
     const body = signedBody({ Status: 'CONFIRMED' });
     const res = await service().handleWebhook(body);
     expect(res.verified).toBe(true);
     expect(res.duplicate).toBe(false);
     expect(res.processed).toBe(true);
     expect(res.paymentStatus).toBe('paid');
-    expect(applyPaymentStatusMock).toHaveBeenCalledWith(
-      'order-uuid-1',
-      'paid',
-      expect.stringContaining('tbank-webhook:CONFIRMED'),
-    );
-    expect(markPaymentLogProcessedMock).toHaveBeenCalledWith('log-1');
+    expect(recordWebhookEventMock).toHaveBeenCalledTimes(1);
+    const arg = recordWebhookEventMock.mock.calls[0]![0] as {
+      log: { orderId: string };
+      nextStatus: string | null;
+      comment: string;
+    };
+    expect(arg.nextStatus).toBe('paid');
+    expect(arg.comment).toContain('tbank-webhook:CONFIRMED');
+    expect(arg.log.orderId).toBe('order-uuid-1');
   });
 
-  it('дубликат (insertPaymentLog inserted:false) → duplicate:true, переход НЕ повторяется', async () => {
-    insertPaymentLogMock.mockResolvedValue({ inserted: false, id: null });
+  it('дубликат (recordWebhookEvent inserted:false) → duplicate:true, processed:false, paymentStatus:null', async () => {
+    recordWebhookEventMock.mockResolvedValue({ inserted: false, processed: false });
     const body = signedBody({ Status: 'CONFIRMED' });
     const res = await service().handleWebhook(body);
     expect(res.verified).toBe(true);
     expect(res.duplicate).toBe(true);
     expect(res.processed).toBe(false);
-    expect(applyPaymentStatusMock).not.toHaveBeenCalled();
-    expect(markPaymentLogProcessedMock).not.toHaveBeenCalled();
+    expect(res.paymentStatus).toBeNull();
   });
 
   it('повторная доставка того же события безопасна (идемпотентность)', async () => {
     const body = signedBody({ Status: 'CONFIRMED' });
     // Первая доставка — новое событие.
-    insertPaymentLogMock.mockResolvedValueOnce({ inserted: true, id: 'log-1' });
+    recordWebhookEventMock.mockResolvedValueOnce({ inserted: true, processed: true });
     const first = await service().handleWebhook(body);
     expect(first.processed).toBe(true);
+    expect(first.duplicate).toBe(false);
     // Вторая доставка — ON CONFLICT DO NOTHING → дубликат.
-    insertPaymentLogMock.mockResolvedValueOnce({ inserted: false, id: null });
+    recordWebhookEventMock.mockResolvedValueOnce({ inserted: false, processed: false });
     const second = await service().handleWebhook(body);
     expect(second.duplicate).toBe(true);
     expect(second.processed).toBe(false);
-    // applyPaymentStatus вызван ровно один раз за две доставки.
-    expect(applyPaymentStatusMock).toHaveBeenCalledTimes(1);
+    expect(recordWebhookEventMock).toHaveBeenCalledTimes(2);
   });
 
-  it('REJECTED → payment_status failed', async () => {
+  it('REJECTED → recordWebhookEvent(nextStatus=failed)', async () => {
     const body = signedBody({ Status: 'REJECTED' });
     const res = await service().handleWebhook(body);
     expect(res.paymentStatus).toBe('failed');
-    expect(applyPaymentStatusMock).toHaveBeenCalledWith(
-      'order-uuid-1',
-      'failed',
-      expect.any(String),
-    );
+    const arg = recordWebhookEventMock.mock.calls[0]![0] as { nextStatus: string | null };
+    expect(arg.nextStatus).toBe('failed');
   });
 
-  it('заказ не найден → verified:true, processed:false, без падения', async () => {
+  it('заказ не найден → verified:true, processed:false, recordWebhookEvent НЕ вызвана', async () => {
     getOrderByNumberMock.mockResolvedValue(null);
     const body = signedBody({ Status: 'CONFIRMED' });
     const res = await service().handleWebhook(body);
     expect(res.verified).toBe(true);
     expect(res.processed).toBe(false);
-    expect(insertPaymentLogMock).not.toHaveBeenCalled();
+    expect(recordWebhookEventMock).not.toHaveBeenCalled();
   });
 
-  it('неизвестный Status (нет маппинга) → лог пишется, переход не применяется', async () => {
+  it('неизвестный Status (нет маппинга) → recordWebhookEvent(nextStatus=null), processed:false', async () => {
+    recordWebhookEventMock.mockResolvedValue({ inserted: true, processed: false });
     const body = signedBody({ Status: 'SOME_FUTURE_STATUS' });
     const res = await service().handleWebhook(body);
     expect(res.verified).toBe(true);
     expect(res.paymentStatus).toBeNull();
-    expect(applyPaymentStatusMock).not.toHaveBeenCalled();
-    // Лог всё равно пишется (аудит) и помечается обработанным.
-    expect(insertPaymentLogMock).toHaveBeenCalled();
-    expect(markPaymentLogProcessedMock).toHaveBeenCalledWith('log-1');
+    expect(res.processed).toBe(false);
+    expect(res.duplicate).toBe(false);
+    // Событие всё равно записано (аудит) с nextStatus null.
+    expect(recordWebhookEventMock).toHaveBeenCalledTimes(1);
+    const arg = recordWebhookEventMock.mock.calls[0]![0] as { nextStatus: string | null };
+    expect(arg.nextStatus).toBeNull();
   });
 });

@@ -1,9 +1,13 @@
 /**
  * Репозиторий модуля payments/tbank (docs/15 §4.2, §4.4, порт lib/cdek/repository
  * + delivery-status). БД-зависимый слой:
+ *   • recordWebhookEvent — АТОМАРНАЯ обработка события webhook в ОДНОЙ транзакции
+ *     (запись лога + применение статуса + пометка processed); закрывает critical-баг
+ *     неатомарности (потеря денег при сбое посреди трёх отдельных транзакций);
  *   • insertPaymentLog — идемпотентная запись события webhook (ON CONFLICT DO
- *     NOTHING по UNIQUE (payment_id, status)); дубликат → inserted=false;
- *   • markPaymentLogProcessed — пометить событие обработанным;
+ *     NOTHING по UNIQUE (payment_id, status)); дубликат → inserted=false; оставлена
+ *     как самостоятельный примитив (не используется handleWebhook после фикса);
+ *   • markPaymentLogProcessed — пометить событие обработанным (самостоятельный примитив);
  *   • applyPaymentStatus — смена orders.payment_status через статус-машину
  *     canTransition('payment', …) в транзакции (UPDATE orders + INSERT history),
  *     БЕЗ Server Actions (webhook не имеет RBAC-контекста), как applyDeliveryStatus;
@@ -71,58 +75,142 @@ export async function markPaymentLogProcessed(id: string): Promise<void> {
 // -----------------------------------------------------------------------------
 
 /**
+ * ТЕЛО смены payment_status на ПЕРЕДАННОЙ транзакции `tx` (без собственного begin).
+ * Вынесено из applyPaymentStatus, чтобы переиспользовать ту же логику внутри
+ * recordWebhookEvent в ОДНОЙ транзакции с записью лога webhook (атомарность,
+ * см. doc-комментарий recordWebhookEvent). Внутренняя — НЕ экспортируется.
+ *
+ * Возвращает true, если переход применён; false — пропущен (недопустим / заказ не
+ * найден / from===to / проиграна гонка guarded UPDATE). Идемпотентно при повторе.
+ * paid проставляет paid_at (§2.8 B). SELECT ... FOR UPDATE + guarded UPDATE
+ * (WHERE payment_status = from) + INSERT history (actor_user_id=NULL → система).
+ */
+async function applyPaymentStatusTx(
+  tx: TransactionSql,
+  orderId: string,
+  to: PaymentStatus,
+  comment: string,
+): Promise<boolean> {
+  const rows = await tx<{ payment_status: string }[]>`
+    SELECT payment_status FROM orders WHERE id = ${orderId} FOR UPDATE
+  `;
+  const from = rows[0]?.payment_status as PaymentStatus | undefined;
+  if (!from) return false;
+  if (from === to) return false;
+  if (!canTransition('payment', from, to)) return false;
+
+  const updated =
+    to === 'paid'
+      ? await tx`
+          UPDATE orders
+             SET payment_status = ${to}, paid_at = now(), updated_at = now()
+           WHERE id = ${orderId} AND payment_status = ${from}
+        `
+      : await tx`
+          UPDATE orders
+             SET payment_status = ${to}, updated_at = now()
+           WHERE id = ${orderId} AND payment_status = ${from}
+        `;
+
+  // Гонка: статус успел измениться между SELECT и UPDATE (теоретически невозможно
+  // под FOR UPDATE в одной транзакции, но guarded UPDATE — дешёвая страховка
+  // на случай иной изоляции/реплик). 0 строк → эффект не применяем.
+  if (updated.count !== 1) return false;
+
+  await tx`
+    INSERT INTO order_status_history
+      (order_id, kind, from_status, to_status, actor_user_id, comment)
+    VALUES
+      (${orderId}, 'payment', ${from}, ${to}, NULL, ${comment})
+  `;
+  return true;
+}
+
+/**
  * Применяет переход payment_status заказа, если он допустим статус-машиной
  * canTransition('payment', …). Возвращает true, если применён; false — пропущен
  * (недопустим / заказ не найден / from===to). Идемпотентно при повторном вызове.
  * paid проставляет paid_at (§2.8 B). Транзакция: UPDATE orders + INSERT history
  * (kind='payment', actor_user_id=NULL → система/Т-Банк).
+ *
+ * АТОМАРНОСТЬ (анти-TOCTOU): чтение `from`, проверка перехода и запись — в ОДНОЙ
+ * транзакции (sql.begin), тело делегировано applyPaymentStatusTx. SELECT ... FOR
+ * UPDATE берёт блокировку строки заказа на время транзакции, так что конкурентный
+ * webhook ждёт коммита и видит уже актуальный статус.
  */
 export async function applyPaymentStatus(
   orderId: string,
   to: PaymentStatus,
   comment = '',
 ): Promise<boolean> {
-  // АТОМАРНОСТЬ (анти-TOCTOU): чтение `from`, проверка перехода и запись — в ОДНОЙ
-  // транзакции. SELECT ... FOR UPDATE берёт блокировку строки заказа на время
-  // транзакции, так что конкурентный webhook ждёт коммита и видит уже актуальный
-  // статус. Дополнительно guarded UPDATE (WHERE payment_status = from) защищает
-  // от out-of-order доставки: если к моменту UPDATE статус уже изменён другим
-  // событием — затронуто 0 строк, переход пропускаем (не откатываем paid→…).
-  // Эффекты (paid_at, история) применяются ТОЛЬКО при rowCount === 1.
-  return await sql.begin<boolean>(async (tx: TransactionSql) => {
-    const rows = await tx<{ payment_status: string }[]>`
-      SELECT payment_status FROM orders WHERE id = ${orderId} FOR UPDATE
+  return await sql.begin<boolean>((tx: TransactionSql) =>
+    applyPaymentStatusTx(tx, orderId, to, comment),
+  );
+}
+
+/** Результат атомарной обработки события webhook (recordWebhookEvent). */
+export interface RecordWebhookResult {
+  /** Событие записано впервые (false → дубликат: ON CONFLICT DO NOTHING). */
+  inserted: boolean;
+  /** Переход payment_status применён в этой же транзакции. */
+  processed: boolean;
+}
+
+/**
+ * АТОМАРНО обрабатывает событие webhook Т-Банка В ОДНОЙ транзакции (sql.begin):
+ * идемпотентная запись лога → применение перехода payment_status → пометка лога
+ * processed. Закрывает critical-баг неатомарности (потеря денег).
+ *
+ * БАГ (до фикса): handleWebhook делал три шага в ТРЁХ разных транзакциях
+ * (insertPaymentLog авто-коммит → applyPaymentStatus собственный begin →
+ * markPaymentLogProcessed авто-коммит). Если applyPaymentStatus БРОСАЛ исключение
+ * (транзиентный сбой БД: deadlock / lock_timeout / обрыв соединения) ПОСЛЕ коммита
+ * лога, то статус НЕ применялся, строка лога оставалась processed=false навсегда,
+ * а повторная доставка webhook видела inserted=false (дубликат) и НЕ применяла
+ * статус → оплаченный заказ навсегда висел в pending. Деньги терялись.
+ *
+ * ФИКС: всё в ОДНОЙ транзакции. Если applyPaymentStatusTx бросит — вся транзакция
+ * (включая INSERT лога) откатывается, поэтому повтор события снова даст
+ * inserted=true и переприменит статус. Дубликат (inserted=false) → ранний выход
+ * без эффектов (повторно применять статус не нужно).
+ *
+ * Колонки лога идентичны insertPaymentLog (order_id, payment_id, status, amount_kop,
+ * is_mock, raw_payload, ip), UNIQUE (payment_id, status) → ON CONFLICT DO NOTHING.
+ */
+export async function recordWebhookEvent(input: {
+  log: PaymentLogInput;
+  nextStatus: PaymentStatus | null;
+  comment: string;
+}): Promise<RecordWebhookResult> {
+  return await sql.begin<RecordWebhookResult>(async (tx: TransactionSql) => {
+    const rows = await tx<{ id: string }[]>`
+      INSERT INTO tbank_payment_log (
+        order_id, payment_id, status, amount_kop, is_mock, raw_payload, ip
+      ) VALUES (
+        ${input.log.orderId}, ${input.log.paymentId}, ${input.log.status},
+        ${input.log.amountKop ?? null}, ${input.log.isMock ?? false},
+        ${input.log.rawPayload ? sql.json(input.log.rawPayload as Record<string, never>) : null},
+        ${input.log.ip ?? null}
+      )
+      ON CONFLICT (payment_id, status) DO NOTHING
+      RETURNING id
     `;
-    const from = rows[0]?.payment_status as PaymentStatus | undefined;
-    if (!from) return false;
-    if (from === to) return false;
-    if (!canTransition('payment', from, to)) return false;
+    const id = rows[0]?.id ?? null;
+    // Дубликат (повторная доставка) — эффект уже применён ранее, не повторяем.
+    if (id === null) return { inserted: false, processed: false };
 
-    const updated =
-      to === 'paid'
-        ? await tx`
-            UPDATE orders
-               SET payment_status = ${to}, paid_at = now(), updated_at = now()
-             WHERE id = ${orderId} AND payment_status = ${from}
-          `
-        : await tx`
-            UPDATE orders
-               SET payment_status = ${to}, updated_at = now()
-             WHERE id = ${orderId} AND payment_status = ${from}
-          `;
+    let processed = false;
+    if (input.nextStatus) {
+      processed = await applyPaymentStatusTx(
+        tx,
+        input.log.orderId,
+        input.nextStatus,
+        input.comment,
+      );
+    }
 
-    // Гонка: статус успел измениться между SELECT и UPDATE (теоретически невозможно
-    // под FOR UPDATE в одной транзакции, но guarded UPDATE — дешёвая страховка
-    // на случай иной изоляции/реплик). 0 строк → эффект не применяем.
-    if (updated.count !== 1) return false;
-
-    await tx`
-      INSERT INTO order_status_history
-        (order_id, kind, from_status, to_status, actor_user_id, comment)
-      VALUES
-        (${orderId}, 'payment', ${from}, ${to}, NULL, ${comment})
-    `;
-    return true;
+    await tx`UPDATE tbank_payment_log SET processed = true WHERE id = ${id}`;
+    return { inserted: true, processed };
   });
 }
 

@@ -9,11 +9,13 @@
  *
  * handleWebhook(payload) — КЛЮЧЕВОЕ (docs/15 §4.2, §7):
  *   1) проверка Token (verifyNotificationToken); невалид → verified:false (403);
- *   2) parseNotification → нормализация;
- *   3) идемпотентная запись в tbank_payment_log (UNIQUE (payment_id, status),
- *      ON CONFLICT DO NOTHING); дубликат → duplicate:true без повторных эффектов;
- *   4) маппинг Status → payment_status (status-map) + переход canTransition;
- *   5) markPaymentLogProcessed.
+ *   2) parseNotification → нормализация + поиск заказа;
+ *   3) маппинг Status → payment_status (status-map);
+ *   4) АТОМАРНАЯ обработка recordWebhookEvent (одна транзакция): идемпотентная
+ *      запись в tbank_payment_log (UNIQUE (payment_id, status), ON CONFLICT DO
+ *      NOTHING) + переход canTransition + пометка processed. Дубликат →
+ *      duplicate:true без повторных эффектов. Сбой БД откатывает ВСЁ (вставку
+ *      лога тоже) → повтор события переприменит статус (закрыт баг неатомарности).
  *
  * Чистая parseNotification (без сети/БД) тестируется отдельно; БД-зависимый
  * handleWebhook — интеграционно (skipIf) либо с моком репозитория в юнит-тесте.
@@ -27,12 +29,7 @@ import { mapTbankStatus } from './status-map';
 import { verifyNotificationToken } from './token';
 import { buildReceipt } from './receipt';
 import { toKopecks } from './receipt';
-import {
-  applyPaymentStatus,
-  insertPaymentLog,
-  markPaymentLogProcessed,
-  setPaymentRefAndProvider,
-} from './repository';
+import { recordWebhookEvent, setPaymentRefAndProvider } from './repository';
 import type {
   HandleWebhookResult,
   InitPaymentResult,
@@ -166,8 +163,11 @@ export class PaymentService {
   }
 
   /**
-   * Обрабатывает webhook Т-Банка с проверкой Token и идемпотентностью
-   * (docs/15 §4.2). Token берётся из config.password (секрет). Возвращает
+   * Обрабатывает webhook Т-Банка с проверкой Token и АТОМАРНОЙ идемпотентной
+   * обработкой (docs/15 §4.2). Token берётся из config.password (секрет). Запись
+   * лога + применение статуса + пометка processed выполняются в ОДНОЙ транзакции
+   * (recordWebhookEvent) — сбой БД откатывает всё и оставляет событие повторяемым
+   * (закрыт critical-баг неатомарности). Возвращает
    * { verified, processed, duplicate, paymentStatus }.
    */
   async handleWebhook(payload: unknown): Promise<HandleWebhookResult> {
@@ -202,30 +202,29 @@ export class PaymentService {
       return { verified: true, processed: false, duplicate: false, paymentStatus: null };
     }
 
-    // 3) Идемпотентная запись в лог (raw без Token/PAN).
-    const logResult = await insertPaymentLog({
-      orderId,
-      paymentId: event.paymentId,
-      status: event.status,
-      amountKop: event.amountKop,
-      isMock: this.manager.isMock,
-      rawPayload: sanitizeNotification(event.raw),
+    // 3) АТОМАРНАЯ обработка события в ОДНОЙ транзакции: запись лога (raw без
+    //    Token/PAN) + применение перехода payment_status + пометка processed.
+    //    recordWebhookEvent гарантирует, что при сбое БД посреди обработки
+    //    откатывается ВСЁ (включая вставку лога) — поэтому повтор события снова
+    //    применит статус (закрыт critical-баг неатомарности, потери денег).
+    //    Недопустимый/отсутствующий маппинг (next=null) → processed=false (no-op),
+    //    дубликат (inserted=false) → ранний выход без эффектов.
+    const next = mapTbankStatus(event.status);
+    const { inserted, processed } = await recordWebhookEvent({
+      log: {
+        orderId,
+        paymentId: event.paymentId,
+        status: event.status,
+        amountKop: event.amountKop,
+        isMock: this.manager.isMock,
+        rawPayload: sanitizeNotification(event.raw),
+      },
+      nextStatus: next,
+      comment: `tbank-webhook:${event.status}`,
     });
-    if (!logResult.inserted) {
+    if (!inserted) {
       // Дубликат: уже обработано — НЕ повторяем эффекты.
       return { verified: true, processed: false, duplicate: true, paymentStatus: null };
-    }
-
-    // 4) Маппинг + переход payment_status (недопустимый пропускается молча).
-    const next = mapTbankStatus(event.status);
-    let processed = false;
-    if (next) {
-      processed = await applyPaymentStatus(orderId, next, `tbank-webhook:${event.status}`);
-    }
-
-    // 5) Пометить лог обработанным.
-    if (logResult.id) {
-      await markPaymentLogProcessed(logResult.id);
     }
 
     return { verified: true, processed, duplicate: false, paymentStatus: next };

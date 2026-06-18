@@ -90,7 +90,7 @@ lib/payments/
     errors.ts        # TbankError(code,message,{tbankErrorCode,httpStatus}) — порт CdekError
     index.ts         # реэкспорт публичного API
 app/api/payments/tbank/
-  webhook/route.ts   # server-to-server callback: проверка Token (идемпотентно) → payment_status → ответ "OK"
+  webhook/route.ts   # server-to-server callback: проверка Token → атомарная recordWebhookEvent (лог+статус+processed) → "OK" / 500 на throw
 app/api/storefront/v1/payment/tbank/
   init/route.ts      # витрина: по orderId создать платёж → вернуть PaymentURL (module-gate+CORS+rate-limit)
   return/route.ts    # (опц.) обработка SuccessURL/FailURL: показать статус, не доверять как источнику истины
@@ -212,16 +212,21 @@ TBANK_REDIRECT_DUE_MIN=60
 6. Webhook (`app/api/payments/tbank/webhook`):
    - **проверяет `Token`** в теле (см. §5.2); невалидный → 403, НЕ обрабатываем;
    - (опц.) IP-whitelist;
-   - **идемпотентно** пишет событие в `tbank_payment_log` (UNIQUE по `(payment_id, status)`,
-     `ON CONFLICT DO NOTHING`); дубликат → не обрабатываем повторно, но всё равно отвечаем `OK`;
    - маппит `Status` → `payment_status` через статус-машину `lib/orders/status.ts` (переход
      применяется лишь если допустим);
-   - обновляет `orders.payment_status` **атомарно** (`applyPaymentStatus`, см. §4.4) — чтение `from`
-     и запись в ОДНОЙ транзакции с `SELECT … FOR UPDATE` + guarded `UPDATE … WHERE payment_status =
-     from`; защита от out-of-order/конкурентных webhook (UNIQUE `(payment_id, status)` защищает от
-     повтора ОДНОГО события, а guard — от двух РАЗНЫХ, напр. не даёт откатить `paid → authorized`);
-     при оплате — `paid_at`, `orders.status` (см. §4.3);
-   - **возвращает строго `OK`** (HTTP 200, plain text) — иначе Т-Банк ретраит.
+   - **АТОМАРНО** обрабатывает событие одним вызовом `recordWebhookEvent` (см. §4.4) в ОДНОЙ
+     транзакции: (a) идемпотентная запись в `tbank_payment_log` (UNIQUE по `(payment_id, status)`,
+     `ON CONFLICT DO NOTHING`) — дубликат → ранний выход, повторно не обрабатываем; (b) смена
+     `orders.payment_status` (`SELECT … FOR UPDATE` + guarded `UPDATE … WHERE payment_status = from`,
+     при оплате — `paid_at`, `orders.status` см. §4.3); (c) пометка лога `processed = true`. Защита
+     от out-of-order/конкурентных webhook (UNIQUE защищает от повтора ОДНОГО события, guard — от двух
+     РАЗНЫХ, напр. не даёт откатить `paid → authorized`);
+   - **штатный результат** (включая дубликат / недопустимый переход / заказ не найден / неизвестный
+     статус — все no-op без throw) → **строго `OK`** (HTTP 200, plain text), иначе Т-Банк ретраит
+     без нужды. **Неожиданная ошибка** обработки верифицированного события (throw) → **500**: пусть
+     Т-Банк РЕТРАЙНЕТ — атомарность `recordWebhookEvent` гарантирует откат всей транзакции (включая
+     вставку лога), не оставляя «осиротевшего» события `processed=false`, и повтор безопасно
+     переприменит статус.
 7. Витрина после редиректа на `SuccessURL` показывает статус, но **источник истины — webhook**
    (или `GetState` как fallback при «зависшем» платеже — задел под cron-синхронизацию).
 
@@ -260,7 +265,17 @@ TBANK_REDIRECT_DUE_MIN=60
   AND payment_status = from`. История (`order_status_history`) и `paid_at` пишутся **только при
   `rowCount === 1`**; иначе (заказ не найден / `from === to` / недопустимый переход / строку уже
   изменил другой webhook) → `false`, no-op. Это исключает откат уже выставленного статуса
-  конкурентным/неупорядоченным уведомлением Т-Банка.
+  конкурентным/неупорядоченным уведомлением Т-Банка. Тело вынесено во внутреннюю
+  `applyPaymentStatusTx(tx, …)` и переиспользуется в `recordWebhookEvent` без отдельного `begin`.
+- **`recordWebhookEvent({ log, nextStatus, comment })`** (`repository.ts`) — **АТОМАРНАЯ** обработка
+  события webhook в ОДНОЙ транзакции `sql.begin`: (1) `INSERT … tbank_payment_log … ON CONFLICT
+  (payment_id, status) DO NOTHING RETURNING id` — нет id → `{inserted:false, processed:false}`
+  (дубликат, эффект не повторяем); (2) при `nextStatus` — `applyPaymentStatusTx(tx, …)`; (3)
+  `UPDATE tbank_payment_log SET processed = true`. **Зачем атомарность:** ранее три шага шли в ТРЁХ
+  отдельных транзакциях; сбой БД на смене статуса ПОСЛЕ коммита лога оставлял лог `processed=false`
+  навсегда, а повтор webhook видел дубликат и НЕ применял статус → оплаченный заказ навсегда висел
+  в `pending` (потеря денег). Теперь сбой откатывает ВСЁ, включая вставку лога, и повтор события
+  снова применяет статус.
 
 ---
 
