@@ -414,10 +414,20 @@ async function slugByName(name) {
 
 async function storeGoto(sp, path) {
   await sp.goto(`${STORE_ORIGIN}${path}`, { waitUntil: 'networkidle' });
+  // Пауза на регидрацию persist-хранилища (skipHydration): иначе добавление в
+  // корзину СРАЗУ после полной перезагрузки могло гонкой затереть прежние позиции
+  // (реальные юзеры ходят client-nav без перезагрузки — это артефакт харнеса).
+  await sp.waitForTimeout(900);
   const txt = (await sp.locator('body').innerText().catch(() => '')) || '';
   const broken = /Application error|Unhandled Runtime|client-side exception|Internal Server Error/i.test(txt);
   if (broken) throw new Error(`страница ${path} с ошибкой рендера`);
   return txt;
+}
+
+// Регистронезависимое вхождение: имена товаров в карточках/корзине рендерятся
+// заглавными через CSS text-transform → innerText возвращает их в верхнем регистре.
+function incl(haystack, needle) {
+  return (haystack || '').toLowerCase().includes((needle || '').toLowerCase());
 }
 
 async function ctaText(sp) {
@@ -470,8 +480,8 @@ async function runE2E(browser, adminPage) {
     // 2. Каталог — новые товары видны
     try {
       const txt = await storeGoto(sp, '/catalog');
-      const hasSimple = txt.includes(`${PREFIX}E2E Простой`);
-      const hasSized = txt.includes(`${PREFIX}E2E С размером`);
+      const hasSimple = incl(txt, `${PREFIX}E2E Простой`);
+      const hasSized = incl(txt, `${PREFIX}E2E С размером`);
       if (hasSimple && hasSized) PASS('e2e каталог: товары видны', 'простой+с размером');
       else FAIL('e2e каталог', `простой=${hasSimple} сразмером=${hasSized}`);
     } catch (e) { FAIL('e2e каталог', e.message); }
@@ -523,7 +533,7 @@ async function runE2E(browser, adminPage) {
       const txt = await storeGoto(sp, '/cart');
       await sp.waitForTimeout(800); // регидрация persist
       const txt2 = (await sp.locator('body').innerText().catch(() => '')) || txt;
-      const hasItems = txt2.includes(`${PREFIX}E2E Простой`) && txt2.includes(`${PREFIX}E2E С размером`);
+      const hasItems = incl(txt2, `${PREFIX}E2E Простой`) && incl(txt2, `${PREFIX}E2E С размером`);
       if (hasItems) PASS('e2e корзина: обе позиции видны');
       else FAIL('e2e корзина', `содержимое не содержит обе позиции`);
     } catch (e) { FAIL('e2e корзина', e.message); }
