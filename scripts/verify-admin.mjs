@@ -584,7 +584,25 @@ async function runE2E(browser, adminPage) {
       const payUrl = new URL(sp.url());
       orderNumber = payUrl.searchParams.get('orderId');
       PASS('e2e оплата: redirect на платёжную страницу', `№${orderNumber}`);
-      await sp.getByRole('button', { name: /Оплатить/ }).first().click();
+
+      // Сначала ОТМЕНА — проверяем обработку отмены + кнопку доплаты (волна 10/11).
+      await sp.getByRole('button', { name: /Отмена/ }).first().click();
+      await sp.waitForURL(/\/account/, { timeout: 25000 });
+      await sp.waitForTimeout(1800);
+      const cancelTxt = (await sp.locator('body').innerText().catch(() => '')) || '';
+      if (/Оплата не завершена/i.test(cancelTxt)) PASS('e2e отмена оплаты: баннер «Оплата не завершена»');
+      else FAIL('e2e отмена оплаты', 'нет баннера «Оплата не завершена»');
+      // Кнопка «Оплатить картой» в карточке заказа (доплата по token, фикс волны 11).
+      const payBtn = sp.getByRole('button', { name: /Оплатить картой/ }).first();
+      if (await payBtn.count()) {
+        PASS('e2e доплата: кнопка «Оплатить картой» есть');
+        await payBtn.click();
+        await sp.waitForURL(/\/mock\/tbank\/pay/, { timeout: 25000 });
+        PASS('e2e доплата: redirect на оплату (token-путь работает)');
+        await sp.getByRole('button', { name: /Оплатить \(демо\)/ }).first().click();
+      } else {
+        FAIL('e2e доплата', 'нет кнопки «Оплатить картой» у неоплаченного card-заказа');
+      }
       await sp.waitForURL(/\/account/, { timeout: 25000 });
       const url = new URL(sp.url());
       const paid = url.searchParams.get('paid');
