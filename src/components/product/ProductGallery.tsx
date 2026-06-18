@@ -48,7 +48,7 @@ export function ProductGallery({ images, name }: ProductGalleryProps) {
         )}
 
         <div
-          className="image-luxury group relative flex-1 aspect-[3/4] bg-surface cursor-zoom-in"
+          className="image-luxury group relative flex-1 aspect-[3/4] max-h-[78vh] bg-surface cursor-zoom-in"
           onClick={() => setLightbox(true)}
         >
           <Image

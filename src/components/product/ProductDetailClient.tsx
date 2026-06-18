@@ -19,6 +19,15 @@ interface ProductDetailClientProps {
   related: StorefrontProduct[];
 }
 
+// Дефолты «Состав и уход» / описания (правки клиента): показываются, если у
+// товара поля не заполнены в админке (когда заполнены — берётся значение товара).
+const DEFAULT_DESCRIPTION =
+  "Современная, стильная и модная одежда премиум класса для врачей и среднего медицинского персонала.";
+const DEFAULT_COMPOSITION = "72% полиэфир, 21% вискоза, 7% спандекс";
+const DEFAULT_CARE =
+  "Вывернуть одежду наизнанку и стирать при температуре воды не выше 30 °С с вещами аналогичного цвета. " +
+  "Не подвергать химической чистке и не отбеливать. Гладить с изнаночной стороны при температуре не выше 110 °С.";
+
 export function ProductDetailClient({ product, related }: ProductDetailClientProps) {
   const [selectedVariant, setSelectedVariant] = useState<StorefrontVariant | null>(null);
   const [quantity, setQuantity] = useState(1);
@@ -96,9 +105,7 @@ export function ProductDetailClient({ product, related }: ProductDetailClientPro
               </div>
 
               <p className="text-base md:text-lg tracking-[0.06em] tabular-nums">{formatPrice(product.price)}</p>
-              {product.description && (
-                <p className="body-editorial">{product.description}</p>
-              )}
+              <p className="body-editorial">{product.description || DEFAULT_DESCRIPTION}</p>
 
               {/* Размер — только для товаров с вариантами. */}
               {hasVariants && (
@@ -172,8 +179,9 @@ export function ProductDetailClient({ product, related }: ProductDetailClientPro
               </div>
 
               <div className="space-y-6 border-t border-border pt-10">
-                {product.composition && <Detail label="Состав" value={product.composition} />}
-                {product.care && <Detail label="Уход" value={product.care} />}
+                <p className="text-[10px] uppercase tracking-[0.2em] text-graphite">Состав и уход</p>
+                <Detail label="Состав" value={product.composition || DEFAULT_COMPOSITION} />
+                <Detail label="Рекомендации по уходу" value={product.care || DEFAULT_CARE} />
                 {product.color && <Detail label="Цвет" value={product.color} />}
                 {product.features.length > 0 && (
                   <div>

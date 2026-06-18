@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Ruler } from "lucide-react";
 
@@ -23,19 +24,26 @@ const SIZE_TABLE = {
 
 export function SizeGuide({ gender }: { gender: "women" | "men" | "unisex" }) {
   const [open, setOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const table = gender === "men" ? SIZE_TABLE.men : SIZE_TABLE.women;
 
-  return (
-    <>
-      <button
-        onClick={() => setOpen(true)}
-        className="inline-flex items-center gap-2 text-[10px] uppercase tracking-[0.15em] text-muted hover:text-graphite transition-colors mt-2"
-      >
-        <Ruler className="h-3.5 w-3.5" strokeWidth={1.5} />
-        Таблица размеров
-      </button>
+  // Портал нужен, чтобы fixed-модалка не зависела от трансформированных предков
+  // (FadeIn/framer-motion на карточке товара) и центрировалась по вьюпорту,
+  // а не «опускалась вниз» внутри transform-контейнера.
+  useEffect(() => setMounted(true), []);
 
-      <AnimatePresence>
+  // Блокируем скролл фона, пока открыта таблица.
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [open]);
+
+  const modal = (
+    <AnimatePresence>
         {open && (
           <motion.div
             initial={{ opacity: 0 }}
@@ -94,6 +102,18 @@ export function SizeGuide({ gender }: { gender: "women" | "men" | "unisex" }) {
           </motion.div>
         )}
       </AnimatePresence>
+  );
+
+  return (
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        className="inline-flex items-center gap-2 text-[10px] uppercase tracking-[0.15em] text-muted hover:text-graphite transition-colors mt-2"
+      >
+        <Ruler className="h-3.5 w-3.5" strokeWidth={1.5} />
+        Таблица размеров
+      </button>
+      {mounted ? createPortal(modal, document.body) : null}
     </>
   );
 }
