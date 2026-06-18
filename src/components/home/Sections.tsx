@@ -437,21 +437,61 @@ export function DetailsSection() {
   );
 }
 
+// Слайды для секции «О бренде» (правки клиента). Пока — доступные фото бренда;
+// TODO(контент клиента): заменить/дополнить фото эскизов.
+const ABOUT_SLIDES = [
+  IMAGES.about.duo,
+  IMAGES.editorial.womenPortrait,
+  IMAGES.editorial.menPortrait,
+];
+
+function AboutGallery({ images }: { images: string[] }) {
+  const [i, setI] = useState(0);
+  useEffect(() => {
+    if (images.length < 2) return;
+    const t = setInterval(() => setI((p) => (p + 1) % images.length), 5000);
+    return () => clearInterval(t);
+  }, [images.length]);
+
+  return (
+    <div className="relative">
+      <div className="image-luxury relative aspect-[3/4] overflow-hidden bg-surface">
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={i}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.6 }}
+            className="absolute inset-0"
+          >
+            <Image src={images[i]} alt="THE CASE — о бренде" fill className="object-cover object-center" sizes="40vw" />
+          </motion.div>
+        </AnimatePresence>
+      </div>
+      {images.length > 1 && (
+        <div className="mt-4 flex gap-2">
+          {images.map((_, n) => (
+            <button
+              key={n}
+              onClick={() => setI(n)}
+              aria-label={`Фото ${n + 1}`}
+              className={`h-1.5 rounded-full transition-all duration-500 ${i === n ? "w-8 bg-graphite" : "w-2 bg-border"}`}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function About() {
   return (
     <section id="about" className="section-space">
       <div className="container-brand">
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-16 lg:gap-20 items-start">
           <FadeIn direction="left" className="lg:col-span-3">
-            <div className="image-luxury relative aspect-[3/4] bg-surface">
-              <Image
-                src={IMAGES.about.duo}
-                alt="THE CASE — девушка и парень в серой форме на блоках"
-                fill
-                className="object-cover object-center"
-                sizes="40vw"
-              />
-            </div>
+            <AboutGallery images={ABOUT_SLIDES} />
           </FadeIn>
 
           <FadeIn direction="right" delay={0.15} className="lg:col-span-2 lg:pt-12 xl:pt-16">
