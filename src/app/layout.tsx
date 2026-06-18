@@ -44,9 +44,13 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // подменю строится по тому, что реально есть в каталоге магазина (универсально
   // под любой ИМ). Сбой запроса не должен ронять весь layout → деградируем до
   // простой ссылки на /catalog.
+  // Категории навигации с ПОТОЛКОМ ожидания: layout рендерится на каждой странице,
+  // поэтому ограничиваем ожидание Admik (2.5с) — иначе залипание бэкенда подвесило бы
+  // КАЖДУЮ страницу. Сбой/таймаут → пустой список (навигация деградирует до /catalog).
   let categories: AdmikCategoryDto[] = [];
   try {
-    categories = await getCategories();
+    const timeout = new Promise<AdmikCategoryDto[]>((resolve) => setTimeout(() => resolve([]), 2500));
+    categories = await Promise.race([getCategories(), timeout]);
   } catch {
     categories = [];
   }

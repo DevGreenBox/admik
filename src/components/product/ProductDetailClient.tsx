@@ -135,7 +135,7 @@ export function ProductDetailClient({ product, related }: ProductDetailClientPro
                       <button
                         key={variant.id}
                         disabled={!variant.inStock}
-                        onClick={() => setSelectedVariant(variant)}
+                        onClick={() => { setSelectedVariant(variant); setAdded(false); }}
                         className={`min-w-[48px] px-4 py-3 text-[10px] uppercase tracking-[0.15em] border transition-all duration-500 disabled:opacity-30 disabled:cursor-not-allowed ${
                           selectedVariant?.id === variant.id
                             ? "border-graphite bg-graphite text-white"

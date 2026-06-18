@@ -26,7 +26,7 @@ export function LuxuryImageSwap({
   // (это роняет рендер), а показываем аккуратный плейсхолдер поверх bg-surface.
   if (!primary) {
     return (
-      <div className={`group/swap image-luxury relative overflow-hidden ${className}`}>
+      <div className={`group/swap image-luxury relative overflow-hidden ${className}`} role="img" aria-label={alt}>
         <div className="absolute inset-0 flex items-center justify-center">
           <span className="text-[9px] uppercase tracking-[0.22em] text-muted">Нет фото</span>
         </div>

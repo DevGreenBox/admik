@@ -160,11 +160,16 @@ function AccountContent() {
     <div className="page-transition pt-16 md:pt-20 relative min-h-screen">
       <div className="absolute inset-0 bg-cover bg-center opacity-[0.04] pointer-events-none" style={{ backgroundImage: `url(${IMAGES.checkout.bg})` }} />
       <div className="container-brand py-10 md:py-16 max-w-4xl relative z-10">
-        {orderParam && (
+        {/* Баннер «оформлен» — только когда заказ реально загрузился (карточка ниже
+            есть). Раньше показывался на голом orderParam и при отсутствии/неверном
+            token обещал карточку, которой нет. */}
+        {linkedOrder && (
           <FadeIn>
             <div className="bg-surface border border-border p-6 mb-8">
-              <p className="text-[10px] uppercase tracking-[0.15em] text-accent mb-2">Заказ оформлен</p>
-              <p className="text-sm">Заказ #{orderParam} создан. Статус и трекинг — ниже.</p>
+              <p className="text-[10px] uppercase tracking-[0.15em] text-accent mb-2">
+                {searchParams.get("paid") ? "Оплата получена" : "Заказ оформлен"}
+              </p>
+              <p className="text-sm">Заказ #{linkedOrder.number} — статус и трекинг ниже.</p>
             </div>
           </FadeIn>
         )}
@@ -187,14 +192,14 @@ function AccountContent() {
         {hydrated && orders.length > 0 && (
           <div className="space-y-4 mb-10">
             {orders
-              .filter((o) => o.number !== orderParam)
+              .filter((o) => !(linkedOrder && o.number === orderParam))
               .map((o) => (
                 <StoredOrderCard key={o.number} number={o.number} token={o.accessToken} />
               ))}
           </div>
         )}
 
-        {hydrated && orders.length === 0 && !linkedOrder && (
+        {hydrated && orders.length === 0 && !linkedOrder && !orderParam && (
           <div className="text-center py-12">
             <Package className="h-10 w-10 mx-auto mb-4 text-muted" strokeWidth={1} />
             <p className="text-sm text-muted">Заказов на этом устройстве пока нет</p>

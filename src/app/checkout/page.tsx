@@ -11,6 +11,7 @@ import {
   cdekCalculate,
   quoteCart,
   createOrder,
+  initPayment,
   mapPaymentMethod,
   AdmikApiError,
   type AdmikCdekCityDto,
@@ -190,12 +191,26 @@ export default function CheckoutPage() {
         createdAt: new Date().toISOString(),
       });
       // Помечаем оформление завершённым ДО clearCart(), чтобы эффект-редирект на
-      // /cart не сработал на опустошённой корзине и не перебил переход на /account.
+      // /cart не сработал на опустошённой корзине и не перебил переход дальше.
       submittedRef.current = true;
       clearCart();
-      router.push(
-        `/account?order=${encodeURIComponent(created.number)}&token=${encodeURIComponent(created.accessToken)}`,
-      );
+
+      const accountUrl = `/account?order=${encodeURIComponent(created.number)}&token=${encodeURIComponent(created.accessToken)}`;
+
+      // ОНЛАЙН-ОПЛАТА: инициируем платёж и ведём покупателя на платёжный шлюз
+      // (боевой Т-Банк — реальная форма; mock — demo-страница). Без этого заказ
+      // оставался бы «Ожидает оплаты» без способа заплатить (был тупик). Если оплата
+      // недоступна (модуль payments выключен / сбой init) — заказ создан, ведём в ЛК.
+      try {
+        const pay = await initPayment(created.number, {
+          accessToken: created.accessToken,
+          returnUrl: `${window.location.origin}${accountUrl}`,
+        });
+        window.location.href = pay.paymentUrl;
+        return;
+      } catch {
+        router.push(accountUrl);
+      }
     } catch (e) {
       // 409 нет остатка / 422 невалидно — показываем сообщение бэкенда, не падаем.
       setError(e instanceof AdmikApiError ? e.message : "Не удалось оформить заказ");

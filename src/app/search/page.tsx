@@ -7,6 +7,12 @@ import { Search as SearchIcon } from "lucide-react";
 import { listProducts, fromListItem, type StorefrontProduct } from "@/lib/admik";
 import { ProductCard } from "@/components/catalog/ProductCard";
 import { FadeIn } from "@/components/ui/Animations";
+import { pluralRu } from "@/lib/plural";
+
+// Лимит результатов поиска — как в каталоге (без лимита бэкенд отдавал страницу по
+// умолчанию ~24, а подпись выдавала её размер за итог). Для магазина уровня THE CASE
+// 60 покрывает весь каталог; подпись честно отражает число показанных результатов.
+const SEARCH_LIMIT = 60;
 
 function SearchContent() {
   const searchParams = useSearchParams();
@@ -25,7 +31,7 @@ function SearchContent() {
     let cancelled = false;
     setLoading(true);
     const t = setTimeout(() => {
-      listProducts({ q })
+      listProducts({ q, limit: SEARCH_LIMIT })
         .then((items) => {
           if (!cancelled) setResults(items.map(fromListItem));
         })
@@ -76,7 +82,7 @@ function SearchContent() {
               <>
                 <p className="text-sm text-muted mb-8">
                   {results.length}{" "}
-                  {results.length === 1 ? "результат" : "результатов"} по запросу «{query}»
+                  {pluralRu(results.length, ["результат", "результата", "результатов"])} по запросу «{query}»
                 </p>
 
                 {results.length === 0 ? (

@@ -240,6 +240,37 @@ export async function createOrder(
   });
 }
 
+/** Результат инициации онлайн-оплаты Т-Банк (PaymentURL — куда вести браузер). */
+export interface AdmikPaymentInitDto {
+  paymentUrl: string;
+  paymentId: string;
+  status: string;
+  isMock: boolean;
+}
+
+/**
+ * Инициация онлайн-оплаты заказа (POST /payments/tbank/init). Сумму считает СЕРВЕР
+ * (anti-tamper), доступ к заказу — по token заказа ИЛИ email покупателя. Возвращает
+ * PaymentURL платёжного шлюза (боевой Т-Банк) либо demo-страницы (mock-режим).
+ * `returnUrl` (опц.) — куда вернуть покупателя после demo-оплаты.
+ */
+export async function initPayment(
+  orderNumber: string,
+  proof: { accessToken?: string; email?: string; returnUrl?: string },
+  config?: Partial<AdmikClientConfig>,
+): Promise<AdmikPaymentInitDto> {
+  return request<AdmikPaymentInitDto>('/payments/tbank/init', {
+    method: 'POST',
+    body: {
+      orderNumber,
+      accessToken: proof.accessToken,
+      email: proof.email,
+      returnUrl: proof.returnUrl,
+    },
+    config,
+  });
+}
+
 /**
  * Трекинг/ЛК: GET /orders/{number}?token=…|email=… (анти-перебор номеров).
  * Подтверждение — токен заказа (выдаётся при создании) или email покупателя.

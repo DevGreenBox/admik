@@ -77,7 +77,7 @@ export function Header({ categories = [] }: { categories?: AdmikCategoryDto[] })
                       </div>
                     </div>
                   ) : (
-                    <Link key={link.href} href={link.href} className="eyebrow text-graphite link-underline">
+                    <Link key={link.label} href={link.href} className="eyebrow text-graphite link-underline">
                       {link.label}
                     </Link>
                   ),
