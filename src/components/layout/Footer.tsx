@@ -15,15 +15,22 @@ const FOOTER_LINKS = {
     { href: "/catalog?category=coats", label: "Халаты" },
   ],
   service: [
-    { href: "/#delivery", label: "Доставка и оплата" },
-    { href: "/#contacts", label: "Контакты" },
+    { href: "/#delivery", label: "Доставка" },
+    { href: "/payment", label: "Оплата" },
+    { href: "/returns", label: "Обмен и возврат" },
+    { href: "/care", label: "Уход за вещами" },
+    { href: "/reviews", label: "ВЫ + THE CASE" },
     { href: "/account", label: "Личный кабинет" },
   ],
   legal: [
-    { href: "/privacy", label: "Политика конфиденциальности" },
+    { href: "/privacy", label: "Обработка персональных данных" },
     { href: "/terms", label: "Пользовательское соглашение" },
   ],
 };
+
+// TODO(контент клиента): подставить реальный ник Telegram и телефон поддержки.
+const SUPPORT_TELEGRAM = "https://t.me/thecase_support";
+const SUPPORT_PHONE = "+70000000000";
 
 export function Footer() {
   const [email, setEmail] = useState("");
@@ -68,8 +75,14 @@ export function Footer() {
                 ))}
               </ul>
               <div className="mt-8 space-y-3 text-[11px] text-white/55">
+                <p className="eyebrow text-white/40">Поддержка</p>
+                <a href={SUPPORT_TELEGRAM} target="_blank" rel="noopener noreferrer" className="block hover:text-white transition-colors">
+                  Написать в Telegram
+                </a>
+                <a href={`tel:${SUPPORT_PHONE}`} className="block hover:text-white transition-colors">
+                  Позвонить
+                </a>
                 <a href="mailto:hello@thecase.ru" className="block hover:text-white transition-colors">hello@thecase.ru</a>
-                <a href="tel:+74951234567" className="block hover:text-white transition-colors">+7 (495) 123-45-67</a>
               </div>
             </div>
 
@@ -85,8 +98,13 @@ export function Footer() {
                 ))}
               </ul>
               <div className="mt-8 flex gap-6">
-                {["Instagram", "Telegram"].map((s) => (
-                  <a key={s} href="#" className="eyebrow text-white/35 hover:text-white transition-colors">{s}</a>
+                {[
+                  { label: "Instagram", href: "#" },
+                  { label: "Telegram", href: SUPPORT_TELEGRAM },
+                ].map((s) => (
+                  <a key={s.label} href={s.href} target="_blank" rel="noopener noreferrer" className="eyebrow text-white/35 hover:text-white transition-colors">
+                    {s.label}
+                  </a>
                 ))}
               </div>
             </div>

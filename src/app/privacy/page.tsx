@@ -5,7 +5,7 @@ export default function PrivacyPage() {
     <div className="page-transition pt-16 md:pt-20">
       <div className="container-brand py-12 md:py-16 max-w-3xl">
         <FadeIn>
-          <h1 className="heading-lg heading-rule mb-8">Политика конфиденциальности</h1>
+          <h1 className="heading-lg heading-rule mb-8">Обработка персональных данных</h1>
           <div className="space-y-6 text-sm text-muted leading-relaxed">
             <p>
               Настоящая Политика конфиденциальности определяет порядок обработки и защиты
