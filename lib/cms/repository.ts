@@ -9,6 +9,7 @@
  */
 
 import { sql } from '@/lib/db/client';
+import { escapeLike } from '@/lib/db/like';
 import type {
   CmsPage,
   CmsPageListRow,
@@ -125,7 +126,7 @@ export async function listCmsPages(
   const page = Math.max(1, Math.floor(f.page));
   const pageSize = Math.min(200, Math.max(1, Math.floor(f.pageSize)));
   const offset = (page - 1) * pageSize;
-  const searchTerm = f.search?.trim() ? `%${f.search.trim()}%` : null;
+  const searchTerm = f.search?.trim() ? `%${escapeLike(f.search.trim())}%` : null;
 
   const where = sql`
     WHERE (${searchTerm}::text IS NULL OR title ILIKE ${searchTerm} OR slug::text ILIKE ${searchTerm})

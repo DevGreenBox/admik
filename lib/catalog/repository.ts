@@ -9,6 +9,7 @@
  */
 
 import { sql } from '@/lib/db/client';
+import { escapeLike } from '@/lib/db/like';
 import { getEffectiveSettings } from '@/lib/config/settings';
 import type {
   Attribute,
@@ -370,7 +371,7 @@ export async function listProducts(
   const pageSize = Math.min(200, Math.max(1, Math.floor(f.pageSize)));
   const offset = (page - 1) * pageSize;
 
-  const searchTerm = f.search?.trim() ? `%${f.search.trim()}%` : null;
+  const searchTerm = f.search?.trim() ? `%${escapeLike(f.search.trim())}%` : null;
   // Поддерево категории (сама + потомки) для рекурсивного фильтра. null = без фильтра.
   const categoryIds = f.categoryId ? await categorySubtreeIds(f.categoryId) : null;
 
