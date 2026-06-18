@@ -12,6 +12,7 @@ import {
   type AuditEntry,
 } from '@/lib/audit/log';
 import { logger } from '@/lib/logger';
+import { normalizeClientIp } from '@/lib/server/request-ip';
 
 /** Структурный логгер для наблюдаемости Server Actions (Этап 6, §6.3.1). */
 const actionLog = logger.child({ module: 'action' });
@@ -137,16 +138,22 @@ async function defaultRevalidate(path: string): Promise<void> {
   revalidatePath(path);
 }
 
-/** IP/UA по умолчанию — читаются из заголовков запроса через next/headers. */
+/**
+ * IP/UA по умолчанию — читаются из заголовков запроса через next/headers.
+ *
+ * IP из X-Forwarded-For / X-Real-IP ВАЛИДИРУЕТСЯ (normalizeClientIp): заголовки
+ * подконтрольны клиенту/прокси, а значение уходит в колонку `inet` (audit_log.ip).
+ * Сырой мусор без валидации ломал бы каст к inet при записи аудита. Невалидный
+ * IP → '' (пайплайн коалесцирует пустую строку в undefined → БД пишет null).
+ */
 async function defaultGetRequestMeta(): Promise<RequestMeta> {
   const { headers } = await import('next/headers');
   const store = await headers();
-  const forwarded = store.get(FORWARDED_FOR_HEADER);
-  // x-forwarded-for может содержать список «client, proxy1, proxy2» — берём первый.
   const ip =
-    forwarded?.split(',')[0]?.trim() ||
-    store.get(REAL_IP_HEADER)?.trim() ||
-    '';
+    normalizeClientIp(
+      store.get(FORWARDED_FOR_HEADER),
+      store.get(REAL_IP_HEADER),
+    ) ?? '';
   const userAgent = store.get('user-agent') ?? undefined;
   return { ip, userAgent };
 }

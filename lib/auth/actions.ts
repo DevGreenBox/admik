@@ -22,6 +22,7 @@ import {
   resetLoginFailures,
 } from '@/lib/auth/rate-limit';
 import { writeAudit } from '@/lib/audit/log';
+import { normalizeClientIp } from '@/lib/server/request-ip';
 
 /**
  * Server Actions аутентификации (docs/04 §4.1, §4.4, §4.6, §7.1).
@@ -87,15 +88,21 @@ const changePasswordSchema = z.object({
 const FORWARDED_FOR_HEADER = 'x-forwarded-for';
 const REAL_IP_HEADER = 'x-real-ip';
 
-/** Извлекает IP и User-Agent текущего запроса для аудита/rate-limit. */
+/**
+ * Извлекает IP и User-Agent текущего запроса для аудита/rate-limit/сессий.
+ *
+ * IP из X-Forwarded-For / X-Real-IP ВАЛИДИРУЕТСЯ (normalizeClientIp) перед
+ * возвратом: эти заголовки подконтрольны клиенту/прокси, а сырое значение идёт
+ * в колонку `inet` (sessions.ip). Кривой/подделанный заголовок без валидации
+ * ломал бы createSession (каст к inet падает) → весь логин. Невалидный IP → undefined.
+ */
 async function getRequestMeta(): Promise<{ ip?: string; userAgent?: string }> {
   const { headers } = await import('next/headers');
   const store = await headers();
-  const forwarded = store.get(FORWARDED_FOR_HEADER);
-  const ip =
-    forwarded?.split(',')[0]?.trim() ||
-    store.get(REAL_IP_HEADER)?.trim() ||
-    undefined;
+  const ip = normalizeClientIp(
+    store.get(FORWARDED_FOR_HEADER),
+    store.get(REAL_IP_HEADER),
+  );
   const userAgent = store.get('user-agent') ?? undefined;
   return { ip, userAgent };
 }

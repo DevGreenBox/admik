@@ -22,16 +22,25 @@ import { STOREFRONT_WRITE_METHODS } from '@/lib/storefront/cors';
 import { CreateOrderSchema } from '@/lib/orders/schemas';
 import { createOrder } from '@/lib/orders/repository';
 import { toOrderCreatedDto } from '@/lib/storefront/order-dto';
+import { normalizeClientIp } from '@/lib/server/request-ip';
 
 export const dynamic = 'force-dynamic';
 
-/** Client IP для orders.ip (как audit_log): первый из X-Forwarded-For / X-Real-IP. */
+/**
+ * Client IP для orders.ip (колонка `inet`, как audit_log).
+ *
+ * IP ВАЛИДИРУЕТСЯ (normalizeClientIp): X-Forwarded-For / X-Real-IP подконтрольны
+ * клиенту/прокси, а сырое значение шло в `inet` — кривой/подделанный заголовок
+ * ронял каст и весь INSERT заказа (тот же класс бага, что в auth/action.ts).
+ * Невалидный IP → null (колонка nullable).
+ */
 function clientIp(req: Request): string | null {
-  const fwd = req.headers.get('x-forwarded-for');
-  if (fwd) {
-    return fwd.split(',')[0]!.trim() || null;
-  }
-  return req.headers.get('x-real-ip');
+  return (
+    normalizeClientIp(
+      req.headers.get('x-forwarded-for'),
+      req.headers.get('x-real-ip'),
+    ) ?? null
+  );
 }
 
 export async function POST(req: Request): Promise<Response> {
