@@ -54,7 +54,7 @@ export default function CartPage() {
                         src={item.imageUrl}
                         alt={item.name}
                         fill
-                        className="object-cover"
+                        className="object-contain object-center"
                       />
                     )}
                   </Link>

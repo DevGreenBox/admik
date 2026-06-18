@@ -55,6 +55,8 @@ export interface AdmikProductListItemDto {
 }
 
 export interface AdmikProductDetailDto {
+  /** uuid товара — нужен для заказа товара БЕЗ вариантов (cart/quote/orders по productId). */
+  id: string;
   slug: string;
   sku: string;
   name: string;
@@ -71,6 +73,19 @@ export interface AdmikProductDetailDto {
   variants: AdmikVariantDto[];
   media: AdmikMediaDto[];
   inStock: boolean;
+  /** Готовый SEO-блок карточки (Admik уже применил фолбэки: title=имя товара и т.п.). */
+  meta: AdmikSeoMeta;
+}
+
+/** Resolved SEO-мета сущности из Storefront API (Admik подставил фолбэки). */
+export interface AdmikSeoMeta {
+  title: string;
+  description: string | null;
+  canonical: string | null;
+  ogTitle: string;
+  ogDescription: string | null;
+  ogImageUrl: string | null;
+  noindex: boolean;
 }
 
 export interface AdmikCategoryDto {
@@ -97,8 +112,12 @@ export type AdmikPaymentMethod =
   | 'invoice';
 
 export interface AdmikCartLineInput {
-  variantId: string;
+  /** uuid варианта (товар с размерами). Взаимоисключимо с productId. */
+  variantId?: string;
+  /** uuid товара без вариантов (один SKU). Шлётся, когда variantId нет. */
+  productId?: string;
   qty: number;
+  weightG?: number;
 }
 
 export interface AdmikDeliverySelection {
@@ -238,6 +257,9 @@ export interface StorefrontVariant {
 
 /** Товар в форме, удобной компонентам витрины (адаптировано из Admik DTO). */
 export interface StorefrontProduct {
+  /** uuid товара (есть только у detail; для list-снимка undefined). Нужен для
+   *  заказа товара без вариантов (productId в корзине/quote/orders). */
+  id?: string;
   slug: string;
   name: string;
   price: number;

@@ -180,6 +180,7 @@ export function fromDetail(dto: AdmikProductDetailDto): StorefrontProduct {
     .filter((u): u is string => Boolean(u));
 
   return {
+    id: dto.id,
     slug: dto.slug,
     name: dto.name,
     price: parseMoney(dto.price),

@@ -297,7 +297,7 @@ export async function cdekCalculate(
   input: {
     to: { city_code?: number; postal_code?: string };
     deliveryMode?: 'pvz' | 'postamat' | 'door';
-    items: Array<{ variantId?: string; qty: number; weightG?: number }>;
+    items: Array<{ variantId?: string; productId?: string; qty: number; weightG?: number }>;
     tariffCode?: number;
   },
   config?: Partial<AdmikClientConfig>,

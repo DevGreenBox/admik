@@ -8,6 +8,7 @@ import { Logo } from "@/components/ui/Logo";
 import { selectCartCount, useStore } from "@/lib/store";
 
 const NAV_LEFT = [
+  { href: "/catalog", label: "Каталог" },
   { href: "/#shop", label: "Коллекция" },
   { href: "/#about", label: "О бренде" },
   { href: "/#materials", label: "Материалы" },
@@ -125,9 +126,6 @@ export function Header() {
                 </motion.div>
               ))}
               <div className="mt-8 pt-10 border-t border-border flex flex-col gap-5">
-                <Link href="/catalog" onClick={() => setMenuOpen(false)} className="link-editorial self-start">
-                  Каталог
-                </Link>
                 <Link href="/account" onClick={() => setMenuOpen(false)} className="link-editorial self-start">
                   Личный кабинет
                 </Link>

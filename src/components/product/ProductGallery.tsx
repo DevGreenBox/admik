@@ -41,7 +41,7 @@ export function ProductGallery({ images, name }: ProductGalleryProps) {
                   active === i ? "opacity-100" : "opacity-40 hover:opacity-70"
                 }`}
               >
-                <Image src={img} alt="" fill className="object-cover" sizes="80px" loading="lazy" />
+                <Image src={img} alt="" fill className="object-contain object-center" sizes="80px" loading="lazy" />
               </button>
             ))}
           </div>
@@ -57,7 +57,7 @@ export function ProductGallery({ images, name }: ProductGalleryProps) {
             alt={`${name} — фото ${active + 1}`}
             fill
             priority
-            className="object-cover"
+            className="object-contain"
             sizes="(max-width: 1024px) 100vw, 45vw"
           />
 

@@ -8,7 +8,16 @@
  */
 
 export interface CartItem {
+  /**
+   * Ключ позиции корзины. Для товара с размерами — uuid варианта; для товара
+   * БЕЗ вариантов — uuid товара (productId), чтобы позиция была уникальной.
+   */
   variantId: string;
+  /**
+   * Задан ⇒ товар без вариантов: в Admik (cart/quote/orders) шлём productId,
+   * а не variantId. Для товаров с размерами не задаётся.
+   */
+  productId?: string;
   slug: string;
   name: string;
   size: string;

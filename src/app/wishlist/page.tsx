@@ -79,6 +79,7 @@ export default function WishlistPage() {
                           secondary={product.images[1]}
                           alt={product.name}
                           sizes="(max-width: 768px) 50vw, 25vw"
+                          imageClassName="object-contain object-center"
                           className="aspect-[3/4] bg-surface"
                         />
                       </Link>

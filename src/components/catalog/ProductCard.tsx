@@ -42,6 +42,7 @@ export function ProductCard({ product, priority = false, size = "default" }: Pro
               alt={product.name}
               priority={priority}
               sizes={imageSizes}
+              imageClassName="object-contain object-center"
               className={`bg-surface ${size === "large" ? "aspect-[3/4]" : "aspect-[3/4]"}`}
             />
           </Link>
@@ -120,17 +121,33 @@ function QuickViewModal({
 
   // Полная карточка (из API) при наличии, иначе списочный снимок.
   const view = detail ?? product;
+  const hasVariants = view.variants.length > 0;
+  // Товар без вариантов покупается по productId (есть только у detail-карточки).
+  const canBuySimple = !hasVariants && view.inStock && Boolean(view.id);
+  const canBuy = hasVariants ? Boolean(selectedVariant) : canBuySimple;
 
   const handleAdd = () => {
-    if (!selectedVariant) return;
-    addToCart({
-      variantId: selectedVariant.id,
-      slug: view.slug,
-      name: view.name,
-      size: selectedVariant.size,
-      price: selectedVariant.price,
-      imageUrl: view.imageUrl,
-    });
+    if (!canBuy) return;
+    if (hasVariants && selectedVariant) {
+      addToCart({
+        variantId: selectedVariant.id,
+        slug: view.slug,
+        name: view.name,
+        size: selectedVariant.size,
+        price: selectedVariant.price,
+        imageUrl: view.imageUrl,
+      });
+    } else if (canBuySimple && view.id) {
+      addToCart({
+        variantId: view.id,
+        productId: view.id,
+        slug: view.slug,
+        name: view.name,
+        size: "",
+        price: view.price,
+        imageUrl: view.imageUrl,
+      });
+    }
     onClose();
   };
 
@@ -161,7 +178,7 @@ function QuickViewModal({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-10 md:gap-16 px-6 md:px-10 pb-10 md:pb-12">
               <div className="relative aspect-[3/4] bg-surface">
                 {view.images[0] && (
-                  <Image src={view.images[0]} alt={view.name} fill className="object-cover" />
+                  <Image src={view.images[0]} alt={view.name} fill className="object-contain" />
                 )}
               </div>
               <div className="flex flex-col justify-center py-2">
@@ -172,38 +189,44 @@ function QuickViewModal({
                   <p className="body-editorial mb-12">{view.description}</p>
                 )}
 
-                <p className="label-caps mb-5">Размер</p>
-                <div className="flex flex-wrap gap-2 mb-12 min-h-[44px]">
-                  {loading ? (
+                {loading ? (
+                  <div className="mb-12 min-h-[44px]">
                     <div className="skeleton h-11 w-full" />
-                  ) : view.variants.length === 0 ? (
-                    <p className="text-[10px] uppercase tracking-[0.18em] text-muted">Нет в наличии</p>
-                  ) : (
-                    view.variants.map((variant) => (
-                      <button
-                        key={variant.id}
-                        disabled={!variant.inStock}
-                        onClick={() => setSelectedVariant(variant)}
-                        className={`min-w-[48px] px-4 py-3 text-[10px] uppercase tracking-[0.18em] border transition-all duration-500 disabled:opacity-30 disabled:cursor-not-allowed ${
-                          selectedVariant?.id === variant.id
-                            ? "border-graphite bg-graphite text-white"
-                            : "border-border hover:border-graphite"
-                        }`}
-                      >
-                        {variant.size}
-                      </button>
-                    ))
-                  )}
-                </div>
+                  </div>
+                ) : hasVariants ? (
+                  <>
+                    <p className="label-caps mb-5">Размер</p>
+                    <div className="flex flex-wrap gap-2 mb-12 min-h-[44px]">
+                      {view.variants.map((variant) => (
+                        <button
+                          key={variant.id}
+                          disabled={!variant.inStock}
+                          onClick={() => setSelectedVariant(variant)}
+                          className={`min-w-[48px] px-4 py-3 text-[10px] uppercase tracking-[0.18em] border transition-all duration-500 disabled:opacity-30 disabled:cursor-not-allowed ${
+                            selectedVariant?.id === variant.id
+                              ? "border-graphite bg-graphite text-white"
+                              : "border-border hover:border-graphite"
+                          }`}
+                        >
+                          {variant.size}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                ) : !canBuySimple ? (
+                  <p className="text-[10px] uppercase tracking-[0.18em] text-muted mb-12">Нет в наличии</p>
+                ) : (
+                  <div className="mb-12" />
+                )}
 
                 <Button
                   variant="primary"
                   size="lg"
-                  disabled={!selectedVariant}
+                  disabled={!canBuy}
                   onClick={handleAdd}
                   className="w-full"
                 >
-                  В корзину
+                  {hasVariants && !selectedVariant ? "Выберите размер" : "В корзину"}
                 </Button>
                 <Link
                   href={`/product/${view.slug}`}

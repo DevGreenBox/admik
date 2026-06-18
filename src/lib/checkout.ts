@@ -10,9 +10,17 @@
 import type { CartItem } from '@/types';
 import type { AdmikCartLineInput } from '@/lib/admik';
 
-/** Позиции корзины → строки `{ variantId, qty }` для quote/order. */
+/**
+ * Позиции корзины → строки для quote/order. Товар без вариантов несёт productId
+ * (тогда шлём его), иначе — variantId (товар с размерами). Admik принимает одно
+ * из двух (ADR-010).
+ */
 export function cartToItems(cart: CartItem[]): AdmikCartLineInput[] {
-  return cart.map((item) => ({ variantId: item.variantId, qty: item.quantity }));
+  return cart.map((item) =>
+    item.productId
+      ? { productId: item.productId, qty: item.quantity }
+      : { variantId: item.variantId, qty: item.quantity },
+  );
 }
 
 /**

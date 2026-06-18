@@ -146,6 +146,7 @@ describe('fromListItem', () => {
 
 describe('fromDetail', () => {
   const dto: AdmikProductDetailDto = {
+    id: '123e4567-e89b-42d3-a456-426614174000',
     slug: 'kostyum-essential',
     sku: 'KE-001',
     name: 'Костюм Essential',
@@ -176,6 +177,15 @@ describe('fromDetail', () => {
       { url: null, type: 'image', alt: '', isPrimary: false },
     ],
     inStock: true,
+    meta: {
+      title: 'Костюм Essential',
+      description: 'Описание',
+      canonical: null,
+      ogTitle: 'Костюм Essential',
+      ogDescription: null,
+      ogImageUrl: null,
+      noindex: false,
+    },
   };
 
   it('атрибуты → поля витрины', () => {

@@ -94,7 +94,7 @@ export default function CheckoutPage() {
         cdekCalculate({
           to: { city_code: city.code },
           deliveryMode: "pvz",
-          items: cart.map((c) => ({ variantId: c.variantId, qty: c.quantity })),
+          items: cartToItems(cart),
         }),
       ]);
       setPickupPoints(points);
