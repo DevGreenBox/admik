@@ -163,3 +163,41 @@ describe('storefront/delivery/cdek/calculate — uuid-валидация поз�
     expect(resolveCartLine).toHaveBeenCalledTimes(1);
   });
 });
+
+/**
+ * Волна 6 (DoS-амплификация): массив items без верхней границы запускал
+ * Promise.all(resolveCartLine→getProductById = 6-7 SELECT) на каждый элемент.
+ * Фикс: .max(MAX_CART_ITEMS=200) как в /cart/quote и /orders → лишние позиции
+ * отсекаются схемой (400) ДО любых обращений к БД.
+ */
+describe('storefront/delivery/cdek/calculate — лимит числа позиций (волна 6, anti-DoS)', () => {
+  beforeEach(() => setEnv());
+  afterEach(() => {
+    process.env = { ...ORIGINAL };
+    vi.resetModules();
+    vi.doUnmock('@/lib/orders/repository');
+  });
+
+  it('> 200 позиций → 400 bad_request, resolveCartLine НЕ вызывается', async () => {
+    const resolveCartLine = vi.fn(async () => {
+      throw new Error('resolveCartLine не должен вызываться при превышении лимита позиций');
+    });
+    vi.doMock('@/lib/orders/repository', () => ({ resolveCartLine }));
+
+    const { POST } = await loadCalc();
+    const items = Array.from({ length: 201 }, () => ({ qty: 1 }));
+    const res = await POST(authedPost('http://x/', { to: { city_code: 44 }, items }));
+    expect(res.status).toBe(400);
+    expect(resolveCartLine).not.toHaveBeenCalled();
+  });
+
+  it('ровно 200 позиций — в пределах лимита (схема не отвергает)', async () => {
+    const resolveCartLine = vi.fn(async () => ({ ok: false, reason: 'variant_not_found' as const }));
+    vi.doMock('@/lib/orders/repository', () => ({ resolveCartLine }));
+
+    const { POST } = await loadCalc();
+    const items = Array.from({ length: 200 }, () => ({ qty: 1 }));
+    const res = await POST(authedPost('http://x/', { to: { city_code: 44 }, items }));
+    expect(res.status).toBe(200);
+  });
+});

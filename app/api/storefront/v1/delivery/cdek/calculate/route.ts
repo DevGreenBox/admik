@@ -31,6 +31,7 @@ import { getCdekManager } from '@/lib/cdek/manager';
 import { getCdekConfig } from '@/lib/cdek/config';
 import { Calculator, type CartLineDims } from '@/lib/cdek/services/calculator';
 import { resolveCartLine } from '@/lib/orders/repository';
+import { MAX_CART_ITEMS } from '@/lib/orders/schemas';
 
 /**
  * Нормализует клиентский tariffCode против белого списка (config.allowedTariffs):
@@ -77,7 +78,13 @@ const CalculateSchema = z
         message: 'Требуется to.city_code или to.postal_code.',
       }),
     deliveryMode: z.enum(['pvz', 'postamat', 'door']).optional(),
-    items: z.array(itemSchema).min(1, 'Список позиций пуст.'),
+    // .max — единая политика с /cart/quote и /orders (MAX_CART_ITEMS): без верхней
+    // границы N позиций × Promise.all(resolveCartLine→getProductById = 6-7 SELECT)
+    // давали амплификацию запросов к БД (DoS, волна 6). Лимит закрывает окно.
+    items: z
+      .array(itemSchema)
+      .min(1, 'Список позиций пуст.')
+      .max(MAX_CART_ITEMS, `Слишком много позиций (максимум ${MAX_CART_ITEMS}).`),
     tariffCode: z.number().int().optional(),
   })
   .strip();
