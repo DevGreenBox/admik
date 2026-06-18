@@ -32,7 +32,10 @@ function withParam(url: string, key: string, val: string, allowed: string[]): st
   try {
     const u = new URL(url);
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return '/';
-    if (!allowed.includes(normalizeOrigin(u.origin) ?? '')) return '/';
+    // Allowlist применяем ТОЛЬКО когда он задан. Пустой STOREFRONT_ALLOWED_ORIGINS —
+    // это режим «demo без секретов» (auth.ts: доступ открыт всем); жёсткая проверка
+    // тогда отправляла бы ЛЮБОЙ легитимный возврат в '/' и ломала demo-оплату.
+    if (allowed.length > 0 && !allowed.includes(normalizeOrigin(u.origin) ?? '')) return '/';
     u.searchParams.set(key, val);
     return u.toString();
   } catch {
