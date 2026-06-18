@@ -101,7 +101,7 @@ export class PaymentService {
   async initPayment(
     order: Order,
     items: OrderItem[] = [],
-    opts: { baseOrigin?: string } = {},
+    opts: { baseOrigin?: string; returnUrl?: string } = {},
   ): Promise<InitPaymentResult> {
     const cfg = this.manager.config;
     const amountKop = toKopecks(order.grandTotal);
@@ -115,6 +115,7 @@ export class PaymentService {
         orderId: order.number,
         amountKop,
         baseOrigin: opts.baseOrigin,
+        returnUrl: opts.returnUrl,
       });
       await setPaymentRefAndProvider(order.id, res.paymentId);
       return {
@@ -228,6 +229,36 @@ export class PaymentService {
     }
 
     return { verified: true, processed, duplicate: false, paymentStatus: next };
+  }
+
+  /**
+   * DEMO-подтверждение mock-платежа (СТРОГО mock-режим, для стенда без боевых
+   * ключей Т-Банк). В mock пароль отсутствует → webhook не верифицируется и платёж
+   * нельзя довести до paid штатно; эта точка имитирует CONFIRMED, чтобы demo-оплата
+   * доходила до конца. В БОЕВОМ режиме (заданы TBANK_*) — РЕФЬЮЗ (никакого обхода
+   * реальной оплаты). Идемпотентно через recordWebhookEvent (UNIQUE payment_id,status).
+   */
+  async confirmMockPayment(
+    orderNumber: string,
+    paymentId: string,
+  ): Promise<{ ok: boolean; reason?: string }> {
+    if (!this.manager.isMock) return { ok: false, reason: 'not_mock' };
+    if (!orderNumber || !paymentId) return { ok: false, reason: 'bad_request' };
+    const found = await getOrderByNumber(orderNumber);
+    if (!found) return { ok: false, reason: 'order_not_found' };
+    await recordWebhookEvent({
+      log: {
+        orderId: found.order.id,
+        paymentId,
+        status: 'CONFIRMED',
+        amountKop: toKopecks(found.order.grandTotal),
+        isMock: true,
+        rawPayload: { mock: true, source: 'mock-pay-demo', orderNumber, paymentId },
+      },
+      nextStatus: mapTbankStatus('CONFIRMED'),
+      comment: 'mock-pay-demo:CONFIRMED',
+    });
+    return { ok: true };
   }
 }
 

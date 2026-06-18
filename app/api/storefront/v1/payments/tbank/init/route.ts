@@ -35,6 +35,9 @@ const InitSchema = z
     orderNumber: z.string().trim().min(1, 'Требуется orderNumber.'),
     accessToken: z.string().trim().optional(),
     email: z.string().trim().optional(),
+    // Куда вернуть покупателя после demo-оплаты (mock-режим). Боевой Т-Банк
+    // использует SuccessURL/FailURL из конфигурации — returnUrl на него не влияет.
+    returnUrl: z.string().trim().url().optional(),
   })
   .strip();
 
@@ -65,7 +68,7 @@ export async function POST(req: Request): Promise<Response> {
         );
       }
 
-      const { orderNumber, accessToken, email } = parsed.data;
+      const { orderNumber, accessToken, email, returnUrl } = parsed.data;
 
       const found = await getOrderByNumber(orderNumber);
 
@@ -90,6 +93,7 @@ export async function POST(req: Request): Promise<Response> {
       try {
         const res = await new PaymentService().initPayment(found.order, found.items, {
           baseOrigin: requestOrigin(req),
+          returnUrl,
         });
         return jsonData(
           {

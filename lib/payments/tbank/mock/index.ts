@@ -42,6 +42,8 @@ export interface MockInitInput {
    * Пусто → возвращается относительный путь (универсально, без хардкода домена).
    */
   baseOrigin?: string;
+  /** Куда demo-страница вернёт покупателя после имитации оплаты (опц.). */
+  returnUrl?: string;
 }
 
 /** Результат mock-инициации (фейковые PaymentId/PaymentURL, is_mock). */
@@ -66,12 +68,13 @@ function mockPaymentId(): string {
  */
 export function mockInitPayment(input: MockInitInput): MockInitResult {
   const paymentId = mockPaymentId();
-  const query = new URLSearchParams({
+  const params = new URLSearchParams({
     orderId: input.orderId,
     paymentId,
     amount: String(input.amountKop),
-  }).toString();
-  const path = `${MOCK_PAYMENT_URL_PATH}?${query}`;
+  });
+  if (input.returnUrl) params.set('returnUrl', input.returnUrl);
+  const path = `${MOCK_PAYMENT_URL_PATH}?${params.toString()}`;
   const paymentUrl =
     input.baseOrigin && input.baseOrigin.length > 0
       ? `${input.baseOrigin.replace(/\/$/, '')}${path}`
