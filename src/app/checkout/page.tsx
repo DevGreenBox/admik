@@ -196,19 +196,29 @@ export default function CheckoutPage() {
       clearCart();
 
       const accountUrl = `/account?order=${encodeURIComponent(created.number)}&token=${encodeURIComponent(created.accessToken)}`;
+      const method = mapPaymentMethod(paymentMethod);
 
-      // ОНЛАЙН-ОПЛАТА: инициируем платёж и ведём покупателя на платёжный шлюз
-      // (боевой Т-Банк — реальная форма; mock — demo-страница). Без этого заказ
-      // оставался бы «Ожидает оплаты» без способа заплатить (был тупик). Если оплата
-      // недоступна (модуль payments выключен / сбой init) — заказ создан, ведём в ЛК.
+      // Онлайн-эквайринг Т-Банк инициируем ТОЛЬКО для карты/СБП. СДЭК PAY (cdek-pay) —
+      // оплата через СДЭК (на ПВЗ/при получении), отдельная онлайн-инициация не нужна →
+      // ведём в ЛК (заказ создан, статус «ожидает оплаты»; доплата — кнопкой в ЛК).
+      // Раньше (регресс волны 9) ЛЮБОЙ метод безусловно слался на Т-Банк-карту.
+      if (method !== "card" && method !== "sbp") {
+        router.push(accountUrl);
+        return;
+      }
       try {
         const pay = await initPayment(created.number, {
           accessToken: created.accessToken,
           returnUrl: `${window.location.origin}${accountUrl}`,
         });
-        window.location.href = pay.paymentUrl;
-        return;
+        if (pay?.paymentUrl) {
+          window.location.href = pay.paymentUrl;
+          return;
+        }
+        router.push(accountUrl); // init без URL — заказ создан, оплата из ЛК
       } catch {
+        // Оплата не запустилась (модуль payments off / сбой) — заказ создан; в ЛК
+        // покупатель увидит заказ и кнопку «Оплатить картой» (не молчаливый тупик).
         router.push(accountUrl);
       }
     } catch (e) {

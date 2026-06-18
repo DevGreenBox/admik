@@ -4,7 +4,7 @@ import { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { Package } from "lucide-react";
 import { formatPrice } from "@/lib/format";
-import { getOrder, AdmikApiError, type AdmikOrderPublicDto } from "@/lib/admik";
+import { getOrder, initPayment, AdmikApiError, type AdmikOrderPublicDto } from "@/lib/admik";
 import { useStore } from "@/lib/store";
 import { Button } from "@/components/ui/Button";
 import { FadeIn } from "@/components/ui/Animations";
@@ -25,8 +25,45 @@ function statusLabel(status: string): string {
   return STATUS_LABELS[status.toLowerCase()] ?? status;
 }
 
-/** Карточка заказа: статусы, позиции, суммы, трек. */
-function OrderCard({ order }: { order: AdmikOrderPublicDto }) {
+/** Можно ли доплатить заказ онлайн: не оплачен и метод — карта/СБП (Т-Банк-эквайринг). */
+function isPayable(order: AdmikOrderPublicDto): boolean {
+  const st = order.paymentStatus?.toLowerCase();
+  const m = order.paymentMethod?.toLowerCase();
+  return (st === "pending" || st === "unset" || !st) && (m === "card" || m === "sbp");
+}
+
+/** Карточка заказа: статусы, позиции, суммы, трек + «Оплатить» для неоплаченного online-заказа. */
+function OrderCard({
+  order,
+  payProof,
+}: {
+  order: AdmikOrderPublicDto;
+  payProof?: { token?: string; email?: string };
+}) {
+  const [paying, setPaying] = useState(false);
+  const [payError, setPayError] = useState("");
+  const canPay = isPayable(order) && Boolean(payProof?.token || payProof?.email);
+
+  const handlePay = async () => {
+    if (!payProof) return;
+    setPaying(true);
+    setPayError("");
+    try {
+      const ret = `${window.location.origin}/account?order=${encodeURIComponent(order.number)}${
+        payProof.token ? `&token=${encodeURIComponent(payProof.token)}` : ""
+      }`;
+      const pay = await initPayment(order.number, { ...payProof, returnUrl: ret });
+      if (pay?.paymentUrl) {
+        window.location.href = pay.paymentUrl;
+        return;
+      }
+      setPayError("Не удалось начать оплату. Попробуйте позже.");
+    } catch (e) {
+      setPayError(e instanceof AdmikApiError ? e.message : "Не удалось начать оплату.");
+    }
+    setPaying(false);
+  };
+
   return (
     <div className="border border-border p-6 space-y-4">
       <div className="flex justify-between items-start">
@@ -69,6 +106,14 @@ function OrderCard({ order }: { order: AdmikOrderPublicDto }) {
         {order.delivery.city && <p>Город: {order.delivery.city}</p>}
         {order.delivery.track && <p>Трек СДЭК: {order.delivery.track}</p>}
       </div>
+      {canPay && (
+        <div className="border-t border-border pt-4">
+          <Button variant="primary" size="md" onClick={handlePay} disabled={paying} className="w-full">
+            {paying ? "Переход к оплате..." : "Оплатить картой"}
+          </Button>
+          {payError && <p className="text-sm text-accent mt-2">{payError}</p>}
+        </div>
+      )}
     </div>
   );
 }
@@ -93,7 +138,7 @@ function StoredOrderCard({ number, token }: { number: string; token: string }) {
     };
   }, [number, token]);
 
-  if (order) return <OrderCard order={order} />;
+  if (order) return <OrderCard order={order} payProof={{ token }} />;
   return (
     <div className="border border-border p-6">
       <p className="text-[11px] uppercase tracking-[0.12em]">#{number}</p>
@@ -160,10 +205,21 @@ function AccountContent() {
     <div className="page-transition pt-16 md:pt-20 relative min-h-screen">
       <div className="absolute inset-0 bg-cover bg-center opacity-[0.04] pointer-events-none" style={{ backgroundImage: `url(${IMAGES.checkout.bg})` }} />
       <div className="container-brand py-10 md:py-16 max-w-4xl relative z-10">
+        {/* Отмена/неудача оплаты: заказ создан, но не оплачен — честно сообщаем и
+            направляем к кнопке «Оплатить» в карточке ниже (не выдаём за успех). */}
+        {searchParams.get("payment") === "cancelled" && (
+          <FadeIn>
+            <div className="border border-accent/40 bg-accent/5 p-6 mb-8">
+              <p className="text-[10px] uppercase tracking-[0.15em] text-accent mb-2">Оплата не завершена</p>
+              <p className="text-sm">Заказ создан, но не оплачен. Вы можете оплатить его ниже.</p>
+            </div>
+          </FadeIn>
+        )}
+
         {/* Баннер «оформлен» — только когда заказ реально загрузился (карточка ниже
-            есть). Раньше показывался на голом orderParam и при отсутствии/неверном
-            token обещал карточку, которой нет. */}
-        {linkedOrder && (
+            есть) И оплата не была отменена. Раньше показывался на голом orderParam и
+            при отсутствии/неверном token обещал карточку, которой нет. */}
+        {linkedOrder && searchParams.get("payment") !== "cancelled" && (
           <FadeIn>
             <div className="bg-surface border border-border p-6 mb-8">
               <p className="text-[10px] uppercase tracking-[0.15em] text-accent mb-2">
@@ -182,7 +238,7 @@ function AccountContent() {
         {linkedOrder && (
           <FadeIn>
             <div className="mb-8">
-              <OrderCard order={linkedOrder} />
+              <OrderCard order={linkedOrder} payProof={{ token: tokenParam ?? undefined }} />
             </div>
           </FadeIn>
         )}
@@ -234,7 +290,7 @@ function AccountContent() {
             </form>
             {lookupOrder && (
               <div className="mt-8 max-w-md">
-                <OrderCard order={lookupOrder} />
+                <OrderCard order={lookupOrder} payProof={{ email: lookupForm.email.trim() }} />
               </div>
             )}
           </div>
