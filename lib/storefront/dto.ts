@@ -36,6 +36,13 @@ import type {
 // ---------------------------------------------------------------------------
 
 /**
+ * Резолвер «ключ объекта хранилища → публичный URL» (инъекция storage.url).
+ * Единый источник истины для всех Storefront-мапперов (cms-dto переэкспортирует).
+ * Сырой S3-ключ наружу НЕ отдаём — URL собирается на границе мапперов.
+ */
+export type PublicUrlResolver = (key: string) => string;
+
+/**
  * Публичная SEO-мета сущности (docs/11 §5.3.4). Наружу — ТОЛЬКО `ogImageUrl`
  * (НЕ ключ S3): URL собирается storage.publicUrl на границе мапперов.
  */
@@ -138,21 +145,37 @@ export interface ProductDetailDto {
 // Мапперы.
 // ---------------------------------------------------------------------------
 
-/** Бренд-ref → публичный BrandDto (только name/slug/logo). */
-export function toBrandDto(brand: BrandRef | null): BrandDto | null {
+/**
+ * Бренд-ref → публичный BrandDto (только name/slug/logo).
+ *
+ * `publicUrl` (storage.url) инъецируется роутом и резолвит logoKey → публичный
+ * URL — сырой S3-ключ наружу НЕ отдаём (зеркально toMediaDto/og:image). Без
+ * резолвера logoUrl=null (обратная совместимость, не падаем) — раньше logoUrl
+ * был всегда null из-за фантомного поля domain.logoUrl (регресс волны 4).
+ */
+export function toBrandDto(
+  brand: BrandRef | null,
+  publicUrl?: PublicUrlResolver,
+): BrandDto | null {
   if (!brand) {
     return null;
   }
   return {
     slug: brand.slug,
     name: brand.name,
-    logoUrl: brand.logoUrl ?? null,
+    logoUrl: brand.logoKey && publicUrl ? publicUrl(brand.logoKey) : null,
   };
 }
 
 /** Опции мапперов, несущих SEO-мету (seoCtx инъецируется параметром). */
 export interface SeoMapOpts {
   seoCtx: SeoCtx;
+  /**
+   * Резолвер ключ → URL для логотипа бренда. Опционален: по умолчанию берётся
+   * `seoCtx.publicUrl` (тот же storage.url). Явно нужен, когда seoCtx собран под
+   * иной pathPrefix, но резолвер логотипа должен совпадать.
+   */
+  publicUrl?: PublicUrlResolver;
 }
 
 /** Строит SeoMetaDto сущности через чистый билдер (наружу — ogImageUrl, не ключ). */
@@ -173,12 +196,19 @@ function entityMeta(
   return buildSeoMeta(entity, ctx);
 }
 
-/** Полный бренд → публичный FullBrandDto (для /brands). Внутренние поля скрыты. */
+/**
+ * Полный бренд → публичный FullBrandDto (для /brands). Внутренние поля скрыты.
+ *
+ * logoUrl резолвится из logoKey через резолвер: по умолчанию — `opts.seoCtx.publicUrl`
+ * (тот же storage.url, что собирает og:image), либо явный `opts.publicUrl`. Без
+ * ключа → null. Это закрывает регресс волны 4 (logoUrl был всегда null).
+ */
 export function toFullBrandDto(brand: Brand, opts: SeoMapOpts): FullBrandDto {
+  const publicUrl = opts.publicUrl ?? opts.seoCtx.publicUrl;
   return {
     slug: brand.slug,
     name: brand.name,
-    logoUrl: brand.logoUrl ?? null,
+    logoUrl: brand.logoKey ? publicUrl(brand.logoKey) : null,
     description: brand.description,
     seoTitle: brand.seoTitle,
     seoDescription: brand.seoDescription,
@@ -217,9 +247,15 @@ export function toCategoryTreeDto(tree: CategoryTreeNode[]): CategoryDto[] {
     }));
 }
 
-/** Строка списка товаров → публичный DTO (price/скидка готовы). */
+/**
+ * Строка списка товаров → публичный DTO (price/скидка готовы).
+ *
+ * `publicUrl` (storage.url) инъецируется роутом — резолвит логотип бренда из
+ * logoKey. Опционален (обратная совместимость): без него brand.logoUrl=null.
+ */
 export function toProductListItemDto(
   row: ProductListRow,
+  publicUrl?: PublicUrlResolver,
 ): ProductListItemDto {
   return {
     slug: row.slug,
@@ -230,7 +266,7 @@ export function toProductListItemDto(
     onSale: row.onSale,
     isNew: row.effectiveIsNew,
     isFeatured: row.isFeatured,
-    brand: toBrandDto(row.brand),
+    brand: toBrandDto(row.brand, publicUrl),
     imageUrl: row.primaryMediaUrl,
     // «В наличии» = есть доступное (quantity − reserved > 0), а не физический
     // остаток: зарезервированное под незавершённые заказы не показываем (оверселл).
@@ -333,7 +369,8 @@ export function toProductDetailDto(
     onSale: isOnSale(product.basePrice, product.compareAtPrice),
     isNew: opts.effectiveIsNew,
     isFeatured: product.isFeatured,
-    brand: toBrandDto(product.brand),
+    // Логотип бренда резолвится тем же storage.url, что и og:image (seoCtx.publicUrl).
+    brand: toBrandDto(product.brand, opts.seoCtx.publicUrl),
     categories: opts.categorySlugs,
     attributes: product.attributesCache ?? {},
     variants: product.variants

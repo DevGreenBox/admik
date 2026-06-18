@@ -12,6 +12,7 @@ import { listProducts } from '@/lib/catalog/repository';
 import type { ProductListFilter } from '@/lib/catalog/repository';
 import { getActiveCategoryIdBySlug } from '@/lib/storefront/queries';
 import { toProductListItemDto } from '@/lib/storefront/dto';
+import { getStorage } from '@/lib/storage';
 
 export const dynamic = 'force-dynamic';
 
@@ -84,7 +85,9 @@ export async function GET(req: Request): Promise<Response> {
     };
 
     const { rows, total } = await listProducts(filter);
-    const data = rows.map(toProductListItemDto);
+    // Логотип бренда: ключ → публичный URL через storage.url (как og:image/медиа).
+    const storage = getStorage();
+    const data = rows.map((r) => toProductListItemDto(r, (k) => storage.url(k)));
 
     return jsonData(
       data,

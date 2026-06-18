@@ -138,8 +138,8 @@ export function mapBrandRef(row: any): BrandRef | null {
     id: row.b_id,
     slug: row.b_slug,
     name: row.b_name,
+    // SQL JOIN отдаёт только b_logo_key; URL резолвится в DTO/админке.
     logoKey: row.b_logo_key ?? null,
-    logoUrl: row.b_logo_url ?? null,
   };
 }
 
@@ -150,8 +150,8 @@ export function mapBrand(row: any): Brand {
     slug: row.slug,
     name: row.name,
     description: row.description ?? '',
+    // SQL отдаёт только logo_key; URL резолвится в DTO/админке (как og:image).
     logoKey: row.logo_key ?? null,
-    logoUrl: row.logo_url ?? null,
     isActive: Boolean(row.is_active),
     sort: Number(row.sort),
     seoTitle: row.seo_title ?? null,

@@ -38,53 +38,82 @@ const brandRef: BrandRef = {
   slug: 'bosch',
   name: 'Bosch',
   logoKey: 'brands/bosch.png',
-  logoUrl: 'https://cdn/bosch.png',
 };
 
+function fullBrand(over: Partial<Brand> = {}): Brand {
+  return {
+    id: 'b1',
+    slug: 'bosch',
+    name: 'Bosch',
+    description: 'desc',
+    logoKey: 'brands/bosch.png',
+    isActive: true,
+    sort: 5,
+    seoTitle: 't',
+    seoDescription: 'd',
+    ogTitle: null,
+    ogDescription: null,
+    ogImageKey: null,
+    canonicalUrl: null,
+    noindex: false,
+    createdAt: D,
+    updatedAt: D,
+    ...over,
+  };
+}
+
 describe('storefront/dto — бренды', () => {
-  it('toBrandDto отдаёт только slug/name/logoUrl (без logoKey/id)', () => {
-    const dto = toBrandDto(brandRef);
+  // РЕГРЕСС (major, волна 4): logoUrl собирается из logoKey РЕЗОЛВЕРОМ
+  // (storage.url), а НЕ берётся из фантомного domain.logoUrl. Раньше logoUrl
+  // был всегда null (домен читал несуществующую колонку logo_url).
+  it('toBrandDto резолвит logoKey→logoUrl через publicUrl; без id/logoKey наружу', () => {
+    const dto = toBrandDto(brandRef, (k) => `https://cdn.test/${k}`);
     expect(dto).toEqual({
       slug: 'bosch',
       name: 'Bosch',
-      logoUrl: 'https://cdn/bosch.png',
+      logoUrl: 'https://cdn.test/brands/bosch.png',
     });
-    // Не должно быть внутренних полей.
     expect(dto).not.toHaveProperty('id');
     expect(dto).not.toHaveProperty('logoKey');
+  });
+
+  it('toBrandDto без резолвера → logoUrl=null (обратная совместимость, не падает)', () => {
+    expect(toBrandDto(brandRef)).toEqual({ slug: 'bosch', name: 'Bosch', logoUrl: null });
+  });
+
+  it('toBrandDto: logoKey=null → logoUrl=null даже с резолвером', () => {
+    const dto = toBrandDto({ ...brandRef, logoKey: null }, (k) => `https://cdn.test/${k}`);
+    expect(dto!.logoUrl).toBeNull();
   });
 
   it('toBrandDto(null) → null', () => {
     expect(toBrandDto(null)).toBeNull();
   });
 
-  it('toFullBrandDto скрывает id/sort/isActive/даты', () => {
-    const brand: Brand = {
-      id: 'b1',
-      slug: 'bosch',
-      name: 'Bosch',
-      description: 'desc',
-      logoKey: 'k',
-      logoUrl: 'u',
-      isActive: true,
-      sort: 5,
-      seoTitle: 't',
-      seoDescription: 'd',
-      ogTitle: null,
-      ogDescription: null,
-      ogImageKey: null,
-      canonicalUrl: null,
-      noindex: false,
-      createdAt: D,
-      updatedAt: D,
-    };
-    const dto = toFullBrandDto(brand, { seoCtx: TEST_SEO_CTX });
+  // Регресс волны 4: FullBrandDto резолвит логотип тем же резолвером, что og:image
+  // (seoCtx.publicUrl). Раньше logoUrl был всегда null.
+  it('toFullBrandDto резолвит logoUrl из logoKey через seoCtx.publicUrl; скрывает служебное', () => {
+    const dto = toFullBrandDto(fullBrand(), { seoCtx: TEST_SEO_CTX });
+    expect(dto.logoUrl).toBe('https://cdn.test/brands/bosch.png');
     expect(dto).not.toHaveProperty('id');
     expect(dto).not.toHaveProperty('logoKey');
     expect(dto).not.toHaveProperty('isActive');
     expect(dto).not.toHaveProperty('sort');
     expect(dto).not.toHaveProperty('createdAt');
     expect(dto.slug).toBe('bosch');
+  });
+
+  it('toFullBrandDto: logoKey=null → logoUrl=null', () => {
+    const dto = toFullBrandDto(fullBrand({ logoKey: null }), { seoCtx: TEST_SEO_CTX });
+    expect(dto.logoUrl).toBeNull();
+  });
+
+  it('toFullBrandDto: явный opts.publicUrl имеет приоритет над seoCtx.publicUrl', () => {
+    const dto = toFullBrandDto(fullBrand(), {
+      seoCtx: TEST_SEO_CTX,
+      publicUrl: (k) => `https://logos.test/${k}`,
+    });
+    expect(dto.logoUrl).toBe('https://logos.test/brands/bosch.png');
   });
 });
 
@@ -108,15 +137,20 @@ describe('storefront/dto — список товаров', () => {
     createdAt: D,
   };
 
-  it('маппит цену/скидку и inStock из доступного остатка; не утекает status/id/sku', () => {
-    const dto = toProductListItemDto(row);
+  it('маппит цену/скидку и inStock из доступного остатка; резолвит лого бренда; не утекает status/id/sku', () => {
+    const dto = toProductListItemDto(row, (k) => `https://cdn.test/${k}`);
     expect(dto.price).toBe('790.00');
     expect(dto.compareAtPrice).toBe('1000.00');
     expect(dto.discountPct).toBe(21);
     expect(dto.onSale).toBe(true);
     expect(dto.isNew).toBe(true);
     expect(dto.isFeatured).toBe(true);
-    expect(dto.brand).toEqual({ slug: 'bosch', name: 'Bosch', logoUrl: 'https://cdn/bosch.png' });
+    // Логотип бренда резолвится переданным storage.url из logoKey (регресс волны 4).
+    expect(dto.brand).toEqual({
+      slug: 'bosch',
+      name: 'Bosch',
+      logoUrl: 'https://cdn.test/brands/bosch.png',
+    });
     expect(dto.imageUrl).toBe('https://cdn/img.jpg');
     expect(dto.inStock).toBe(true);
     // Внутренние поля наружу не отдаём.
@@ -244,6 +278,9 @@ describe('storefront/dto — карточка товара', () => {
     expect(dto.onSale).toBe(true);
     expect(dto.isNew).toBe(true);
     expect(dto.brand?.slug).toBe('bosch');
+    // Логотип бренда карточки резолвится тем же seoCtx.publicUrl, что и og:image
+    // (регресс волны 4 — раньше всегда null).
+    expect(dto.brand?.logoUrl).toBe('https://cdn.test/brands/bosch.png');
     expect(dto.categories).toEqual(['outerwear']);
     expect(dto.inStock).toBe(true);
     // Медиа — без внутреннего storageKey/sizeBytes.

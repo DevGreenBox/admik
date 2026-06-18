@@ -1,6 +1,7 @@
 import Link from 'next/link';
 
 import { listBrands } from '@/lib/catalog/repository';
+import { getStorage } from '@/lib/storage';
 
 import { Forbidden } from '../../_components/Forbidden';
 import { PageHeader } from '../../_components/PageHeader';
@@ -25,6 +26,13 @@ export default async function BrandsPage() {
   }
 
   const brands = await listBrands();
+  // Резолвим ключ логотипа в публичный URL на сервере (как og:image) — домен из
+  // storage, не хардкод; компонент получает готовый logoUrl для <img>.
+  const storage = getStorage();
+  const items = brands.map((b) => ({
+    ...b,
+    logoUrl: b.logoKey ? storage.url(b.logoKey) : null,
+  }));
 
   return (
     <div>
@@ -45,7 +53,7 @@ export default async function BrandsPage() {
       />
 
       <div className="mt-6">
-        <BrandList brands={brands} />
+        <BrandList brands={items} />
       </div>
     </div>
   );

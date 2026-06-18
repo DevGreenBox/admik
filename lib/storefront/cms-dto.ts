@@ -15,7 +15,7 @@
  */
 
 import { buildSeoMeta, type SeoCtx } from '@/lib/seo/meta';
-import type { SeoMetaDto } from './dto';
+import type { SeoMetaDto, PublicUrlResolver } from './dto';
 import type {
   CmsPage,
   CmsPageWithSections,
@@ -74,8 +74,12 @@ function pageMeta(page: CmsPage, ctx: SeoCtx): SeoMetaDto {
   );
 }
 
-/** Резолвер ключ объекта хранилища → публичный URL (инъекция storage.url). */
-export type PublicUrlResolver = (key: string) => string;
+/**
+ * Резолвер ключ объекта хранилища → публичный URL (инъекция storage.url).
+ * Единый источник истины — lib/storefront/dto; переэкспорт для обратной
+ * совместимости импортов из cms-dto.
+ */
+export type { PublicUrlResolver } from './dto';
 
 /**
  * Подменяет в content секции СЫРЫЕ ключи хранилища публичными URL: витрине НЕ

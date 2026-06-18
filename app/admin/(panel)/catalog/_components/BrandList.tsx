@@ -16,7 +16,13 @@ import type { ActionResult } from '@/lib/server/action';
  */
 type Fail = Extract<ActionResult<unknown>, { ok: false }>;
 
-export function BrandList({ brands }: { brands: Brand[] }) {
+/**
+ * Бренд для админ-таблицы: доменный Brand + готовый logoUrl, резолвенный на
+ * сервере из logoKey (storage.url) — домен URL не хранит (как og:image).
+ */
+export type BrandListItem = Brand & { logoUrl: string | null };
+
+export function BrandList({ brands }: { brands: BrandListItem[] }) {
   const router = useRouter();
   const [error, setError] = useState<Fail | null>(null);
 

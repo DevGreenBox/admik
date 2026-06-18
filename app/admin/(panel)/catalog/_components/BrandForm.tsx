@@ -20,7 +20,14 @@ import { SeoFieldset, type SeoFieldsetValue } from '../../_components/SeoFieldse
  */
 type Fail = Extract<ActionResult<unknown>, { ok: false }>;
 
-export function BrandForm({ brand }: { brand: Brand | null }) {
+/**
+ * Бренд для формы: доменный Brand + готовый logoUrl (резолвен на сервере из
+ * logoKey через storage.url, как og:image) — для предпросмотра <img>. URL в
+ * доменной модели не храним; null — лого нет.
+ */
+export type BrandFormBrand = Brand & { logoUrl?: string | null };
+
+export function BrandForm({ brand }: { brand: BrandFormBrand | null }) {
   const router = useRouter();
   const isEdit = brand !== null;
   const fileRef = useRef<HTMLInputElement>(null);

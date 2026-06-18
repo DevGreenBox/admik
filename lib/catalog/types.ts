@@ -109,8 +109,12 @@ export interface BrandRef {
   id: string;
   slug: string;
   name: string;
+  /**
+   * Ключ объекта логотипа в хранилище (как product_media.storage_key). URL
+   * собирается на границе представления (DTO/админка) через storage.url(key) —
+   * домен не хранится в домене (зеркально og:image, см. lib/seo/meta).
+   */
   logoKey: string | null;
-  logoUrl: string | null;
 }
 
 /** Бренд / производитель (brands, docs/06 §3.3). */
@@ -119,10 +123,12 @@ export interface Brand {
   slug: string;
   name: string;
   description: string;
-  /** Ключ объекта логотипа в хранилище (как product_media.storage_key). */
+  /**
+   * Ключ объекта логотипа в хранилище (как product_media.storage_key). URL
+   * собирается на границе представления (DTO/админка) через storage.url(key) —
+   * URL в доменной модели НЕ храним (зеркально og:image, см. lib/seo/meta).
+   */
   logoKey: string | null;
-  /** Публичный URL логотипа (если хранилище его отдаёт). */
-  logoUrl: string | null;
   isActive: boolean;
   sort: number;
   seoTitle: string | null;

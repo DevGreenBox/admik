@@ -95,7 +95,6 @@ describe('storefront/dto — FullBrandDto.meta / CategoryDto.meta', () => {
       name: 'Brembo',
       description: '',
       logoKey: null,
-      logoUrl: null,
       isActive: true,
       sort: 0,
       seoTitle: null,

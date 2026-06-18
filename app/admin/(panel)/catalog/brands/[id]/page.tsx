@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
 import { getBrandById } from '@/lib/catalog/repository';
+import { getStorage } from '@/lib/storage';
 
 import { Forbidden } from '../../../_components/Forbidden';
 import { guardCatalog } from '../../_components/guard';
@@ -33,6 +34,12 @@ export default async function BrandDetailPage({
   if (!brand) {
     notFound();
   }
+  // Резолвим ключ логотипа в публичный URL на сервере (как og:image) — для <img>.
+  const storage = getStorage();
+  const brandView = {
+    ...brand,
+    logoUrl: brand.logoKey ? storage.url(brand.logoKey) : null,
+  };
 
   return (
     <div>
@@ -45,7 +52,7 @@ export default async function BrandDetailPage({
       <h1 className="mt-2 text-2xl font-semibold text-gray-900">{brand.name}</h1>
 
       <div className="mt-6">
-        <BrandForm brand={brand} />
+        <BrandForm brand={brandView} />
       </div>
     </div>
   );

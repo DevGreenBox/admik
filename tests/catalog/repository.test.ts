@@ -158,27 +158,41 @@ describe('mapVariant', () => {
 });
 
 describe('mapBrand / mapBrandRef', () => {
-  it('mapBrand маппит поля и нормализует null', () => {
+  // РЕГРЕСС (major, волна 4): реальный SQL брендов выбирает ТОЛЬКО logo_key
+  // (колонки logo_url в схеме нет — миграция 0011). Маппер ОБЯЗАН прокинуть
+  // logo_key → logoKey; URL логотипа резолвится из ключа на границе
+  // представления (DTO/админка), как og:image (см. lib/seo/meta buildOgImageUrl).
+  // Раньше mapBrand читал несуществующий row.logo_url → logoUrl навсегда null.
+  it('mapBrand маппит logo_key→logoKey из РЕАЛЬНОЙ строки SQL (без logo_url)', () => {
     const b = mapBrand({
       id: 'b1', slug: 'bosch', name: 'Bosch', description: 'd', logo_key: 'k',
-      logo_url: null, is_active: true, sort: '2', seo_title: null,
+      is_active: true, sort: '2', seo_title: null,
       seo_description: null, created_at: new Date(), updated_at: new Date(),
     });
     expect(b.slug).toBe('bosch');
     expect(b.logoKey).toBe('k');
-    expect(b.logoUrl).toBeNull();
     expect(b.isActive).toBe(true);
     expect(b.sort).toBe(2);
+  });
+
+  it('mapBrand: logo_key=null → logoKey=null (без лого)', () => {
+    const b = mapBrand({
+      id: 'b2', slug: 'noname', name: 'NoName', description: '', logo_key: null,
+      is_active: true, sort: '0', seo_title: null, seo_description: null,
+      created_at: new Date(), updated_at: new Date(),
+    });
+    expect(b.logoKey).toBeNull();
   });
 
   it('mapBrandRef из префикса b_; null, если бренда нет', () => {
     expect(
       mapBrandRef({ b_id: null, b_slug: null, b_name: null, b_logo_key: null }),
     ).toBeNull();
+    // Реальный JOIN отдаёт ТОЛЬКО b_logo_key — маппер обязан прокинуть его в logoKey.
     const ref = mapBrandRef({
       b_id: 'b1', b_slug: 'kyb', b_name: 'KYB', b_logo_key: 'lk',
     });
-    expect(ref).toEqual({ id: 'b1', slug: 'kyb', name: 'KYB', logoKey: 'lk', logoUrl: null });
+    expect(ref).toEqual({ id: 'b1', slug: 'kyb', name: 'KYB', logoKey: 'lk' });
   });
 });
 
