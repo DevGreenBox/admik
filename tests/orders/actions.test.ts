@@ -200,6 +200,11 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.clearAllMocks();
+  // clearAllMocks чистит историю вызовов, но НЕ кастомную реализацию. Тесты,
+  // подменяющие реализацию release/commit (анти-oversell сценарий с состоянием
+  // inventory), могли бы протечь в соседние — реинсталлируем дефолт (return true).
+  releaseReservationMock.mockImplementation(async () => true);
+  commitReservationMock.mockImplementation(async () => true);
 });
 
 // =============================================================================
@@ -370,14 +375,133 @@ describe('резерв остатков при переходах', () => {
     expect(releaseReservationMock).not.toHaveBeenCalled();
   });
 
-  it('возврат (delivered→refunded) вызывает release и синхронизирует оплату', async () => {
+  // -----------------------------------------------------------------------------
+  // CRITICAL (волна 6, oversell): возврат/отмена УЖЕ ОТГРУЖЕННОГО заказа НЕ должен
+  // дёргать releaseReservation. На входе в shipped уже выполнен commitReservation
+  // (reserved-=qty), т.е. резерв ЭТОГО заказа списан. releaseReservation гардит по
+  // ГЛОБАЛЬНОМУ агрегату inventory (WHERE reserved >= qty), без привязки к заказу,
+  // — при наличии резерва ДРУГИХ открытых заказов на том же SKU release пройдёт и
+  // украдёт ЧУЖОЙ резерв → oversell. Поэтому для from ∈ {shipped, delivered,
+  // completed} эффект над резервом — 'none' (физический restock — отдельная опер.).
+  // -----------------------------------------------------------------------------
+
+  it('возврат отгруженного (shipped→refunded) НЕ вызывает release (резерв уже списан commit-ом)', async () => {
+    H.state.getOrderByIdQueue = [
+      orderDetail({ status: 'shipped', paymentStatus: 'paid' }),
+      orderDetail({ status: 'refunded', paymentStatus: 'refunded' }),
+    ];
+    const res = await refundOrder({ id: UUID });
+    expect(res.ok).toBe(true);
+    expect(releaseReservationMock).not.toHaveBeenCalled();
+    expect(commitReservationMock).not.toHaveBeenCalled();
+  });
+
+  it('возврат доставленного (delivered→refunded) НЕ вызывает release', async () => {
     H.state.getOrderByIdQueue = [
       orderDetail({ status: 'delivered', paymentStatus: 'paid' }),
       orderDetail({ status: 'refunded', paymentStatus: 'refunded' }),
     ];
     const res = await refundOrder({ id: UUID });
     expect(res.ok).toBe(true);
+    expect(releaseReservationMock).not.toHaveBeenCalled();
+  });
+
+  it('возврат завершённого (completed→refunded) НЕ вызывает release', async () => {
+    H.state.getOrderByIdQueue = [
+      orderDetail({ status: 'completed', paymentStatus: 'paid' }),
+      orderDetail({ status: 'refunded', paymentStatus: 'refunded' }),
+    ];
+    const res = await refundOrder({ id: UUID });
+    expect(res.ok).toBe(true);
+    expect(releaseReservationMock).not.toHaveBeenCalled();
+  });
+
+  it('возврат ДО отгрузки (paid→refunded) вызывает release (резерв ещё держится)', async () => {
+    H.state.getOrderByIdQueue = [
+      orderDetail({ status: 'paid', paymentStatus: 'paid' }),
+      orderDetail({ status: 'refunded', paymentStatus: 'refunded' }),
+    ];
+    const res = await refundOrder({ id: UUID });
+    expect(res.ok).toBe(true);
     expect(releaseReservationMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('возврат из packed (packed→refunded) вызывает release (резерв ещё держится)', async () => {
+    H.state.getOrderByIdQueue = [
+      orderDetail({ status: 'packed', paymentStatus: 'paid' }),
+      orderDetail({ status: 'refunded', paymentStatus: 'refunded' }),
+    ];
+    const res = await refundOrder({ id: UUID });
+    expect(res.ok).toBe(true);
+    expect(releaseReservationMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('отмена НЕотгруженного (new→cancelled) вызывает release (резерв возвращается)', async () => {
+    H.state.getOrderByIdQueue = [
+      orderDetail({ status: 'new' }),
+      orderDetail({ status: 'cancelled' }),
+    ];
+    const res = await cancelOrder({ id: UUID });
+    expect(res.ok).toBe(true);
+    expect(releaseReservationMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('отмена из awaiting_payment (awaiting_payment→cancelled) вызывает release', async () => {
+    H.state.getOrderByIdQueue = [
+      orderDetail({ status: 'awaiting_payment' }),
+      orderDetail({ status: 'cancelled' }),
+    ];
+    const res = await cancelOrder({ id: UUID });
+    expect(res.ok).toBe(true);
+    expect(releaseReservationMock).toHaveBeenCalledTimes(1);
+  });
+
+  // Сценарий «refund отгруженного A не уменьшает резерв B» (anti-oversell):
+  // моделируем on-the-fly inventory (одна SKU). Эмулируем фактическое поведение
+  // releaseReservation/commitReservation поверх состояния остатка и убеждаемся,
+  // что refund заказа A из статуса shipped НЕ трогает reserved (резерв заказа B
+  // сохраняется). На СТАРОМ коде stockEffectFor('refunded')='release' вызвал бы
+  // releaseReservation → reserved заказа B был бы списан (украден).
+  it('refund отгруженного A не уменьшает резерв B на той же SKU (anti-oversell)', async () => {
+    // Состояние остатка одной SKU: после отгрузки A (3 ед.) и резерва B (4 ед.).
+    // quantity=7 (10−3 commit A), reserved=4 (резерв B). available = 7−4 = 3.
+    const inv = { quantity: 7, reserved: 4 };
+    // Эмулируем release/commit поверх inv, чтобы поймать факт «кражи» резерва B.
+    releaseReservationMock.mockImplementation(async (..._a: unknown[]) => {
+      const unit = _a[1] as { qty: number };
+      if (inv.reserved >= unit.qty) {
+        inv.reserved -= unit.qty; // именно это «украло» бы резерв B на старом коде
+        return true;
+      }
+      return false;
+    });
+    commitReservationMock.mockImplementation(async (..._a: unknown[]) => {
+      const unit = _a[1] as { qty: number };
+      if (inv.reserved >= unit.qty && inv.quantity >= unit.qty) {
+        inv.quantity -= unit.qty;
+        inv.reserved -= unit.qty;
+        return true;
+      }
+      return false;
+    });
+
+    // Заказ A на 3 ед., из статуса shipped → refunded.
+    H.state.getOrderByIdQueue = [
+      {
+        order: { id: UUID, number: 'GA-2026-000001', status: 'shipped', paymentStatus: 'paid', deliveryStatus: 'in_transit' },
+        items: [{ productId: 'p-1', variantId: null, quantity: 3, skuSnapshot: 'SKU-1' }],
+      },
+      {
+        order: { id: UUID, number: 'GA-2026-000001', status: 'refunded', paymentStatus: 'refunded', deliveryStatus: 'in_transit' },
+        items: [{ productId: 'p-1', variantId: null, quantity: 3, skuSnapshot: 'SKU-1' }],
+      },
+    ];
+    const res = await refundOrder({ id: UUID });
+    expect(res.ok).toBe(true);
+    // Резерв заказа B (4 ед.) НЕ тронут — release не вызывался (дефолтные
+    // реализации release/commit реинсталлируются в afterEach — изоляция).
+    expect(inv.reserved).toBe(4);
+    expect(releaseReservationMock).not.toHaveBeenCalled();
   });
 });
 

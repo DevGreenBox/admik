@@ -39,10 +39,13 @@ import type { Order, OrderItem, PromoCode } from './types';
  * Доменные ошибки — через OrderError (errors.ts); недопустимые переходы статусов
  * валидируются canTransition (status.ts) на сервере. При смене статуса заказа
  * пишется order_status_history и (для перехода с резервом остатков) выполняется
- * release/commit на inventory (§6):
- *   • → cancelled → releaseReservation (возврат резерва);
- *   • → shipped   → commitReservation (списание остатка);
- *   • → refunded  → release (если ещё зарезервировано) / возврат на склад опц.
+ * release/commit на inventory (§6). Эффект зависит от ПАРЫ from→to (anti-oversell,
+ * волна 6 — см. stockEffectFor):
+ *   • cancel/refund из new/awaiting_payment/paid/packed → releaseReservation
+ *     (резерв заказа ещё держится — корректно вернуть);
+ *   • → shipped (из packed) → commitReservation (списание остатка);
+ *   • refund из shipped/delivered/completed → НИЧЕГО (резерв уже списан commit-ом;
+ *     release украл бы чужой резерв; физический restock — отдельная операция).
  *
  * Флаг модуля: каждый handler в начале await assertOrdersEnabled() — авторитетный
  * гейт (env ⊕ БД-оверрайд): выключение из UI отклоняет вызов, а не только скрывает.
@@ -98,9 +101,48 @@ function isUniqueViolation(err: unknown): boolean {
 /** Действие над резервом остатков при переходе статуса заказа (§6). */
 type StockEffect = 'none' | 'release' | 'commit';
 
-/** Какое действие над резервом выполнять при входе в статус `to`. */
-function stockEffectFor(to: Order['status']): StockEffect {
-  if (to === 'cancelled' || to === 'refunded') return 'release';
+/**
+ * Статусы заказа, ДО входа в которые резерв этого заказа ещё ДЕРЖИТСЯ на
+ * inventory (reserved += qty при createOrder, ещё НЕ списан commit-ом). commit
+ * выполняется ровно при входе в 'shipped' (см. ниже), поэтому из этих статусов
+ * cancel/refund обязан вернуть резерв (release). Имена статусов — из status.ts
+ * (ORDER_STATUS_TRANSITIONS) и types.ts.
+ */
+const RESERVE_HELD_STATUSES: ReadonlySet<Order['status']> = new Set([
+  'new',
+  'awaiting_payment',
+  'paid',
+  'packed',
+]);
+
+/**
+ * Какое действие над резервом выполнять при переходе `from → to` (§6).
+ *
+ * ВАЖНО (CRITICAL, волна 6, anti-oversell): эффект 'release' для cancel/refund
+ * зависит НЕ только от `to`, но и от `from`. На входе в 'shipped' выполняется
+ * commitReservation (quantity-=qty, reserved-=qty) — резерв ЭТОГО заказа уже
+ * СПИСАН. releaseReservation гардит по ГЛОБАЛЬНОМУ агрегату строки inventory
+ * (WHERE reserved >= qty) без привязки к заказу (per-order резерва в схеме 0010
+ * нет — хранятся только агрегатные quantity/reserved). Поэтому release при
+ * refund/cancel из shipped/delivered/completed НЕ нашёл бы «свой» резерв (он уже
+ * списан commit-ом), но при наличии резерва ДРУГИХ открытых заказов на том же
+ * SKU гард прошёл бы и release украл ЧУЖОЙ резерв → повреждение резервов чужих
+ * заказов + oversell (CHECK inventory_reserved_le_qty это не ловит).
+ *
+ * Поэтому:
+ *   • from ∈ RESERVE_HELD (new/awaiting_payment/paid/packed) + to cancelled/
+ *     refunded → 'release': резерв заказа ещё держится, корректно вернуть его;
+ *   • from ∈ {shipped, delivered, completed} + to refunded → 'none': резерв уже
+ *     списан commit-ом, трогать reserved НЕЛЬЗЯ. Физический возврат товара на
+ *     склад (restock: quantity += qty) — ОТДЕЛЬНАЯ операция, здесь её НЕ делаем
+ *     намеренно: консервативно не раздуваем остаток товаром, который мог не
+ *     вернуться физически (приёмка/осмотр возврата — вне этого перехода);
+ *   • to 'shipped' (из packed) → 'commit': списание остатка при отгрузке.
+ */
+function stockEffectFor(from: Order['status'], to: Order['status']): StockEffect {
+  if (to === 'cancelled' || to === 'refunded') {
+    return RESERVE_HELD_STATUSES.has(from) ? 'release' : 'none';
+  }
   if (to === 'shipped') return 'commit';
   return 'none';
 }
@@ -148,7 +190,7 @@ async function applyOrderStatusTransition(args: {
     );
   }
 
-  const effect = stockEffectFor(args.to);
+  const effect = stockEffectFor(from, args.to);
   const promoCodeId = current.order.promoCodeId;
   const revertPromo = args.to === 'cancelled' || args.to === 'refunded';
 
@@ -175,9 +217,12 @@ async function applyOrderStatusTransition(args: {
       );
     }
 
-    // (b) Резерв/списание по каждой позиции — только после успешного перехода
-    // (best-effort: при refund резерв уже мог быть списан отгрузкой — release
-    // вернёт false и не упадёт; commit обязан списать → иначе ROLLBACK).
+    // (b) Резерв/списание по каждой позиции — только после успешного перехода.
+    // effect учитывает `from` (см. stockEffectFor): release делается ТОЛЬКО когда
+    // резерв заказа ещё держится (from ∈ RESERVE_HELD). При refund отгруженного
+    // (from ∈ shipped/delivered/completed) effect='none' — резерв уже списан
+    // commit-ом, его нельзя трогать (иначе украли бы чужой резерв → oversell).
+    // commit обязан списать → иначе ROLLBACK.
     if (effect !== 'none') {
       for (const item of current.items) {
         if (!item.productId) continue; // снимок без ссылки — нечего двигать
