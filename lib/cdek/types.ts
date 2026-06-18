@@ -225,6 +225,13 @@ export interface CdekShipmentUpdateInput {
   statusAt?: Date | null;
   printUrl?: string | null;
   error?: string | null;
+  /**
+   * Явный сброс ошибки и счётчика попыток (успешное пере-создание накладной).
+   * COALESCE(error) сам по себе НЕ затирает старую ошибку при error=null, поэтому
+   * для успеха нужен явный флаг: error=NULL и retry_count=0. По умолчанию false —
+   * прежнее поведение (COALESCE-патч, retry_count не трогаем).
+   */
+  clearError?: boolean;
 }
 
 /** Поля для записи события в cdek_status_log (идемпотентная вставка). */

@@ -210,6 +210,52 @@ describe.skipIf(!INTEGRATION_DB_URL)('cdek/repository — CRUD (интеграц
     await sql`DELETE FROM orders WHERE id = ${orderId}`;
   });
 
+  // БАГ B волны 7: первый create накладной упал (error='...', retry_count>0,
+  // cdek_uuid=NULL); повторный create успешен (uuid выставлен). На успехе должен
+  // явно сброситься error и retry_count — COALESCE(error) при error=null оставил
+  // бы старый текст, и оператор видел бы «ошибку» на успешной накладной.
+  it('updateShipmentByOrderId: clearError=true сбрасывает error и retry_count при успехе', async () => {
+    await ensureLoaded();
+    const orderId = await makeOrder();
+    // Состояние после неудачного create.
+    await repo.createShipment({ orderId, error: 'Сбой связи с API СДЭК', isMock: true });
+    await repo.bumpShipmentRetry(orderId, 'Сбой связи с API СДЭК');
+    const failed = await repo.getShipmentByOrderId(orderId);
+    expect(failed?.error).toBe('Сбой связи с API СДЭК');
+    expect(failed?.retryCount).toBe(1);
+    expect(failed?.cdekUuid).toBeNull();
+
+    // Успешное пере-создание: выставляем uuid и явно чистим ошибку/счётчик.
+    const ok = await repo.updateShipmentByOrderId(orderId, {
+      cdekUuid: 'uuid-ok-' + Date.now(),
+      clearError: true,
+    });
+    expect(ok?.cdekUuid).not.toBeNull();
+    expect(ok?.error).toBeNull();
+    expect(ok?.retryCount).toBe(0);
+
+    const reread = await repo.getShipmentByOrderId(orderId);
+    expect(reread?.error).toBeNull();
+    expect(reread?.cdekUuid).not.toBeNull();
+    expect(reread?.retryCount).toBe(0);
+
+    await sql`DELETE FROM orders WHERE id = ${orderId}`;
+  });
+
+  // Регресс к существующему поведению: БЕЗ clearError патч НЕ трогает error (даже
+  // когда error не передан) и НЕ трогает retry_count — COALESCE сохраняет прежнее.
+  it('updateShipmentByOrderId: без clearError старая ошибка и retry_count сохраняются', async () => {
+    await ensureLoaded();
+    const orderId = await makeOrder();
+    await repo.createShipment({ orderId, error: 'Прошлая ошибка', isMock: true });
+    await repo.bumpShipmentRetry(orderId, 'Прошлая ошибка');
+    const updated = await repo.updateShipmentByOrderId(orderId, { statusCode: 'CREATED' });
+    expect(updated?.statusCode).toBe('CREATED');
+    expect(updated?.error).toBe('Прошлая ошибка'); // COALESCE не затёр
+    expect(updated?.retryCount).toBe(1); // не сброшен
+    await sql`DELETE FROM orders WHERE id = ${orderId}`;
+  });
+
   it('insertStatusLog: первый раз inserted=true, повтор inserted=false', async () => {
     await ensureLoaded();
     const orderId = await makeOrder();

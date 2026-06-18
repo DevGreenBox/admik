@@ -538,6 +538,13 @@ export class OrderService {
    * Транзакция: SELECT ... FOR UPDATE по orders/cdek_shipments → buildPayload → create →
    * запись cdek_uuid/cdek_number в cdek_shipments + денорм. в orders.cdek_uuid/cdek_track.
    * При ошибке: rollback + отдельный UPDATE error/retry_count++.
+   *
+   * Волна 7 (баг B): при УСПЕШНОМ пере-создании накладной (existing-ветка) вызов
+   * updateShipmentByOrderId идёт с clearError=true → error СБРАСЫВАЕТСЯ в NULL и
+   * retry_count в 0 ЯВНО. COALESCE(error) при error=null оставил бы текст прошлой
+   * неудачи, и оператор видел бы «ошибку» на фактически успешной накладной. Флаг
+   * clearError применяется ТОЛЬКО на успехе; обычный патч (без флага) сохраняет
+   * прежнее COALESCE-поведение и не трогает retry_count.
    */
   createShipment(orderId: string, opts?: { force?: boolean }): Promise<CdekShipment | null>;
 }

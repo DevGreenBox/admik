@@ -456,8 +456,12 @@ export class OrderService {
         error: null,
       };
 
+      // existing-ветка: пере-создание накладной. clearError=true ЯВНО сбрасывает
+      // error и retry_count прошлой неудачи (баг B волны 7) — COALESCE(error) при
+      // error=null оставил бы старый текст, и оператор видел бы «ошибку» на
+      // фактически успешной накладной.
       const saved = existing
-        ? await updateShipmentByOrderId(orderId, shipmentFields)
+        ? await updateShipmentByOrderId(orderId, { ...shipmentFields, clearError: true })
         : await repoCreateShipment({ orderId, ...shipmentFields });
 
       // Денормализация на orders (горячие поля для списков/витрины).

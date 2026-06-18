@@ -133,11 +133,17 @@ export async function createShipment(
 /**
  * Обновляет отправление по order_id (COALESCE-патч: NULL-поля во входе → не
  * меняются). Возвращает обновлённую запись или null, если отправления нет.
+ *
+ * clearError=true (успешное пере-создание накладной): error СБРАСЫВАЕТСЯ в NULL и
+ * retry_count в 0 ЯВНО, не через COALESCE (иначе error=null не затёр бы старый
+ * текст неудачи — баг B волны 7: успешная накладная показывала ошибку прошлой
+ * попытки). Без флага поведение прежнее: error через COALESCE, retry_count не трогаем.
  */
 export async function updateShipmentByOrderId(
   orderId: string,
   patch: CdekShipmentUpdateInput,
 ): Promise<CdekShipment | null> {
+  const clearError = patch.clearError ?? false;
   const [row] = await sql<Record<string, unknown>[]>`
     UPDATE cdek_shipments SET
       cdek_uuid     = COALESCE(${patch.cdekUuid ?? null}, cdek_uuid),
@@ -155,7 +161,9 @@ export async function updateShipmentByOrderId(
       status_name   = COALESCE(${patch.statusName ?? null}, status_name),
       status_at     = COALESCE(${patch.statusAt ?? null}, status_at),
       print_url     = COALESCE(${patch.printUrl ?? null}, print_url),
-      error         = COALESCE(${patch.error ?? null}, error),
+      error         = CASE WHEN ${clearError} THEN NULL
+                           ELSE COALESCE(${patch.error ?? null}, error) END,
+      retry_count   = CASE WHEN ${clearError} THEN 0 ELSE retry_count END,
       updated_at    = now()
     WHERE order_id = ${orderId}
     RETURNING *
