@@ -573,6 +573,10 @@ async function runE2E(browser, adminPage) {
       const hasTotals = /Итого/.test(summary) && /Доставка/.test(summary);
       if (hasTotals) PASS('e2e чекаут: серверный итог показан (товары/доставка/итого)');
       else FAIL('e2e чекаут итог', 'нет блока сумм на шаге оплаты');
+      // Выбираем «Банковская карта» — только card/sbp идут на Т-Банк-шлюз (волна 10);
+      // дефолт «СДЭК PAY» ведёт в ЛК без онлайн-инициации.
+      await sp.getByRole('button', { name: /Банковская карта/ }).first().click().catch(() => {});
+      await sp.waitForTimeout(300);
       await sp.getByRole('button', { name: /Подтвердить заказ/ }).first().click();
       // Онлайн-оплата (волна 9): заказ создан → redirect на demo-страницу оплаты
       // (домен Admik), там «Оплатить (демо)» → возврат в ЛК витрины с ?paid=1.

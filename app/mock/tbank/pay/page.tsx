@@ -14,6 +14,7 @@
 import { redirect, notFound } from 'next/navigation';
 import { getTbankConfig } from '@/lib/payments/tbank/config';
 import { PaymentService } from '@/lib/payments/tbank/service';
+import { getStorefrontConfig, normalizeOrigin } from '@/lib/storefront/env';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,11 +24,15 @@ function isMockMode(): boolean {
   return !cfg.terminalKey || !cfg.password;
 }
 
-/** Безопасно добавляет query-параметр к returnUrl; не-http(s)/битый → '/'. */
-function withParam(url: string, key: string, val: string): string {
+/** Безопасно добавляет query-параметр к returnUrl. ANTI-OPEN-REDIRECT: origin
+ *  returnUrl должен быть в allowlist витрины (STOREFRONT_ALLOWED_ORIGINS) — иначе
+ *  '/'. Не-http(s)/битый URL → тоже '/'. (Страница публична → returnUrl из query
+ *  нельзя слепо использовать для редиректа.) */
+function withParam(url: string, key: string, val: string, allowed: string[]): string {
   try {
     const u = new URL(url);
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return '/';
+    if (!allowed.includes(normalizeOrigin(u.origin) ?? '')) return '/';
     u.searchParams.set(key, val);
     return u.toString();
   } catch {
@@ -53,16 +58,20 @@ export default async function MockPayPage({
   const paymentId = sp.paymentId ?? '';
   const amountKop = Number(sp.amount ?? 0);
   const returnUrl = sp.returnUrl ?? '';
+  const allowed = getStorefrontConfig().allowedOrigins;
 
   async function pay() {
     'use server';
-    await new PaymentService().confirmMockPayment(orderId, paymentId);
-    redirect(returnUrl ? withParam(returnUrl, 'paid', '1') : '/');
+    // Подтверждаем платёж; paid=1 ставим ТОЛЬКО при успехе confirmMockPayment
+    // (иначе ?payment=failed — не выдаём неуспех за оплату).
+    const res = await new PaymentService().confirmMockPayment(orderId, paymentId);
+    if (!returnUrl) redirect('/');
+    redirect(res.ok ? withParam(returnUrl, 'paid', '1', allowed) : withParam(returnUrl, 'payment', 'failed', allowed));
   }
 
   async function cancel() {
     'use server';
-    redirect(returnUrl ? withParam(returnUrl, 'payment', 'cancelled') : '/');
+    redirect(returnUrl ? withParam(returnUrl, 'payment', 'cancelled', allowed) : '/');
   }
 
   return (
