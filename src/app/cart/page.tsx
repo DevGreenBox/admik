@@ -73,9 +73,11 @@ export default function CartPage() {
                           {item.name}
                         </h3>
                       </Link>
-                      <p className="text-[10px] text-muted mt-1">
-                        Размер: {item.size}
-                      </p>
+                      {item.size && (
+                        <p className="text-[10px] text-muted mt-1">
+                          Размер: {item.size}
+                        </p>
+                      )}
                     </div>
 
                     <div className="flex items-center justify-between mt-4">

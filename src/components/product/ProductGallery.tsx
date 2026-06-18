@@ -28,6 +28,20 @@ export function ProductGallery({ images, name }: ProductGalleryProps) {
     return () => window.removeEventListener("keydown", onKey);
   }, [lightbox, next, prev]);
 
+  // Нет фото (товар без медиа — весь стенд может быть без картинок): плейсхолдер
+  // вместо <Image src={undefined}> (консистентно с карточкой каталога).
+  if (!images || images.length === 0) {
+    return (
+      <div
+        className="image-luxury relative flex-1 aspect-[3/4] max-h-[78vh] bg-surface flex items-center justify-center"
+        role="img"
+        aria-label={name}
+      >
+        <span className="text-[10px] uppercase tracking-[0.22em] text-muted">Нет фото</span>
+      </div>
+    );
+  }
+
   return (
     <>
       <div className="flex flex-col-reverse lg:flex-row gap-4 lg:gap-6">

@@ -79,6 +79,10 @@ export default function CheckoutPage() {
   const citiesSeqRef = useRef(0);
   useEffect(() => {
     if (cityQuery.length < 2 || selectedCity?.name === cityQuery) {
+      // Сдвигаем seq и в этой ветке: иначе in-flight запрос (таймер уже сработал,
+      // ждём сеть), стартовавший ДО выбора города, по возврату пройдёт проверку
+      // seq и переоткроет выпадашку поверх уже выбранного города.
+      citiesSeqRef.current++;
       setCities([]);
       return;
     }
