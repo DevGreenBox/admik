@@ -4,7 +4,9 @@
 // ЗАПУСК (creds — только через env, не печатать):
 //   export OWNER_EMAIL=...; export OWNER_PASSWORD=...
 //   node scripts/verify-admin.mjs <phase>
-// Фазы: login | catalog | full | cleanup
+// Фазы: login | catalog | full | sections | e2e | cleanup
+//   e2e — браузерный проклик ВИТРИНЫ (STORE_ORIGIN): каталог → карточка → корзина
+//         → чекаут (город/ПВЗ/заказ) → проверка в админке → уборка ZZ-QA-товаров.
 //
 // `full` создаёт тест-данные с префиксом ZZ-QA- и в конце удаляет товары через
 // UI. Заказ/покупателя/промокоды добивает SQL-чистка (запускается отдельно по
@@ -396,6 +398,207 @@ async function runSections(page) {
   }
 }
 
+// --- E2E витрины: реальный проклик пути покупателя в браузере ---------------
+// Создаёт ZZ-QA товары разных вариаций через админку, затем РЕАЛЬНО прокликивает
+// витрину (STORE_ORIGIN) в отдельном чистом контексте: каталог → карточка
+// (простой/с размером/распроданный) → корзина → чекаут (город→ПВЗ→оплата→заказ)
+// → проверка заказа в админке → уборка. Это покрытие БРАУЗЕРНОГО UI витрины,
+// которого не было (раньше витрину дёргали только через API).
+
+// Резолв slug по имени из публичного листинга.
+async function slugByName(name) {
+  const list = await sf(`/products?limit=200`);
+  const items = Array.isArray(list.body?.data) ? list.body.data : [];
+  return items.find((i) => i.name === name)?.slug ?? null;
+}
+
+async function storeGoto(sp, path) {
+  await sp.goto(`${STORE_ORIGIN}${path}`, { waitUntil: 'networkidle' });
+  const txt = (await sp.locator('body').innerText().catch(() => '')) || '';
+  const broken = /Application error|Unhandled Runtime|client-side exception|Internal Server Error/i.test(txt);
+  if (broken) throw new Error(`страница ${path} с ошибкой рендера`);
+  return txt;
+}
+
+async function ctaText(sp) {
+  // Подпись основной кнопки покупки на карточке (первая полноширинная кнопка).
+  const btns = sp.locator('button:has-text("корзину"), button:has-text("Нет в наличии"), button:has-text("Выберите размер"), button:has-text("Добавлено")');
+  return ((await btns.first().textContent().catch(() => '')) || '').trim();
+}
+
+async function runE2E(browser, adminPage) {
+  const ids = {};
+  // --- SETUP: товары разных вариаций через админку ---
+  try {
+    ids.simple = await createProduct(adminPage, { name: `${PREFIX}E2E Простой`, price: 2490, compareAt: 2990, status: 'active' });
+    await setStock(adminPage, 25);
+    PASS('e2e setup: простой товар (скидка, остаток 25)', ids.simple);
+  } catch (e) { FAIL('e2e setup простой', e.message); }
+
+  try {
+    ids.sized = await createProduct(adminPage, { name: `${PREFIX}E2E С размером`, price: 1990, status: 'active' });
+    await addVariant(adminPage, 'M');
+    await setStock(adminPage, 15);
+    PASS('e2e setup: товар с размером M (остаток 15)', ids.sized);
+  } catch (e) { FAIL('e2e setup с размером', e.message); }
+
+  try {
+    ids.oos = await createProduct(adminPage, { name: `${PREFIX}E2E Распродан`, price: 1000, status: 'active' });
+    await setStock(adminPage, 0);
+    PASS('e2e setup: распроданный простой товар (остаток 0)', ids.oos);
+  } catch (e) { FAIL('e2e setup распродан', e.message); }
+
+  // Дать витрине (ISR/no-store) увидеть новые товары.
+  await adminPage.waitForTimeout(1500);
+  const slugs = {};
+  for (const [k, name] of [['simple', `${PREFIX}E2E Простой`], ['sized', `${PREFIX}E2E С размером`], ['oos', `${PREFIX}E2E Распродан`]]) {
+    slugs[k] = await slugByName(name).catch(() => null);
+  }
+
+  // --- STOREFRONT: чистый контекст (пустой localStorage → пустая корзина) ---
+  const ctx = await browser.newContext();
+  const sp = await ctx.newPage();
+  const consoleErrors = [];
+  sp.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text().slice(0, 160)); });
+  sp.on('pageerror', (e) => consoleErrors.push('pageerror: ' + (e.message || '').slice(0, 160)));
+
+  try {
+    // 1. Главная
+    try { await storeGoto(sp, '/'); PASS('e2e главная рендерится'); }
+    catch (e) { FAIL('e2e главная', e.message); }
+
+    // 2. Каталог — новые товары видны
+    try {
+      const txt = await storeGoto(sp, '/catalog');
+      const hasSimple = txt.includes(`${PREFIX}E2E Простой`);
+      const hasSized = txt.includes(`${PREFIX}E2E С размером`);
+      if (hasSimple && hasSized) PASS('e2e каталог: товары видны', 'простой+с размером');
+      else FAIL('e2e каталог', `простой=${hasSimple} сразмером=${hasSized}`);
+    } catch (e) { FAIL('e2e каталог', e.message); }
+
+    // 3. Карточка простого товара → "В корзину", добавить
+    if (slugs.simple) {
+      try {
+        await storeGoto(sp, `/product/${slugs.simple}`);
+        const cta = await ctaText(sp);
+        if (cta === 'В корзину') PASS('e2e карточка простого: кнопка "В корзину"');
+        else FAIL('e2e карточка простого', `кнопка="${cta}" (ждали "В корзину")`);
+        await sp.getByRole('button', { name: 'В корзину', exact: true }).first().click();
+        await sp.waitForTimeout(800);
+        const after = await ctaText(sp);
+        if (after === 'Добавлено') PASS('e2e добавление простого: "Добавлено"');
+        else INFO('e2e добавление простого', `после клика кнопка="${after}"`);
+      } catch (e) { FAIL('e2e карточка простого', e.message); }
+    } else FAIL('e2e карточка простого', 'slug не найден');
+
+    // 4. Карточка с размером → "Выберите размер" → выбрать M → "В корзину" → добавить
+    if (slugs.sized) {
+      try {
+        await storeGoto(sp, `/product/${slugs.sized}`);
+        const cta0 = await ctaText(sp);
+        if (cta0 === 'Выберите размер') PASS('e2e карточка с размером: до выбора "Выберите размер"');
+        else FAIL('e2e карточка с размером (до выбора)', `кнопка="${cta0}"`);
+        await sp.getByRole('button', { name: 'M', exact: true }).first().click();
+        await sp.waitForTimeout(400);
+        const cta1 = await ctaText(sp);
+        if (cta1 === 'В корзину') PASS('e2e карточка с размером: после выбора M "В корзину"');
+        else FAIL('e2e карточка с размером (после выбора)', `кнопка="${cta1}"`);
+        await sp.getByRole('button', { name: 'В корзину', exact: true }).first().click();
+        await sp.waitForTimeout(800);
+      } catch (e) { FAIL('e2e карточка с размером', e.message); }
+    } else FAIL('e2e карточка с размером', 'slug не найден');
+
+    // 5. Карточка распроданного → "Нет в наличии" (нельзя купить)
+    if (slugs.oos) {
+      try {
+        await storeGoto(sp, `/product/${slugs.oos}`);
+        const cta = await ctaText(sp);
+        if (cta === 'Нет в наличии') PASS('e2e карточка распроданного: "Нет в наличии"');
+        else FAIL('e2e карточка распроданного', `кнопка="${cta}" (ждали "Нет в наличии")`);
+      } catch (e) { FAIL('e2e карточка распроданного', e.message); }
+    }
+
+    // 6. Корзина — 2 позиции, изменение количества
+    try {
+      const txt = await storeGoto(sp, '/cart');
+      await sp.waitForTimeout(800); // регидрация persist
+      const txt2 = (await sp.locator('body').innerText().catch(() => '')) || txt;
+      const hasItems = txt2.includes(`${PREFIX}E2E Простой`) && txt2.includes(`${PREFIX}E2E С размером`);
+      if (hasItems) PASS('e2e корзина: обе позиции видны');
+      else FAIL('e2e корзина', `содержимое не содержит обе позиции`);
+    } catch (e) { FAIL('e2e корзина', e.message); }
+
+    // 7. Чекаут — контакты → город → ПВЗ → оплата → заказ
+    let orderNumber = null;
+    try {
+      await storeGoto(sp, '/checkout');
+      await sp.waitForTimeout(800);
+      // Шаг 1: контакты (4 поля по порядку: имя, фамилия, email, телефон)
+      const inputs = sp.locator('input');
+      await inputs.nth(0).fill('Тест');
+      await inputs.nth(1).fill('Покупатель');
+      await inputs.nth(2).fill(QA_EMAIL);
+      await inputs.nth(3).fill('+70000000000');
+      await sp.getByRole('button', { name: 'Далее' }).first().click();
+      await sp.waitForTimeout(600);
+      // Шаг 2: город
+      const cityInput = sp.locator('input[placeholder="Начните вводить..."]');
+      await cityInput.fill('Москва');
+      await sp.waitForTimeout(900); // debounce + сеть
+      const cityOpt = sp.locator('div.absolute button').first();
+      await cityOpt.waitFor({ state: 'visible', timeout: 8000 });
+      await cityOpt.click();
+      // ПВЗ + стоимость
+      await sp.waitForTimeout(2500);
+      const pvzBtn = sp.locator('button:has-text("ПВЗ"), button').filter({ hasText: /ПВЗ|пункт|ул\.|пр\.|д\./i }).first();
+      // запасной путь: первая кнопка в группе "Пункт выдачи"
+      const pvzGroup = sp.locator('p:has-text("Пункт выдачи")').locator('xpath=following-sibling::div[1]//button').first();
+      if (await pvzGroup.count()) { await pvzGroup.click(); }
+      else if (await pvzBtn.count()) { await pvzBtn.click(); }
+      await sp.waitForTimeout(600);
+      await sp.getByRole('button', { name: 'Далее' }).first().click();
+      await sp.waitForTimeout(2500);
+      // Шаг 3: подтвердить
+      const summary = (await sp.locator('body').innerText().catch(() => '')) || '';
+      const hasTotals = /Итого/.test(summary) && /Доставка/.test(summary);
+      if (hasTotals) PASS('e2e чекаут: серверный итог показан (товары/доставка/итого)');
+      else FAIL('e2e чекаут итог', 'нет блока сумм на шаге оплаты');
+      await sp.getByRole('button', { name: /Подтвердить заказ/ }).first().click();
+      await sp.waitForURL(/\/account/, { timeout: 20000 });
+      const acc = (await sp.locator('body').innerText().catch(() => '')) || '';
+      const m = acc.match(/№?\s*([A-Z0-9-]{4,})/);
+      const url = new URL(sp.url());
+      orderNumber = url.searchParams.get('order');
+      if (orderNumber) PASS('e2e чекаут: заказ оформлен', `№${orderNumber}`);
+      else FAIL('e2e чекаут оформление', `редирект на ${sp.url()}, тело: ${acc.slice(0, 100)}`);
+    } catch (e) {
+      FAIL('e2e чекаут', e.message);
+    }
+
+    // 8. Заказ виден в админке
+    if (orderNumber) {
+      try {
+        await adminPage.goto(`${ADMIN}/admin/orders`, { waitUntil: 'networkidle' });
+        const visible = await adminPage.locator(`text=${orderNumber}`).count();
+        if (visible > 0) PASS('e2e заказ в админке', `№${orderNumber}`);
+        else FAIL('e2e заказ в админке', `№${orderNumber} не найден`);
+      } catch (e) { FAIL('e2e заказ в админке', e.message); }
+    }
+
+    if (consoleErrors.length) INFO('e2e консоль витрины', `ошибок: ${consoleErrors.length}; первая: ${consoleErrors[0]}`);
+    else PASS('e2e консоль витрины', 'без ошибок в консоли');
+  } finally {
+    await ctx.close();
+  }
+
+  // --- CLEANUP ---
+  for (const k of ['simple', 'sized', 'oos']) {
+    if (!ids[k]) continue;
+    const ok = await deleteProductUI(adminPage, ids[k]);
+    rec(ok ? 'PASS' : 'FAIL', `e2e cleanup ${k}`, ids[k]);
+  }
+}
+
 // --- запуск ---------------------------------------------------------------
 
 const browser = await chromium.launch();
@@ -413,6 +616,8 @@ try {
       await runFull(page);
     } else if (phase === 'sections') {
       await runSections(page);
+    } else if (phase === 'e2e') {
+      await runE2E(browser, page);
     } else if (phase === 'cleanup') {
       await runCleanup(page);
     }
