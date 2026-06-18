@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { FadeIn } from "@/components/ui/Animations";
 
 export const metadata = {
@@ -39,7 +40,7 @@ export default function ReviewsPage() {
         <FadeIn>
           <p className="mt-12 text-sm text-muted">
             Хотите попасть в галерею? Пришлите фото в&nbsp;
-            <a href="/#contacts" className="link-underline text-graphite">поддержку</a>.
+            <Link href="/#contacts" className="link-underline text-graphite">поддержку</Link>.
           </p>
         </FadeIn>
       </div>
