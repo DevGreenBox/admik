@@ -4,6 +4,7 @@ import { requireUser } from '@/lib/auth/session';
 import { can } from '@/lib/auth/rbac';
 import { sql } from '@/lib/db/client';
 import { getDashboardSeries } from '@/lib/analytics/repository';
+import { isModuleEnabled } from '@/lib/config/modules';
 import { MiniBarChart } from './_components/MiniBarChart';
 
 /**
@@ -38,13 +39,25 @@ function MetricCard({ title, value }: { title: string; value: number }) {
 export default async function DashboardPage() {
   const user = await requireUser();
 
+  // Модуль orders может быть выключен для магазина (ADMIK_MODULES). Таблица orders
+  // существует всегда (миграции аддитивны и НЕ модуль-зависимы), поэтому без явного
+  // гейта дашборд показывал бы счётчики и график заказов даже при выключенном модуле —
+  // расходясь с моделью гейтинга (nav.ts / guardOrders) и собственным комментарием
+  // карточек. Гейтим чтения orders флагом модуля; «Посещения» от модуля orders не
+  // зависят и показываются всегда.
+  const ordersOn = isModuleEnabled('orders');
+
   const [products, categories, ordersTotal, ordersToday, series] = await Promise.all([
     safeCount(sql<{ n: string }[]>`SELECT count(*)::text AS n FROM products`),
     safeCount(sql<{ n: string }[]>`SELECT count(*)::text AS n FROM categories`),
-    safeCount(sql<{ n: string }[]>`SELECT count(*)::text AS n FROM orders`),
-    safeCount(
-      sql<{ n: string }[]>`SELECT count(*)::text AS n FROM orders WHERE created_at >= current_date`,
-    ),
+    ordersOn
+      ? safeCount(sql<{ n: string }[]>`SELECT count(*)::text AS n FROM orders`)
+      : Promise.resolve(null),
+    ordersOn
+      ? safeCount(
+          sql<{ n: string }[]>`SELECT count(*)::text AS n FROM orders WHERE created_at >= current_date`,
+        )
+      : Promise.resolve(null),
     // Ряды для графиков (заказы/посещения за 14 дней); null при отсутствии БД.
     getDashboardSeries(14).catch(() => null),
   ]);
@@ -78,12 +91,14 @@ export default async function DashboardPage() {
 
       {series ? (
         <section aria-label="Графики за 14 дней" className="mt-8 grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <MiniBarChart
-            title="Заказы за 14 дней"
-            points={series.orders}
-            unit="заказов"
-            barClassName="fill-gray-800"
-          />
+          {ordersOn ? (
+            <MiniBarChart
+              title="Заказы за 14 дней"
+              points={series.orders}
+              unit="заказов"
+              barClassName="fill-gray-800"
+            />
+          ) : null}
           <MiniBarChart
             title="Посещения сайта за 14 дней"
             points={series.views}
