@@ -50,6 +50,7 @@ export async function POST(req: Request): Promise<Response> {
         fulfillable: result.fulfillable,
         promoReason: result.promo && !result.promo.valid ? result.promo.reason : null,
         issues: result.issues,
+        deliveryResolved: result.deliveryResolved,
       });
 
       return jsonData(dto, {}, cors);

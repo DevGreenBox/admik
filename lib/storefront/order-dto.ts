@@ -289,6 +289,12 @@ export interface QuoteDto {
     free: boolean;
     freeThresholdMet: boolean;
     cost: string;
+    /**
+     * Удалось ли рассчитать стоимость доставки. false — расчёт СДЭК был нужен,
+     * но упал: `cost` НЕ доверять, показать «уточняется» и не давать оформить
+     * (createOrder всё равно вернёт ошибку — anti-undercharge). По умолчанию true.
+     */
+    available: boolean;
   };
   /** Все позиции в наличии и валидны — можно оформлять. */
   fulfillable: boolean;
@@ -306,6 +312,8 @@ export function toQuoteDto(input: {
   fulfillable: boolean;
   promoReason?: string | null;
   issues: Array<{ index: number; code: string }>;
+  /** Удалось ли рассчитать доставку (см. QuoteDto.delivery.available). По умолч. true. */
+  deliveryResolved?: boolean;
 }): QuoteDto {
   const { quote } = input;
   return {
@@ -333,6 +341,7 @@ export function toQuoteDto(input: {
       free: quote.delivery.free,
       freeThresholdMet: quote.delivery.freeThresholdMet,
       cost: quote.delivery.cost,
+      available: input.deliveryResolved ?? true,
     },
     fulfillable: input.fulfillable,
     issues: input.issues,

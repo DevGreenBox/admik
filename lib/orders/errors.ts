@@ -32,3 +32,31 @@ export class OrderError extends PublicActionError {
     Object.setPrototypeOf(this, OrderError.prototype);
   }
 }
+
+/**
+ * Сбой РЕАЛЬНО НУЖНОГО расчёта стоимости доставки (сеть/ошибка СДЭК).
+ *
+ * Anti-undercharge: при создании заказа нулевая доставка из-за сбоя расчёта
+ * НЕДОПУСТИМА — клиент недоплатил бы за доставку (магазин теряет деньги). Раньше
+ * computeDeliveryCost молча деградировал такой сбой к stub 0.00; теперь он
+ * БРОСАЕТ эту ошибку, блокируя создание заказа с понятным сообщением. По-design
+ * нулевая доставка (самовывоз / cdek выключен / нет назначения / порог бесплатной
+ * доставки) сюда НЕ попадает — она обрабатывается до расчёта (needsCdekProvider).
+ *
+ * Наследует PublicActionError → message доходит до UI как доменная ошибка
+ * (`error:'validation'`), а не «внутренняя ошибка». code='delivery_calc_failed'.
+ */
+export class DeliveryCalculationError extends PublicActionError {
+  readonly code = 'delivery_calc_failed';
+  /** Исходная причина (для логов/диагностики), не утекает в UI отдельно. */
+  readonly cause?: unknown;
+  constructor(
+    message = 'Не удалось рассчитать стоимость доставки. Попробуйте позже.',
+    cause?: unknown,
+  ) {
+    super(message);
+    this.cause = cause;
+    this.name = 'DeliveryCalculationError';
+    Object.setPrototypeOf(this, DeliveryCalculationError.prototype);
+  }
+}

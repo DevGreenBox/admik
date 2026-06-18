@@ -157,3 +157,172 @@ describe('orders/delivery-cost — адаптер расчёта доставк�
     ).toBe(true);
   });
 });
+
+/**
+ * BUG (major, data-integrity — undercharge): при РЕАЛЬНО НУЖНОМ расчёте СДЭК
+ * (useCdek=true) сбой расчёта (сеть/ошибка СДЭК) молча превращался в 0.00 — и в
+ * quote, и при СОЗДАНИИ ЗАКАЗА. Клиент недоплачивал за доставку.
+ *
+ * Эти тесты мокают lazy-import @/lib/cdek/services/calculator + @/lib/cdek/manager,
+ * чтобы calculate БРОСАЛ. Проверяем:
+ *   • createOrder-путь (softFail НЕ задан) → НЕ возвращает 0 молча, а БРОСАЕТ
+ *     доменную DeliveryCalculationError (блокирует создание заказа);
+ *   • quote-путь (softFail:true) → НЕ бросает, но сигналит нерасчитанность
+ *     (resolved:false, source:'unavailable') — витрина покажет «уточняется»;
+ *   • by-design 0.00 (pickup/disabled/no destination) остаётся 0.00 и resolved:true;
+ *   • успешный расчёт → корректная сумма, resolved:true.
+ */
+describe('orders/delivery-cost — сбой расчёта СДЭК НЕ обнуляет доставку (undercharge)', () => {
+  const ORIG_MODULES = process.env.ADMIK_MODULES;
+
+  /** Загрузка модуля с замоканным cdek: calculate бросает или возвращает зад. сумму. */
+  async function loadWithCdek(opts: {
+    calculate: () => Promise<unknown> | never;
+    isMock?: boolean;
+  }) {
+    vi.resetModules();
+    vi.doMock('@/lib/cdek/services/calculator', () => ({
+      Calculator: class {
+        constructor(_m: unknown) {}
+        async calculate() {
+          return opts.calculate();
+        }
+      },
+    }));
+    vi.doMock('@/lib/cdek/manager', () => ({
+      getCdekManager: () => ({ isMock: opts.isMock ?? true }),
+    }));
+    return import('@/lib/orders/delivery-cost');
+  }
+
+  beforeEach(() => {
+    delete process.env.CDEK_ACCOUNT;
+    delete process.env.CDEK_SECRET;
+    process.env.ADMIK_MODULES = 'orders,cdek';
+  });
+  afterEach(() => {
+    process.env.ADMIK_MODULES = ORIG_MODULES;
+    vi.resetModules();
+    vi.doUnmock('@/lib/cdek/services/calculator');
+    vi.doUnmock('@/lib/cdek/manager');
+  });
+
+  it('createOrder-путь: сбой расчёта при useCdek → БРОСАЕТ (а НЕ молча 0.00)', async () => {
+    const { computeDeliveryCost } = await loadWithCdek({
+      calculate: () => {
+        throw new Error('network down (CDEK)');
+      },
+    });
+    await expect(
+      computeDeliveryCost({
+        deliveryType: 'courier',
+        lines: [{ qty: 1, weightG: 500 }],
+        destination: { cityName: 'Москва' },
+      }),
+    ).rejects.toMatchObject({ code: 'delivery_calc_failed' });
+  });
+
+  it('createOrder-путь: брошенная ошибка несёт человекочитаемое сообщение для UI', async () => {
+    const { computeDeliveryCost, DeliveryCalculationError } = await loadWithCdek({
+      calculate: () => Promise.reject(new Error('CDEK 500')),
+    });
+    let caught: unknown;
+    try {
+      await computeDeliveryCost({
+        deliveryType: 'courier',
+        lines: [{ qty: 1 }],
+        destination: { cityCode: 44 },
+      });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(DeliveryCalculationError);
+    expect((caught as Error).message).toMatch(/доставк/i);
+  });
+
+  it('quote-путь (softFail): сбой расчёта → НЕ бросает, сигналит нерасчитанность', async () => {
+    const { computeDeliveryCost } = await loadWithCdek({
+      calculate: () => {
+        throw new Error('boom');
+      },
+    });
+    const res = await computeDeliveryCost(
+      {
+        deliveryType: 'courier',
+        lines: [{ qty: 1 }],
+        destination: { cityName: 'Москва' },
+      },
+      { softFail: true },
+    );
+    expect(res.resolved).toBe(false);
+    expect(res.source).toBe('unavailable');
+  });
+
+  it('успешный расчёт → корректная сумма, resolved:true', async () => {
+    const { computeDeliveryCost } = await loadWithCdek({
+      calculate: async () => ({
+        deliverySum: '349.00',
+        periodMin: 2,
+        periodMax: 4,
+        tariffCode: 136,
+      }),
+    });
+    const res = await computeDeliveryCost({
+      deliveryType: 'courier',
+      lines: [{ qty: 1, weightG: 500 }],
+      destination: { cityName: 'Москва' },
+    });
+    expect(res.cost).toBe('349.00');
+    expect(res.resolved).toBe(true);
+    expect(res.source).toBe('cdek_mock');
+    expect(res.tariffCode).toBe(136);
+  });
+
+  it('by-design 0.00 не маскирует сбой: pickup → resolved:true даже с бросающим cdek', async () => {
+    const { computeDeliveryCost } = await loadWithCdek({
+      calculate: () => {
+        throw new Error('should not be called for pickup');
+      },
+    });
+    const res = await computeDeliveryCost({
+      deliveryType: 'pickup',
+      lines: [{ qty: 1 }],
+      destination: { cityCode: 44 },
+    });
+    expect(res.cost).toBe('0.00');
+    expect(res.resolved).toBe(true);
+    expect(res.source).toBe('stub');
+  });
+
+  it('by-design 0.00: модуль cdek выключен → resolved:true, расчёт не зовётся', async () => {
+    process.env.ADMIK_MODULES = 'orders';
+    const { computeDeliveryCost } = await loadWithCdek({
+      calculate: () => {
+        throw new Error('should not be called when cdek disabled');
+      },
+    });
+    const res = await computeDeliveryCost({
+      deliveryType: 'courier',
+      lines: [{ qty: 1 }],
+      destination: { cityName: 'Москва' },
+    });
+    expect(res.cost).toBe('0.00');
+    expect(res.resolved).toBe(true);
+    expect(res.source).toBe('stub');
+  });
+
+  it('softFail НЕ влияет на by-design stub: pickup всё равно 0.00 resolved:true', async () => {
+    const { computeDeliveryCost } = await loadWithCdek({
+      calculate: () => {
+        throw new Error('nope');
+      },
+    });
+    const res = await computeDeliveryCost(
+      { deliveryType: 'pickup', lines: [{ qty: 1 }], destination: {} },
+      { softFail: true },
+    );
+    expect(res.cost).toBe('0.00');
+    expect(res.resolved).toBe(true);
+    expect(res.source).toBe('stub');
+  });
+});

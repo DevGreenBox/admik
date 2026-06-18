@@ -23,7 +23,10 @@
  */
 
 import { isModuleEnabled } from '@/lib/config/modules';
+import { DeliveryCalculationError } from './errors';
 import type { DeliveryType } from './types';
+
+export { DeliveryCalculationError } from './errors';
 
 /** Позиция корзины с (опц.) габаритами товара/варианта (миграция 0018, §3.3). */
 export interface DeliveryCostLine {
@@ -52,13 +55,25 @@ export interface DeliveryCostInput {
   tariffCode?: number;
 }
 
-/** Источник расчёта (для прозрачности/аудита). */
-export type DeliveryCostSource = 'stub' | 'cdek' | 'cdek_mock';
+/**
+ * Источник расчёта (для прозрачности/аудита).
+ *   • stub        — by-design 0.00 (самовывоз / cdek выключен / нет назначения);
+ *   • cdek/cdek_mock — успешный расчёт СДЭК (реальный/mock);
+ *   • unavailable — расчёт БЫЛ нужен, но УПАЛ (только при softFail в quote;
+ *     cost здесь НЕ доверять — витрина показывает «уточняется»).
+ */
+export type DeliveryCostSource = 'stub' | 'cdek' | 'cdek_mock' | 'unavailable';
 
 /** Результат расчёта стоимости доставки. */
 export interface DeliveryCostResult {
   /** Стоимость доставки (строка NUMERIC(14,2)). '0.00' для stub/pickup. */
   cost: string;
+  /**
+   * Доверять ли cost. true — by-design 0.00 ИЛИ успешный расчёт. false — расчёт
+   * был нужен, но упал (source='unavailable'), cost — заглушка для совместимости
+   * типа. Создание заказа НЕ принимает resolved:false (см. softFail).
+   */
+  resolved: boolean;
   /** Срок доставки (дней, минимум) — null для stub. */
   etaDays: number | null;
   periodMin: number | null;
@@ -68,6 +83,18 @@ export interface DeliveryCostResult {
   provider: string;
 }
 
+/** Опции расчёта. */
+export interface ComputeDeliveryCostOptions {
+  /**
+   * Мягкий сбой: при УПАВШЕМ нужном расчёте СДЭК НЕ бросать, а вернуть результат
+   * с resolved:false / source:'unavailable' (для quote — витрина покажет
+   * «уточняется»). По умолчанию false: сбой нужного расчёта БРОСАЕТ
+   * DeliveryCalculationError (для createOrder — недопустима нулевая доставка
+   * из-за сбоя, anti-undercharge).
+   */
+  softFail?: boolean;
+}
+
 /** Провайдер расчёта доставки (контракт развязки). */
 export interface DeliveryCostProvider {
   quote(input: DeliveryCostInput): Promise<DeliveryCostResult>;
@@ -75,6 +102,7 @@ export interface DeliveryCostProvider {
 
 const STUB_RESULT: DeliveryCostResult = {
   cost: '0.00',
+  resolved: true,
   etaDays: null,
   periodMin: null,
   periodMax: null,
@@ -131,6 +159,7 @@ function toDeliveryMode(deliveryType: DeliveryType): 'pvz' | 'door' {
  */
 export async function computeDeliveryCost(
   input: DeliveryCostInput,
+  options: ComputeDeliveryCostOptions = {},
 ): Promise<DeliveryCostResult> {
   const useCdek = needsCdekProvider({
     cdekEnabled: isModuleEnabled('cdek'),
@@ -174,6 +203,7 @@ export async function computeDeliveryCost(
 
     return {
       cost: result.deliverySum,
+      resolved: true,
       etaDays: result.periodMin,
       periodMin: result.periodMin,
       periodMax: result.periodMax,
@@ -181,8 +211,27 @@ export async function computeDeliveryCost(
       source: manager.isMock ? 'cdek_mock' : 'cdek',
       provider: 'cdek',
     };
-  } catch {
-    // Любой сбой расчёта (сеть/конфиг) — деградация к stub, не ломаем quote.
-    return stubDeliveryProvider.quote(input);
+  } catch (err) {
+    // Сбой РЕАЛЬНО НУЖНОГО расчёта СДЭК (сеть/конфиг). Раньше он молча
+    // деградировал к stub 0.00 — и в quote, и при СОЗДАНИИ заказа: клиент
+    // недоплачивал за доставку (BUG major, undercharge).
+    //   • softFail (quote): НЕ бросаем — возвращаем resolved:false /
+    //     source:'unavailable', чтобы превью корзины не падало, а витрина
+    //     показала «уточняется» (cost 0.00 здесь НЕ доверять).
+    //   • по умолчанию (createOrder): БРОСАЕМ — нулевая доставка из-за сбоя
+    //     недопустима (anti-undercharge), создание заказа блокируется.
+    if (options.softFail) {
+      return {
+        cost: '0.00',
+        resolved: false,
+        etaDays: null,
+        periodMin: null,
+        periodMax: null,
+        tariffCode: null,
+        source: 'unavailable',
+        provider: 'cdek',
+      };
+    }
+    throw new DeliveryCalculationError(undefined, err);
   }
 }

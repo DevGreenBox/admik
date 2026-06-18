@@ -34,6 +34,7 @@ import {
 import { validatePromo, type PromoValidationResult } from './promo';
 import {
   computeDeliveryCost,
+  DeliveryCalculationError,
   type DeliveryDestination,
   type DeliveryCostLine,
 } from './delivery-cost';
@@ -494,7 +495,13 @@ async function resolveDeliveryCost(args: {
   city?: string;
   cityCode?: number;
   pvzCode?: string;
-}): Promise<string> {
+  /**
+   * Мягкий сбой расчёта: true для quote (превью не должно падать → resolved:false),
+   * false/undefined для createOrder (сбой нужного расчёта БРОСАЕТ
+   * DeliveryCalculationError — anti-undercharge, нулевая доставка недопустима).
+   */
+  softFail?: boolean;
+}): Promise<{ cost: string; resolved: boolean }> {
   const deliveryType: DeliveryType = args.deliveryType ?? 'courier';
   // Назначение: код города (если витрина его знает) + имя города + код ПВЗ.
   // cityName КРИТИЧЕН для курьера (BUG #3): курьерская доставка часто несёт
@@ -505,8 +512,11 @@ async function resolveDeliveryCost(args: {
     pvzCode: args.pvzCode,
   };
   const lines: DeliveryCostLine[] = args.lines.map((l) => ({ qty: l.qty }));
-  const res = await computeDeliveryCost({ deliveryType, lines, destination });
-  return res.cost;
+  const res = await computeDeliveryCost(
+    { deliveryType, lines, destination },
+    { softFail: args.softFail },
+  );
+  return { cost: res.cost, resolved: res.resolved };
 }
 
 // =============================================================================
@@ -525,6 +535,12 @@ export interface QuoteCartResult {
   promo: PromoValidationResult | null;
   /** Достаточно ли остатка по всем позициям (можно оформлять). */
   fulfillable: boolean;
+  /**
+   * Удалось ли рассчитать стоимость доставки. false — расчёт СДЭК был нужен,
+   * но упал (deliveryTotal в превью НЕ доверять; витрина показывает «уточняется»
+   * и не даёт оформить — createOrder всё равно заблокирует, anti-undercharge).
+   */
+  deliveryResolved: boolean;
 }
 
 /**
@@ -588,19 +604,22 @@ export async function quoteCart(
     }
   }
 
-  const deliveryCost = await resolveDeliveryCost({
+  // quote — превью: softFail, чтобы сбой расчёта СДЭК не ронял корзину (resolved
+  // прокидывается наружу; реальную блокировку недоплаты делает createOrder).
+  const delivery = await resolveDeliveryCost({
     deliveryType: input.delivery?.type,
     lines,
     city: input.delivery?.city,
     cityCode: input.delivery?.cityCode,
     pvzCode: input.delivery?.pvzCode,
+    softFail: true,
   });
 
   const quote = calculateQuote({
     lines,
     promo: appliedPromo,
     delivery: {
-      cost: deliveryCost,
+      cost: delivery.cost,
       freeThreshold,
     },
     scopeTargets,
@@ -621,7 +640,14 @@ export async function quoteCart(
   const fulfillable =
     issues.length === 0 && lines.length === input.items.length && lines.length > 0;
 
-  return { quote, currency, issues, promo: promoResult, fulfillable };
+  return {
+    quote,
+    currency,
+    issues,
+    promo: promoResult,
+    fulfillable,
+    deliveryResolved: delivery.resolved,
+  };
 }
 
 // =============================================================================
@@ -731,7 +757,7 @@ export type CreateOrderResult =
   | { ok: true; order: Order; reused: boolean }
   | {
       ok: false;
-      code: 'out_of_stock' | 'invalid_item' | 'invalid_promo';
+      code: 'out_of_stock' | 'invalid_item' | 'invalid_promo' | 'delivery_unavailable';
       message: string;
     };
 
@@ -800,13 +826,27 @@ export async function createOrder(
     scopeTargets = found.scopeTargets;
   }
 
-  const deliveryCost = await resolveDeliveryCost({
-    deliveryType: input.delivery.type,
-    lines: resolved,
-    city: input.delivery.city,
-    cityCode: input.delivery.cityCode,
-    pvzCode: input.delivery.pvzCode,
-  });
+  // СОЗДАНИЕ заказа: НЕ softFail. Сбой нужного расчёта доставки → бросок
+  // DeliveryCalculationError (anti-undercharge). Конвертируем в доменный
+  // {ok:false} — контракт createOrder не бросает доменные ошибки, а runStorefront
+  // не оборачивает throw (стал бы 500); admin-обёртка перекинет как OrderError.
+  let deliveryCost: string;
+  try {
+    deliveryCost = (
+      await resolveDeliveryCost({
+        deliveryType: input.delivery.type,
+        lines: resolved,
+        city: input.delivery.city,
+        cityCode: input.delivery.cityCode,
+        pvzCode: input.delivery.pvzCode,
+      })
+    ).cost;
+  } catch (e) {
+    if (e instanceof DeliveryCalculationError) {
+      return { ok: false, code: 'delivery_unavailable', message: e.message };
+    }
+    throw e;
+  }
 
   const quote = calculateQuote({
     lines: resolved,

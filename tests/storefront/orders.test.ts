@@ -232,7 +232,12 @@ describe('order-dto — toQuoteDto', () => {
     expect(dto.currency).toBe('RUB');
     expect(dto.lines[0]).toMatchObject({ sku: 'CASE-BLK', qty: 2, lineTotal: '3000.00' });
     expect(dto.promo).toEqual({ applied: true, code: 'SALE10', discount: '300.00', reason: null });
-    expect(dto.delivery).toEqual({ free: true, freeThresholdMet: true, cost: '0.00' });
+    expect(dto.delivery).toEqual({
+      free: true,
+      freeThresholdMet: true,
+      cost: '0.00',
+      available: true,
+    });
     expect(dto.fulfillable).toBe(true);
     expect(dto.issues).toEqual([]);
   });
@@ -248,6 +253,27 @@ describe('order-dto — toQuoteDto', () => {
     expect(dto.promo.reason).toBe('expired');
     expect(dto.fulfillable).toBe(false);
     expect(dto.issues).toEqual([{ index: 0, code: 'out_of_stock' }]);
+  });
+
+  it('deliveryResolved отсутствует → delivery.available = true (по умолчанию)', () => {
+    const dto = toQuoteDto({
+      quote: makeQuoteResult(),
+      currency: 'RUB',
+      fulfillable: true,
+      issues: [],
+    });
+    expect(dto.delivery.available).toBe(true);
+  });
+
+  it('deliveryResolved:false (сбой расчёта СДЭК) → delivery.available = false («уточняется»)', () => {
+    const dto = toQuoteDto({
+      quote: makeQuoteResult(),
+      currency: 'RUB',
+      fulfillable: true,
+      issues: [],
+      deliveryResolved: false,
+    });
+    expect(dto.delivery.available).toBe(false);
   });
 });
 
