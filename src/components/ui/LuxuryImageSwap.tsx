@@ -1,7 +1,8 @@
 import Image from "next/image";
 
 interface LuxuryImageSwapProps {
-  primary: string;
+  /** URL основного фото; может отсутствовать (товар без медиа) → плейсхолдер. */
+  primary?: string | null;
   secondary?: string | null;
   alt: string;
   priority?: boolean;
@@ -19,7 +20,19 @@ export function LuxuryImageSwap({
   className = "",
   imageClassName = "object-cover object-center",
 }: LuxuryImageSwapProps) {
-  const hasSwap = Boolean(secondary && secondary !== primary);
+  const hasSwap = Boolean(primary && secondary && secondary !== primary);
+
+  // Нет фото (весь стенд может быть без медиа) → не передаём undefined в next/image
+  // (это роняет рендер), а показываем аккуратный плейсхолдер поверх bg-surface.
+  if (!primary) {
+    return (
+      <div className={`group/swap image-luxury relative overflow-hidden ${className}`}>
+        <div className="absolute inset-0 flex items-center justify-center">
+          <span className="text-[9px] uppercase tracking-[0.22em] text-muted">Нет фото</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={`group/swap image-luxury relative overflow-hidden ${className}`}>

@@ -123,6 +123,9 @@ export interface AdmikCartLineInput {
 export interface AdmikDeliverySelection {
   type: AdmikDeliveryType;
   city?: string;
+  /** Точный код города СДЭК (из выбора на шаге доставки). Передаётся в quote/order,
+   *  чтобы сервер считал доставку по коду, а не геокодил неоднозначное имя города. */
+  cityCode?: number;
   address?: string;
   pvzCode?: string;
 }

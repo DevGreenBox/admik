@@ -55,11 +55,18 @@ export interface ContactForm {
   phone: string;
 }
 
-/** Шаг 1 валиден: имя, email и телефон заполнены. */
+/** Грубая проверка формата email — ранний клиентский гейт, чтобы кнопка «Далее»
+ *  блокировалась при явно невалидном email (сервер валидирует строго, но его
+ *  ошибка прилетела бы только на последнем шаге). */
+export function isValidEmail(email: string): boolean {
+  return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim());
+}
+
+/** Шаг 1 валиден: имя и телефон заполнены, email корректного формата. */
 export function isContactStepValid(form: ContactForm): boolean {
   return (
     form.firstName.trim() !== '' &&
-    form.email.trim() !== '' &&
+    isValidEmail(form.email) &&
     form.phone.trim() !== ''
   );
 }

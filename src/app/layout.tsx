@@ -3,6 +3,7 @@ import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import Providers from "@/components/Providers";
 import { getSiteUrl, isNoindex } from "@/lib/site-url";
+import { getCategories, type AdmikCategoryDto } from "@/lib/admik";
 import "./globals.css";
 
 // generateMetadata (а не статический объект) — чтобы metadataBase и robots
@@ -38,12 +39,23 @@ export function generateMetadata(): Metadata {
   };
 }
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // Категории для навигации «Коллекция» — из реального дерева (не хардкод slug):
+  // подменю строится по тому, что реально есть в каталоге магазина (универсально
+  // под любой ИМ). Сбой запроса не должен ронять весь layout → деградируем до
+  // простой ссылки на /catalog.
+  let categories: AdmikCategoryDto[] = [];
+  try {
+    categories = await getCategories();
+  } catch {
+    categories = [];
+  }
+
   return (
     <html lang="ru">
       <body className="min-h-screen flex flex-col">
         <Providers>
-          <Header />
+          <Header categories={categories} />
           <main className="flex-1">{children}</main>
           <Footer />
         </Providers>

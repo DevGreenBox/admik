@@ -70,6 +70,17 @@ describe('isContactStepValid', () => {
       isContactStepValid({ firstName: 'И', lastName: '', email: '', phone: '+7' }),
     ).toBe(false);
   });
+  it('false при невалидном формате email (ранний гейт, не доводим до сервера)', () => {
+    expect(
+      isContactStepValid({ firstName: 'Иван', lastName: 'П', email: 'неэмейл', phone: '+7' }),
+    ).toBe(false);
+    expect(
+      isContactStepValid({ firstName: 'Иван', lastName: 'П', email: 'a@b', phone: '+7' }),
+    ).toBe(false);
+    expect(
+      isContactStepValid({ firstName: 'Иван', lastName: 'П', email: 'a@b.ru', phone: '+7' }),
+    ).toBe(true);
+  });
 });
 
 describe('isDeliveryStepValid', () => {

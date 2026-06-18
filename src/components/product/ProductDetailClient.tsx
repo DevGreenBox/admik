@@ -55,8 +55,13 @@ export function ProductDetailClient({ product, related }: ProductDetailClientPro
     hasSelectedVariant: Boolean(selectedVariant),
   });
 
+  // Цена к покупке: выбранного варианта, иначе базовая товара. Используется и в
+  // отображении, и в позиции корзины — чтобы показанная цена совпала с добавленной.
+  const activePrice = selectedVariant?.price ?? product.price;
+
   const handleAddToCart = () => {
     if (!canBuy) return;
+    if (added) return; // не плодим дубль позиции, пока показывается «Добавлено»
     if (hasVariants && selectedVariant) {
       addToCart(
         {
@@ -113,7 +118,7 @@ export function ProductDetailClient({ product, related }: ProductDetailClientPro
                 <h1 className="heading-lg heading-rule">{product.name}</h1>
               </div>
 
-              <p className="text-base md:text-lg tracking-[0.06em] tabular-nums">{formatPrice(product.price)}</p>
+              <p className="text-base md:text-lg tracking-[0.06em] tabular-nums">{formatPrice(activePrice)}</p>
               <p className="body-editorial">{product.description || DEFAULT_DESCRIPTION}</p>
 
               {/* Размер — только для товаров с вариантами. */}
@@ -218,7 +223,7 @@ export function ProductDetailClient({ product, related }: ProductDetailClientPro
 
       <StickyAddToCart
         name={product.name}
-        price={product.price}
+        price={activePrice}
         selectedSize={selectedSize}
         ctaLabel={ctaLabel}
         onAddToCart={handleAddToCart}

@@ -1,6 +1,6 @@
 export default function Loading() {
   return (
-    <div className="page-transition pt-16 md:pt-20">
+    <div className="page-transition pt-16 md:pt-[72px]">
       <div className="container-brand py-12 md:py-16">
         <div className="skeleton h-8 w-48 mb-4" />
         <div className="skeleton h-4 w-24 mb-12" />

@@ -60,23 +60,34 @@ export default function CheckoutPage() {
         : `idem-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   }
 
-  // Редирект на /cart ТОЛЬКО после регидрации хранилища: иначе на жёсткой загрузке
-  // /checkout корзина ещё пуста (skipHydration) и покупателя ошибочно выкидывало.
+  // Гард завершённого оформления: после успешного заказа clearCart() опустошает
+  // корзину, и эффект-редирект ниже иначе перебил бы переход на /account, выкинув
+  // покупателя на пустой /cart (теряя подтверждение и токен трекинга).
+  const submittedRef = useRef(false);
+
+  // Редирект на /cart ТОЛЬКО после регидрации хранилища и НЕ после оформления:
+  // иначе на жёсткой загрузке /checkout корзина ещё пуста (skipHydration) и
+  // покупателя ошибочно выкидывало; а после заказа — перебивало /account.
   useEffect(() => {
-    if (hydrated && cart.length === 0) router.push("/cart");
+    if (hydrated && cart.length === 0 && !submittedRef.current) router.push("/cart");
   }, [hydrated, cart, router]);
 
-  // Автокомплит города: debounce 300мс → cdekCities.
+  // Автокомплит города: debounce 300мс → cdekCities. Seq-токен: применяем только
+  // ответ ПОСЛЕДНЕГО запроса (иначе медленный in-flight ответ мог перезаписать
+  // список и заново открыть выпадашку уже после выбора города).
+  const citiesSeqRef = useRef(0);
   useEffect(() => {
     if (cityQuery.length < 2 || selectedCity?.name === cityQuery) {
       setCities([]);
       return;
     }
+    const seq = ++citiesSeqRef.current;
     const t = setTimeout(async () => {
       try {
-        setCities(await cdekCities(cityQuery));
+        const res = await cdekCities(cityQuery);
+        if (seq === citiesSeqRef.current) setCities(res);
       } catch {
-        setCities([]);
+        if (seq === citiesSeqRef.current) setCities([]);
       }
     }, 300);
     return () => clearTimeout(t);
@@ -118,6 +129,24 @@ export default function CheckoutPage() {
     }
   };
 
+  // Выбор ПВЗ → серверный quote (anti-tamper): показываем на шаге 2 ИМЕННО серверную
+  // стоимость доставки (с учётом порога бесплатной доставки), а не сырой тариф СДЭК —
+  // иначе шаг 2 покажет ненулевую сумму там, где сервер в итоге посчитает 0.
+  const handlePvzSelect = async (pvz: AdmikCdekPvzDto) => {
+    setSelectedPickup(pvz);
+    setError("");
+    try {
+      const q = await quoteCart({
+        items: cartToItems(cart),
+        delivery: { type: "pvz", city: selectedCity!.name, cityCode: selectedCity!.code, pvzCode: pvz.code },
+      });
+      setQuote(q);
+      setDeliveryCost(Number(q.deliveryTotal)); // серверная доставка (с порогом бесплатной)
+    } catch {
+      // оставляем предварительную стоимость из cdekCalculate; финальный итог — на шаге 3
+    }
+  };
+
   // Переход на шаг 3 — серверный расчёт итога (anti-tamper).
   const goToPayment = async () => {
     if (!selectedCity || !selectedPickup) return;
@@ -126,7 +155,7 @@ export default function CheckoutPage() {
     try {
       const q = await quoteCart({
         items: cartToItems(cart),
-        delivery: { type: "pvz", city: selectedCity.name, pvzCode: selectedPickup.code },
+        delivery: { type: "pvz", city: selectedCity.name, cityCode: selectedCity.code, pvzCode: selectedPickup.code },
       });
       setQuote(q);
       setStep(3);
@@ -150,7 +179,7 @@ export default function CheckoutPage() {
             email: form.email,
             phone: form.phone,
           },
-          delivery: { type: "pvz", city: selectedCity.name, pvzCode: selectedPickup.code },
+          delivery: { type: "pvz", city: selectedCity.name, cityCode: selectedCity.code, pvzCode: selectedPickup.code },
           paymentMethod: mapPaymentMethod(paymentMethod),
         },
         { idempotencyKey: idempotencyKey.current },
@@ -160,6 +189,9 @@ export default function CheckoutPage() {
         accessToken: created.accessToken,
         createdAt: new Date().toISOString(),
       });
+      // Помечаем оформление завершённым ДО clearCart(), чтобы эффект-редирект на
+      // /cart не сработал на опустошённой корзине и не перебил переход на /account.
+      submittedRef.current = true;
       clearCart();
       router.push(
         `/account?order=${encodeURIComponent(created.number)}&token=${encodeURIComponent(created.accessToken)}`,
@@ -236,12 +268,12 @@ export default function CheckoutPage() {
               {selectedCity && deliveryCost !== null && (
                 <div className="bg-surface p-4 flex justify-between text-sm">
                   <span className="text-muted">Доставка СДЭК{deliveryEta ? ` · ${deliveryEta}` : ""}</span>
-                  <span>{formatPrice(deliveryCost)}</span>
+                  <span>{deliveryCost === 0 ? "Бесплатно" : formatPrice(deliveryCost)}</span>
                 </div>
               )}
               {pickupPoints.length > 0 && (
                 <OptionGroup title="Пункт выдачи" options={pickupPoints} selected={selectedPickup?.code}
-                  onSelect={setSelectedPickup}
+                  onSelect={handlePvzSelect}
                   render={(opt) => opt.name} sub={(opt) => opt.address} />
               )}
               {error && <p className="text-sm text-accent">{error}</p>}

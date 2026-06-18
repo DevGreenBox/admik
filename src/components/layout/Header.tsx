@@ -6,31 +6,34 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Search, ShoppingBag, Heart, User, Menu, X } from "lucide-react";
 import { Logo } from "@/components/ui/Logo";
 import { selectCartCount, useStore } from "@/lib/store";
+import type { AdmikCategoryDto } from "@/lib/admik";
 
 type NavItem = { href: string; label: string; children?: { href: string; label: string }[] };
-
-const NAV_LEFT: NavItem[] = [
-  { href: "/catalog", label: "Каталог" },
-  {
-    href: "/catalog",
-    label: "Коллекция",
-    children: [
-      { href: "/catalog?category=women", label: "Для женщин" },
-      { href: "/catalog?category=men", label: "Для мужчин" },
-    ],
-  },
-  { href: "/#about", label: "О бренде" },
-];
 
 const NAV_RIGHT: NavItem[] = [
   { href: "/#delivery", label: "Доставка" },
   { href: "/#contacts", label: "Контакты" },
 ];
 
-export function Header() {
+export function Header({ categories = [] }: { categories?: AdmikCategoryDto[] }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const cartCount = useStore(selectCartCount);
   const wishlistCount = useStore((s) => s.wishlist.length);
+
+  // Подменю «Коллекция» — из РЕАЛЬНЫХ категорий магазина (не хардкод women/men,
+  // которых может не быть → пустой каталог). Если категорий нет — «Коллекция»
+  // деградирует до простой ссылки на /catalog.
+  const collectionChildren = categories.map((c) => ({
+    href: `/catalog?category=${encodeURIComponent(c.slug)}`,
+    label: c.name,
+  }));
+  const NAV_LEFT: NavItem[] = [
+    { href: "/catalog", label: "Каталог" },
+    collectionChildren.length > 0
+      ? { href: "/catalog", label: "Коллекция", children: collectionChildren }
+      : { href: "/catalog", label: "Коллекция" },
+    { href: "/#about", label: "О бренде" },
+  ];
 
   useEffect(() => {
     document.body.style.overflow = menuOpen ? "hidden" : "";
