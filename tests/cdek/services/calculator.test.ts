@@ -7,6 +7,7 @@ import {
   type CartLineDims,
 } from '@/lib/cdek/services/calculator';
 import { CDEK_FALLBACK_DIMENSIONS } from '@/lib/cdek/config';
+import { CdekError } from '@/lib/cdek/errors';
 
 /**
  * Тесты Calculator (docs/08 §5). Mock-путь — формула детерминирована. Real-путь —
@@ -182,5 +183,89 @@ describe('cdek/calculator — real-путь (замоканный manager.client
     const calc = new Calculator(m);
     const list = await calc.calculateAvailable({ to: { code: 137 }, packages: [{ weight: 500 }] });
     expect(list).toEqual([]);
+  });
+});
+
+/**
+ * BUG B (CRITICAL, undercharge): СДЭК на /v2/calculator/tariff может вернуть
+ * HTTP 200 БЕЗ цены (delivery_sum/total_sum отсутствуют) — например, когда тариф
+ * недоступен для назначения: тело несёт непустой errors[]. Раньше mapTariffResult
+ * прогонял отсутствующее поле через toMoney(undefined) === '0.00' и Calculator
+ * РЕЗОЛВИЛСЯ с deliverySum '0.00' (resolved-путь), а computeDeliveryCost не видел
+ * throw → anti-undercharge guard НЕ срабатывал → заказ с бесплатной доставкой.
+ *
+ * Фикс: при отсутствии конечной цены ИЛИ непустом errors[] mapTariffResult бросает
+ * CdekError('cdek_calc_no_price') — это превращается в DeliveryCalculationError
+ * выше по стеку (createOrder → delivery_unavailable; quote softFail → resolved:false).
+ * Легитимный нуль (delivery_sum: 0) остаётся валидным '0.00'.
+ */
+describe('cdek/calculator — real-путь: 200 без цены НЕ резолвится в 0.00 (BUG B)', () => {
+  function makeManager(responseBody: unknown) {
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify(responseBody), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    ) as unknown as typeof fetch;
+    const tokenCache = { getToken: vi.fn(async () => 'tok-X'), invalidate: vi.fn(async () => {}) };
+    return new CdekManager({ config: realCfg, fetchImpl, tokenCache });
+  }
+
+  it('200 c errors[] и без delivery_sum → БРОСАЕТ CdekError (а НЕ 0.00 resolved)', async () => {
+    const m = makeManager({
+      errors: [{ code: 'v2_calc_tariff_unavailable', message: 'Тариф недоступен' }],
+    });
+    const calc = new Calculator(m);
+    await expect(
+      calc.calculate({ to: { code: 137 }, packages: [{ weight: 500 }], tariffCode: 136 }),
+    ).rejects.toBeInstanceOf(CdekError);
+  });
+
+  it('200 без delivery_sum/total_sum (нет ни цены, ни errors) → БРОСАЕТ CdekError', async () => {
+    const m = makeManager({ period_min: 2, period_max: 5, tariff_code: 136 });
+    const calc = new Calculator(m);
+    await expect(
+      calc.calculate({ to: { code: 137 }, packages: [{ weight: 500 }], tariffCode: 136 }),
+    ).rejects.toMatchObject({ code: 'cdek_calc_no_price' });
+  });
+
+  it('брошенная CdekError несёт structured errors[] СДЭК (для аудита/диагностики)', async () => {
+    const m = makeManager({
+      errors: [{ code: 'v2_no_tariff', message: 'нет тарифа' }],
+    });
+    const calc = new Calculator(m);
+    let caught: unknown;
+    try {
+      await calc.calculate({ to: { code: 137 }, packages: [{ weight: 500 }], tariffCode: 136 });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(CdekError);
+    expect((caught as CdekError).cdekErrors).toEqual([
+      { code: 'v2_no_tariff', message: 'нет тарифа' },
+    ]);
+  });
+
+  it('легитимный нуль (delivery_sum: 0, без errors) остаётся валидным 0.00 resolved', async () => {
+    const m = makeManager({ delivery_sum: 0, period_min: 1, period_max: 2, tariff_code: 136 });
+    const calc = new Calculator(m);
+    const res = await calc.calculate({
+      to: { code: 137 },
+      packages: [{ weight: 500 }],
+      tariffCode: 136,
+    });
+    expect(res.deliverySum).toBe('0.00');
+    expect(res.tariffCode).toBe(136);
+  });
+
+  it('строковая цена "450.00" по-прежнему маппится корректно', async () => {
+    const m = makeManager({ delivery_sum: '450.00', period_min: 1, period_max: 3, tariff_code: 136 });
+    const calc = new Calculator(m);
+    const res = await calc.calculate({
+      to: { code: 137 },
+      packages: [{ weight: 500 }],
+      tariffCode: 136,
+    });
+    expect(res.deliverySum).toBe('450.00');
   });
 });

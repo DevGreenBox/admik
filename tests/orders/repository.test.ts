@@ -30,11 +30,13 @@ describe.skipIf(!INTEGRATION_DB_URL)('orders/repository (интеграция, �
     basePrice: string;
     quantity: number;
     reserved?: number;
+    /** Реальный вес единицы (граммы) — для проверки BUG A (anti-undercharge). */
+    weightG?: number;
   }): Promise<string> {
     const suffix = Math.random().toString(36).slice(2, 10);
     const [p] = await sql<{ id: string }[]>`
-      INSERT INTO products (sku, slug, name, status, base_price)
-      VALUES (${'OT-' + suffix}, ${'ot-' + suffix}, ${'OrderTest ' + suffix}, 'active', ${opts.basePrice})
+      INSERT INTO products (sku, slug, name, status, base_price, weight_g)
+      VALUES (${'OT-' + suffix}, ${'ot-' + suffix}, ${'OrderTest ' + suffix}, 'active', ${opts.basePrice}, ${opts.weightG ?? null})
       RETURNING id
     `;
     const productId = p!.id;
@@ -377,6 +379,117 @@ describe.skipIf(!INTEGRATION_DB_URL)('orders/repository (интеграция, �
     });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.code).toBe('out_of_stock');
+  });
+
+  // BUG A (CRITICAL, anti-undercharge): доставка должна считаться по РЕАЛЬНОМУ весу
+  // из каталога (resolveLineDims → order_items.weight_g), а не по дефолту магазина.
+  // Раньше resolveDeliveryCost отбрасывал weightG → и quote, и createOrder билили
+  // по дефолту (≈500 г), а реальная СДЭК-накладная — по реальному весу: undercharge.
+  describe('BUG A: доставка считается по реальному весу (anti-undercharge)', () => {
+    const ORIG_MODULES = process.env.ADMIK_MODULES;
+    const ORIG_ACC = process.env.CDEK_ACCOUNT;
+    const ORIG_SEC = process.env.CDEK_SECRET;
+
+    beforeAll(() => {
+      // Модуль cdek включён + mock-режим (без боевых ключей): courier триггерит
+      // расчёт по весу (door-формула §5.3), детерминированный, без сети.
+      process.env.ADMIK_MODULES = 'catalog,orders,cdek';
+      delete process.env.CDEK_ACCOUNT;
+      delete process.env.CDEK_SECRET;
+    });
+    afterAll(() => {
+      if (ORIG_MODULES === undefined) delete process.env.ADMIK_MODULES;
+      else process.env.ADMIK_MODULES = ORIG_MODULES;
+      if (ORIG_ACC === undefined) delete process.env.CDEK_ACCOUNT;
+      else process.env.CDEK_ACCOUNT = ORIG_ACC;
+      if (ORIG_SEC === undefined) delete process.env.CDEK_SECRET;
+      else process.env.CDEK_SECRET = ORIG_SEC;
+    });
+
+    it('quote/createOrder/Calculator дают ОДИНАКОВУЮ доставку по реальному весу 5кг', async () => {
+      const weightG = 5000; // тяжёлый товар: дефолтный путь дал бы дешевле
+      const productId = await makeProduct({ basePrice: '1000.00', quantity: 10, weightG });
+      const delivery = { type: 'courier' as const, city: 'Москва' };
+
+      // 1) Эталон: прямой расчёт СДЭК по реальному весу. Зеркалит ровно то, что
+      // делает computeDeliveryCost: дефолтный тариф магазина (CDEK_DEFAULT_TARIFF),
+      // назначение строкой города (address). Дефолтный тариф 136 — ПВЗ-формула §5.3
+      // без курьерской надбавки.
+      const { Calculator } = await import('@/lib/cdek/services/calculator');
+      const { getCdekManager } = await import('@/lib/cdek/manager');
+      const mgr = getCdekManager();
+      const calc = new Calculator(mgr);
+      const expected = await calc.calculate({
+        to: { address: 'Москва' },
+        lines: [{ qty: 1, weightG }],
+        tariffCode: mgr.config.defaultTariffCode,
+      });
+      // 5000 г → 5 кг по дефолтному тарифу 136 (ПВЗ): 300 + 100*5 = 800
+      // (≠ 400 при дефолтном весе 500 г — это и есть устранённый undercharge).
+      expect(expected.deliverySum).toBe('800.00');
+
+      // 2) quote: доставка совпадает с эталоном по реальному весу.
+      const q = await repo.quoteCart({ items: [{ productId, qty: 1 }], delivery });
+      expect(q.deliveryResolved).toBe(true);
+      expect(q.quote.deliveryCost).toBe(expected.deliverySum);
+
+      // 3) createOrder: delivery_total/order_items.weight_g согласованы с эталоном.
+      const r = await repo.createOrder({
+        items: [{ productId, qty: 1 }],
+        customer: customer(),
+        delivery,
+        paymentMethod: 'cod',
+      });
+      expect(r.ok).toBe(true);
+      if (!r.ok) return;
+      created.orderIds.push(r.order.id);
+      expect(r.order.deliveryTotal).toBe(expected.deliverySum);
+
+      // order_items.weight_g несёт РЕАЛЬНЫЙ вес — тот же, по которому считали.
+      const [oi] = await sql<{ weight_g: number | null }[]>`
+        SELECT weight_g FROM order_items WHERE order_id = ${r.order.id} LIMIT 1
+      `;
+      expect(Number(oi!.weight_g)).toBe(weightG);
+    });
+  });
+
+  // BUG C (консистентность quote↔createOrder): две линии ОДНОГО юнита по qty
+  // каждая. Полинейная проверка пропускала (available >= qty на линию), но резерв
+  // createOrder кумулятивен (вторая линия падает). Quote теперь агрегирует спрос
+  // по юниту → fulfillable=false там же, где createOrder вернёт out_of_stock.
+  it('BUG C: quote с двумя линиями одного юнита при остатке < суммы → fulfillable=false', async () => {
+    const productId = await makeProduct({ basePrice: '100.00', quantity: 3 });
+    // Спрос 2+2=4 > остаток 3 (но каждая линия по 2 <= 3 — старый полинейный
+    // путь дал бы fulfillable=true и рассогласование с createOrder).
+    const items = [
+      { productId, qty: 2 },
+      { productId, qty: 2 },
+    ];
+    const q = await repo.quoteCart({ items });
+    expect(q.fulfillable).toBe(false);
+    expect(q.issues.some((i) => i.code === 'out_of_stock')).toBe(true);
+
+    // Согласованность: createOrder на тот же ввод тоже отклоняет (out_of_stock).
+    const r = await repo.createOrder({
+      items,
+      customer: customer(),
+      delivery: { type: 'courier' },
+      paymentMethod: 'cod',
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.code).toBe('out_of_stock');
+  });
+
+  it('BUG C: две линии одного юнита, сумма <= остатка → fulfillable=true (не ломаем)', async () => {
+    const productId = await makeProduct({ basePrice: '100.00', quantity: 5 });
+    const q = await repo.quoteCart({
+      items: [
+        { productId, qty: 2 },
+        { productId, qty: 2 },
+      ],
+    });
+    expect(q.fulfillable).toBe(true);
+    expect(q.issues).toHaveLength(0);
   });
 
   it('гонка резерва: только один из двух параллельных заказов на последний остаток', async () => {

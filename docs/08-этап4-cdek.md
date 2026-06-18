@@ -423,6 +423,26 @@ export async function computeDeliveryCost(input: DeliveryCostInput): Promise<Del
 `address` (real СДЭК геокодирует; mock считает по весу). Опц. числовой `delivery.cityCode`
 (из автокомплита витрины) даёт точное назначение и идёт в `Calculator.to.code`.
 
+**Anti-undercharge — реальный вес позиций (BUG A, волна 4).** Адаптер
+`resolveDeliveryCost` (в `lib/orders/repository.ts`) ОБЯЗАН нести в `DeliveryCostLine[]`
+не только `qty`, но и `weightG/lengthCm/widthCm/heightCm` каждой позиции (снимок каталога
+из `resolveLineDims`). Раньше строился `lines.map(l => ({ qty: l.qty }))` — вес/габариты
+терялись, `aggregatePackage` подставлял дефолт магазина (`CDEK_DEFAULT_WEIGHT_G ≈ 500`), и
+`quote`/`createOrder` считали доставку по дефолтному весу, тогда как `order_items.weight_g`
+и реальная СДЭК-накладная (`lib/cdek/services/order.ts`) билятся по РЕАЛЬНОМУ весу →
+магазин недополучал за доставку тяжёлых товаров. В `quoteCart` локальный массив позиций
+типизирован `ResolvedLine[]` (а не `PricedLine[]`), чтобы габариты были видны компилятору и
+дошли до расчёта. `null`-поля по-прежнему легитимно деградируют к дефолту магазина.
+
+**Anti-undercharge — 200 без цены (BUG B, волна 4).** СДЭК отвечает HTTP 200 даже когда
+тариф недоступен для назначения: тело несёт непустой `errors[]` и НЕ содержит
+`delivery_sum`/`total_sum`. `mapTariffResult` ДО маппинга требует конечную цену и пустой
+`errors[]`; иначе бросает `CdekError('cdek_calc_no_price', …, { cdekErrors })`. Это
+поднимается до `DeliveryCalculationError` (`createOrder` → `delivery_unavailable`; `quote`
+`softFail` → `resolved:false`), а НЕ резолвится молча в `0.00`. Легитимный нуль
+(`delivery_sum: 0` без `errors`) остаётся валидным `'0.00'`. Mock не затронут (его суммы
+считаются формулой и не проходят через `mapTariffResult`).
+
 ### 5.2 `Calculator` (порт `Calculator.php`)
 
 ```ts

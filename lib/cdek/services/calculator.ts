@@ -19,6 +19,7 @@ import {
   CDEK_FALLBACK_DIMENSIONS,
   type CdekConfig,
 } from '../config';
+import { CdekError, type CdekApiError } from '../errors';
 import type {
   CdekLocation,
   CdekPackage,
@@ -126,9 +127,46 @@ function toIntOrNull(v: unknown): number | null {
   return Number.isFinite(n) ? Math.trunc(n) : null;
 }
 
+/** Достаёт structured errors[] из тела ответа СДЭК (поле `errors`). */
+function extractCdekErrors(raw: Record<string, unknown>): CdekApiError[] {
+  const errs = raw.errors;
+  if (!Array.isArray(errs)) return [];
+  return errs
+    .filter((e): e is Record<string, unknown> => !!e && typeof e === 'object')
+    .map((e) => ({
+      code: typeof e.code === 'string' ? e.code : 'unknown',
+      message: typeof e.message === 'string' ? e.message : '',
+    }));
+}
+
+/**
+ * Маппинг ответа /v2/calculator/tariff → CdekTariffResult.
+ *
+ * BUG B (anti-undercharge): СДЭК отвечает HTTP 200 даже когда тариф недоступен —
+ * тело тогда несёт непустой errors[] и НЕ содержит delivery_sum/total_sum. Раньше
+ * отсутствующее поле проходило через toMoney(undefined) === '0.00', Calculator
+ * резолвился с нулевой ценой (resolved-путь), и заказ создавался с БЕСПЛАТНОЙ
+ * доставкой (клиент недоплачивал). Поэтому ДО маппинга требуем конечную цену и
+ * отсутствие errors[]: иначе бросаем CdekError — выше по стеку он превращается в
+ * DeliveryCalculationError (createOrder → delivery_unavailable; quote softFail →
+ * resolved:false). Легитимный нуль (delivery_sum: 0 без errors) остаётся '0.00'.
+ */
 function mapTariffResult(raw: Record<string, unknown>, tariffCode: number): CdekTariffResult {
+  const priceRaw = raw.delivery_sum ?? raw.total_sum;
+  const price =
+    typeof priceRaw === 'string'
+      ? Number(priceRaw)
+      : typeof priceRaw === 'number'
+        ? priceRaw
+        : NaN;
+  const cdekErrors = extractCdekErrors(raw);
+  if (!Number.isFinite(price) || cdekErrors.length > 0) {
+    throw new CdekError('cdek_calc_no_price', 'СДЭК калькулятор не вернул цену доставки.', {
+      cdekErrors,
+    });
+  }
   return {
-    deliverySum: toMoney(raw.delivery_sum ?? raw.total_sum),
+    deliverySum: price.toFixed(2),
     periodMin: toIntOrNull(raw.period_min),
     periodMax: toIntOrNull(raw.period_max),
     tariffCode: toIntOrNull(raw.tariff_code) ?? tariffCode,

@@ -325,4 +325,47 @@ describe('orders/delivery-cost — сбой расчёта СДЭК НЕ обн�
     expect(res.resolved).toBe(true);
     expect(res.source).toBe('stub');
   });
+
+  // BUG B (CRITICAL, undercharge): СДЭК-калькулятор отвечает 200 БЕЗ цены
+  // (errors[] вместо delivery_sum) → Calculator.calculate теперь бросает CdekError
+  // (а не резолвится в 0.00). Здесь проверяем КОМПОЗИЦИЮ: брошенный CdekError
+  // обрабатывается computeDeliveryCost так же, как сетевой сбой — createOrder-путь
+  // БРОСАЕТ DeliveryCalculationError, quote softFail → resolved:false. То есть
+  // заказ с «бесплатной» доставкой из-за недоступного тарифа более невозможен.
+  it('CdekError «нет цены» (200+errors) → createOrder-путь БРОСАЕТ (не 0.00)', async () => {
+    const { CdekError } = await import('@/lib/cdek/errors');
+    const { computeDeliveryCost } = await loadWithCdek({
+      calculate: () =>
+        Promise.reject(
+          new CdekError('cdek_calc_no_price', 'СДЭК калькулятор не вернул цену доставки.', {
+            cdekErrors: [{ code: 'v2_calc_tariff_unavailable', message: 'Тариф недоступен' }],
+          }),
+        ),
+    });
+    await expect(
+      computeDeliveryCost({
+        deliveryType: 'courier',
+        lines: [{ qty: 1, weightG: 500 }],
+        destination: { cityName: 'Москва' },
+      }),
+    ).rejects.toMatchObject({ code: 'delivery_calc_failed' });
+  });
+
+  it('CdekError «нет цены» (200+errors) → quote softFail → resolved:false', async () => {
+    const { CdekError } = await import('@/lib/cdek/errors');
+    const { computeDeliveryCost } = await loadWithCdek({
+      calculate: () =>
+        Promise.reject(new CdekError('cdek_calc_no_price', 'нет цены', { cdekErrors: [] })),
+    });
+    const res = await computeDeliveryCost(
+      {
+        deliveryType: 'courier',
+        lines: [{ qty: 1, weightG: 500 }],
+        destination: { cityName: 'Москва' },
+      },
+      { softFail: true },
+    );
+    expect(res.resolved).toBe(false);
+    expect(res.source).toBe('unavailable');
+  });
 });

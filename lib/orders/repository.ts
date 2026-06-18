@@ -491,7 +491,20 @@ export async function resolveGiftLine(promo: PromoCode): Promise<ResolvedLine | 
  */
 async function resolveDeliveryCost(args: {
   deliveryType: DeliveryType | undefined;
-  lines: ReadonlyArray<{ qty: number }>;
+  // BUG A (CRITICAL, anti-undercharge): сюда ОБЯЗАТЕЛЬНО нести вес/габариты линии,
+  // а не только qty. Раньше принимался только { qty } → реальные weightG/lengthCm/…
+  // ОТБРАСЫВАЛИСЬ, и aggregatePackage (lib/cdek/.../calculator) подставлял дефолт
+  // магазина (CDEK_DEFAULT_WEIGHT ≈ 500 г) для КАЖДОЙ позиции. Итог: и quote, и
+  // createOrder считали доставку по дефолтному весу, тогда как order_items.weight_g
+  // и реальная СДЭК-накладная (lib/cdek/services/order) билятся по РЕАЛЬНОМУ весу
+  // из каталога (resolveLineDims) → магазин недополучал за доставку тяжёлых товаров.
+  lines: ReadonlyArray<{
+    qty: number;
+    weightG?: number | null;
+    lengthCm?: number | null;
+    widthCm?: number | null;
+    heightCm?: number | null;
+  }>;
   city?: string;
   cityCode?: number;
   pvzCode?: string;
@@ -511,7 +524,16 @@ async function resolveDeliveryCost(args: {
     cityName: args.city,
     pvzCode: args.pvzCode,
   };
-  const lines: DeliveryCostLine[] = args.lines.map((l) => ({ qty: l.qty }));
+  // BUG A: пробрасываем РЕАЛЬНЫЕ вес/габариты из каталога (resolveLineDims) в
+  // расчёт доставки — иначе aggregatePackage подставит дефолт магазина и магазин
+  // недополучит за доставку (anti-undercharge). null → дефолт магазина (легитимно).
+  const lines: DeliveryCostLine[] = args.lines.map((l) => ({
+    qty: l.qty,
+    weightG: l.weightG ?? null,
+    lengthCm: l.lengthCm ?? null,
+    widthCm: l.widthCm ?? null,
+    heightCm: l.heightCm ?? null,
+  }));
   const res = await computeDeliveryCost(
     { deliveryType, lines, destination },
     { softFail: args.softFail },
@@ -559,7 +581,20 @@ export async function quoteCart(
   const freeThreshold = Number(fromMinor(eff.delivery.freeDeliveryThreshold));
 
   const issues: QuoteCartResult['issues'] = [];
-  const lines: PricedLine[] = [];
+  // BUG A: тип ResolvedLine (а не PricedLine) — чтобы вес/габариты позиции были
+  // ВИДНЫ компилятору и доходили до resolveDeliveryCost. resolveCartLine отдаёт
+  // именно ResolvedLine (с weightG/lengthCm/…); calculateQuote принимает
+  // PricedLine, а ResolvedLine его расширяет — присваивание корректно.
+  const lines: ResolvedLine[] = [];
+  // BUG C (консистентность quote↔createOrder): остаток проверяем по СУММАРНОМУ
+  // спросу на юнит, а не полинейно. Раньше две линии одного юнита (productId+
+  // variantId) по qty каждая проходили per-line inStock (available >= qty), но
+  // createOrder резервирует КУМУЛЯТИВНО (reserveUnit вызывается на каждую линию,
+  // вторая падает) → quote говорил «можно», а заказ падал out_of_stock. Копим
+  // спрос по ключу юнита и сверяем нарастающим итогом — как кумулятивный резерв.
+  const demandByUnit = new Map<string, number>();
+  const unitKey = (productId: string, variantId: string | null): string =>
+    `${productId}:${variantId ?? NIL_UUID}`;
 
   for (let i = 0; i < input.items.length; i++) {
     const res = await resolveCartLine(input.items[i]!);
@@ -567,7 +602,12 @@ export async function quoteCart(
       issues.push({ index: i, code: res.reason });
       continue;
     }
-    if (!res.line.inStock) {
+    const key = unitKey(res.line.productId, res.line.variantId);
+    const cumulative = (demandByUnit.get(key) ?? 0) + res.line.qty;
+    demandByUnit.set(key, cumulative);
+    // out_of_stock — если НАРАСТАЮЩИЙ спрос на юнит превысил доступный остаток
+    // (available для всех линий одного юнита одинаков — снимок каталога).
+    if (cumulative > res.line.available) {
       issues.push({ index: i, code: 'out_of_stock' });
     }
     lines.push(res.line);
