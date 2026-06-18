@@ -359,6 +359,43 @@ async function runCleanup(page) {
   }
 }
 
+// Проверка, что все разделы админки реально рендерятся (без error-оверлея Next,
+// с осмысленным заголовком/контентом). Перебор всего меню — «прокликать админку».
+async function runSections(page) {
+  const sections = [
+    ['Дашборд', '/admin'],
+    ['Каталог — товары', '/admin/catalog'],
+    ['Каталог — категории', '/admin/catalog/categories'],
+    ['Каталог — бренды', '/admin/catalog/brands'],
+    ['Заказы', '/admin/orders'],
+    ['Промокоды', '/admin/promo'],
+    ['Доставка (СДЭК)', '/admin/cdek'],
+    ['CMS — страницы', '/admin/cms'],
+    ['Настройки', '/admin/settings'],
+    ['Пользователи', '/admin/users'],
+    ['Роли', '/admin/roles'],
+    ['Аудит', '/admin/audit'],
+  ];
+  for (const [label, path] of sections) {
+    try {
+      const resp = await page.goto(`${ADMIN}${path}`, { waitUntil: 'networkidle' });
+      const http = resp ? resp.status() : 0;
+      const bodyText = (await page.locator('body').innerText().catch(() => '')) || '';
+      const broken = /Application error|Unhandled Runtime|This page could not be found|Internal Server Error|client-side exception/i.test(bodyText);
+      const h1 = (await page.locator('h1').first().textContent().catch(() => '')) || '';
+      const finalUrl = page.url();
+      const bouncedToLogin = /\/admin\/login/.test(finalUrl);
+      if (http >= 200 && http < 400 && !broken && !bouncedToLogin && h1.trim()) {
+        PASS(`раздел ${label}`, `${path} → "${h1.trim().slice(0, 40)}"`);
+      } else {
+        FAIL(`раздел ${label}`, `http=${http} h1="${h1.trim().slice(0, 30)}" broken=${broken} login=${bouncedToLogin}`);
+      }
+    } catch (e) {
+      FAIL(`раздел ${label}`, e.message.slice(0, 120));
+    }
+  }
+}
+
 // --- запуск ---------------------------------------------------------------
 
 const browser = await chromium.launch();
@@ -374,6 +411,8 @@ try {
       INFO('catalog rows', String(await page.locator('table tbody tr').count().catch(() => 0)));
     } else if (phase === 'full') {
       await runFull(page);
+    } else if (phase === 'sections') {
+      await runSections(page);
     } else if (phase === 'cleanup') {
       await runCleanup(page);
     }
