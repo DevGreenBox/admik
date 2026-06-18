@@ -51,6 +51,30 @@ export function SectionEditor({
     [...sections].sort((a, b) => a.displayOrder - b.displayOrder),
   );
 
+  // Ресинхронизация с серверным состоянием — паттерн «adjusting state during
+  // render» из React-доков (you-might-not-need-an-effect):
+  //
+  //   useState инициализируется лишь однажды (при монтировании), а router.refresh()
+  //   НЕ размонтирует клиентский компонент — он перерисовывает дерево и приносит
+  //   новый проп `sections`. Без ресинка добавленная секция не появлялась бы,
+  //   а удалённая оставалась бы в списке до полной перезагрузки страницы
+  //   (и владелец, считая «Добавить» сломанным, плодил бы реальные дубли).
+  //
+  // Сравниваем ссылку на проп с тем, на основе которого считали `ordered`.
+  // Server Action → router.refresh() даёт НОВУЮ ссылку `sections`, поэтому при
+  // изменении add/delete/toggle/reorder мы пересобираем порядок прямо в рендере
+  // (без useEffect → без каскадных ре-рендеров и без запрета
+  // react-hooks/set-state-in-effect; React сразу перезапускает рендер с новым
+  // состоянием, до отрисовки в DOM — мерцания нет).
+  //
+  // Это сохраняет локальный UI-стейт (editingId, adding, newType, открытая
+  // SectionForm) — в отличие от remount по key, который их бы сбросил.
+  const [syncedFrom, setSyncedFrom] = useState(sections);
+  if (sections !== syncedFrom) {
+    setSyncedFrom(sections);
+    setOrdered([...sections].sort((a, b) => a.displayOrder - b.displayOrder));
+  }
+
   function handle(result: ActionResult<unknown>, onOk?: () => void) {
     setPending(false);
     if (result.ok) {

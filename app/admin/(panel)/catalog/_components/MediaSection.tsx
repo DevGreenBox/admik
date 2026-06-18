@@ -61,6 +61,9 @@ export function MediaSection({ product }: { product: ProductDetail }) {
   }
 
   async function remove(id: string) {
+    if (!window.confirm('Удалить изображение?')) {
+      return;
+    }
     setError(null);
     const result = await deleteMediaAction({ id });
     if (result.ok) router.refresh();

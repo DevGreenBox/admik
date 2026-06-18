@@ -81,6 +81,9 @@ export function VariantsSection({ product }: { product: ProductDetail }) {
   }
 
   async function removeVariant(id: string) {
+    if (!window.confirm('Удалить вариант? Действие необратимо, остатки варианта будут потеряны.')) {
+      return;
+    }
     setError(null);
     const result = await deleteVariantAction({ id });
     if (result.ok) router.refresh();
