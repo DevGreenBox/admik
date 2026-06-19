@@ -87,6 +87,22 @@ describe('config/settings — mergeSettings (env ⊕ БД)', () => {
     expect(eff.orders.orderPrefix).toBe('GA');
   });
 
+  it('logoUrl: плейсхолдер example.com → null (не рендерим битую картинку в шапке)', () => {
+    // Из .env.example в .env часто попадает SHOP_LOGO_URL=https://example.com/logo.svg.
+    const effEnv = mergeSettings(envWith({ SHOP_LOGO_URL: 'https://example.com/logo.svg' }), []);
+    expect(effEnv.branding.logoUrl).toBeNull();
+    // Тот же плейсхолдер в БД — тоже null.
+    const effDb = mergeSettings(envWith(), [
+      { setting_key: 'branding', value: { logoUrl: 'https://example.com/logo.svg' } },
+    ]);
+    expect(effDb.branding.logoUrl).toBeNull();
+  });
+
+  it('logoUrl: валидный https URL сохраняется как есть', () => {
+    const eff = mergeSettings(envWith({ SHOP_LOGO_URL: 'https://cdn.shop.ru/logo.svg' }), []);
+    expect(eff.branding.logoUrl).toBe('https://cdn.shop.ru/logo.svg');
+  });
+
   it('лишние/неизвестные поля в value отбрасываются Zod', () => {
     const eff = mergeSettings(envWith(), [
       {

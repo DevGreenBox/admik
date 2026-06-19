@@ -1,4 +1,5 @@
 import { logout } from '@/lib/auth/actions';
+import { ShopLogo } from './ShopLogo';
 
 /**
  * Верхняя панель: брендинг магазина (из .env, без хардкодов) + текущий
@@ -16,14 +17,7 @@ export function Topbar({
   return (
     <header className="flex items-center justify-between border-b border-gray-200 bg-white px-6 py-3">
       <div className="flex items-center gap-3">
-        {shopLogoUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element -- логотип из произвольного внешнего URL (.env), не оптимизируем через next/image
-          <img
-            src={shopLogoUrl}
-            alt={`Логотип: ${shopName}`}
-            className="h-8 w-auto"
-          />
-        ) : null}
+        {shopLogoUrl ? <ShopLogo src={shopLogoUrl} shopName={shopName} /> : null}
         <span className="text-lg font-semibold text-gray-900">{shopName}</span>
       </div>
 

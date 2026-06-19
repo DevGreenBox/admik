@@ -96,6 +96,26 @@ export interface EffectiveSettings {
 // mergeSettings — ЧИСТАЯ функция env ⊕ БД.
 // -----------------------------------------------------------------------------
 
+/**
+ * Очищает URL логотипа: пустое/невалидное/плейсхолдер `example.com` (из
+ * `.env.example`) → null, чтобы в шапке админки не висела «битая картинка».
+ * Реальный битый URL дополнительно гасится onError в ShopLogo (клиент).
+ */
+function cleanLogoUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  const trimmed = url.trim();
+  if (!trimmed) return null;
+  try {
+    const host = new URL(trimmed).hostname.toLowerCase();
+    if (host === 'example.com' || host === 'www.example.com' || host === 'example.org') {
+      return null;
+    }
+    return trimmed;
+  } catch {
+    return null; // невалидный URL → не рендерим логотип
+  }
+}
+
 /** Индексирует строки БД по ключу с безопасным парсом значения. */
 function indexRows(dbRows: SettingRow[]): Map<string, Record<string, unknown>> {
   const map = new Map<string, Record<string, unknown>>();
@@ -132,7 +152,7 @@ export function mergeSettings(env: Env, dbRows: SettingRow[]): EffectiveSettings
   return {
     branding: {
       shopName: branding.shopName ?? env.SHOP_NAME ?? 'Admik',
-      logoUrl: branding.logoUrl ?? env.SHOP_LOGO_URL ?? null,
+      logoUrl: cleanLogoUrl(branding.logoUrl ?? env.SHOP_LOGO_URL),
       faviconUrl: branding.faviconUrl ?? null,
       theme: {
         primaryColor: branding.theme?.primaryColor ?? null,
