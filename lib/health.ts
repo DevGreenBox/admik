@@ -141,9 +141,13 @@ export async function checkS3(): Promise<CheckResult> {
     return { status: 'skipped' };
   }
   const started = Date.now();
+  // C6-4 (аудит цикла 6): объявлен ВНЕ try, чтобы освободить HTTP-агент в finally —
+  // как redis.quit() выше. Иначе при частых health-пробах (мониторинг/LB-healthcheck)
+  // новый S3Client на каждый вызов держит keep-alive сокеты → утечка FD/памяти.
+  let client: import('@aws-sdk/client-s3').S3Client | undefined;
   try {
     const { S3Client, HeadBucketCommand } = await import('@aws-sdk/client-s3');
-    const client = new S3Client({
+    client = new S3Client({
       region: env.S3_REGION ?? 'us-east-1',
       endpoint: env.S3_ENDPOINT,
       forcePathStyle: true,
@@ -160,6 +164,8 @@ export async function checkS3(): Promise<CheckResult> {
     return { status: 'ok', latencyMs: Date.now() - started };
   } catch (error) {
     return failure('s3', error);
+  } finally {
+    client?.destroy();
   }
 }
 
