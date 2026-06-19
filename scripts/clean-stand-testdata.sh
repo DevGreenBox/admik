@@ -30,6 +30,7 @@ echo "=== ТЕКУЩИЕ ТЕСТ-АРТЕФАКТЫ НА СТЕНДЕ ==="
 echo -n "  заказы QA ($QA_EMAIL): "; psql_exec "SELECT count(*) FROM orders WHERE customer_email='$QA_EMAIL';"
 echo -n "  категории ZZ-*:        "; psql_exec "SELECT count(*) FROM categories WHERE slug LIKE 'zz-%' OR name LIKE 'ZZ-%';"
 echo -n "  товары ZZ-QA-*:        "; psql_exec "SELECT count(*) FROM products WHERE slug LIKE 'zz-qa-%' OR name LIKE 'ZZ-QA-%';"
+echo -n "  промокоды ZZ-*:        "; psql_exec "SELECT count(*) FROM promo_codes WHERE code LIKE 'ZZ-%';"
 
 if [ "$CONFIRM" != "yes" ]; then
   echo
@@ -43,6 +44,9 @@ echo "=== УДАЛЕНИЕ (CONFIRM=yes) ==="
 echo -n "  удалено заказов QA: "; psql_exec "WITH d AS (DELETE FROM orders WHERE customer_email='$QA_EMAIL' RETURNING 1) SELECT count(*) FROM d;"
 # 2. Товары ZZ-QA — best-effort (если FK без каскада — оставит, выведется ниже).
 echo -n "  удалено товаров ZZ-QA: "; psql_exec "WITH d AS (DELETE FROM products WHERE slug LIKE 'zz-qa-%' OR name LIKE 'ZZ-QA-%' RETURNING 1) SELECT count(*) FROM d;" || echo "(часть с FK — чистить через админку)"
+# 2b. Промокоды ZZ-* (создаёт фаза `full`, UI их не удаляет → копятся, мешают повторному прогону).
+#     Каскад redemptions/targets по FK. Публичных ZZ-промо не плодит, но засоряют админ-список.
+echo -n "  удалено промокодов ZZ: "; psql_exec "WITH d AS (DELETE FROM promo_codes WHERE code LIKE 'ZZ-%' RETURNING 1) SELECT count(*) FROM d;"
 # 3. Категории ZZ — сначала дети (parent_id у ZZ-родителя), затем сами ZZ (FK RESTRICT).
 #    Два прохода (до 2 уровней вложенности тест-категорий).
 for _pass in 1 2 3; do
