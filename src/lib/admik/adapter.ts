@@ -122,6 +122,7 @@ export function toStorefrontVariant(v: AdmikVariantDto): StorefrontVariant {
     size: variantSize(v),
     price: parseMoney(v.price),
     inStock: v.inStock,
+    availableQty: Math.max(0, Math.trunc(v.availableQty ?? 0)),
   };
 }
 
@@ -155,6 +156,7 @@ export function fromListItem(dto: AdmikProductListItemDto): StorefrontProduct {
     isNew: dto.isNew,
     isBestseller: dto.isFeatured,
     inStock: dto.inStock,
+    availableQty: Math.max(0, Math.trunc(dto.availableQty ?? 0)),
     imageUrl: dto.imageUrl,
     images: dto.imageUrl ? [dto.imageUrl] : [],
     brand: dto.brand ? { slug: dto.brand.slug, name: dto.brand.name } : null,
@@ -190,6 +192,7 @@ export function fromDetail(dto: AdmikProductDetailDto): StorefrontProduct {
     isNew: dto.isNew,
     isBestseller: dto.isFeatured,
     inStock: dto.inStock,
+    availableQty: Math.max(0, Math.trunc(dto.availableQty ?? 0)),
     imageUrl: images[0] ?? null,
     images,
     brand: dto.brand ? { slug: dto.brand.slug, name: dto.brand.name } : null,

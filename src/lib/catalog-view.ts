@@ -47,6 +47,39 @@ export function categoryTabs(categories: AdmikCategoryDto[]): CategoryTab[] {
   ];
 }
 
+/** Ссылка подменю навигации (одна категория любого уровня). */
+export interface CategoryNavItem {
+  href: string;
+  label: string;
+}
+
+/**
+ * Плоский список ссылок для подменю «Коллекция»: дерево категорий Admik
+ * (родители + ВЛОЖЕННЫЕ children) обходом в глубину. Дети визуально сдвинуты
+ * префиксом «— » по глубине — чтобы в одноуровневом дропдауне читалась иерархия
+ * (та же конвенция, что в админском дереве категорий, CategoryManager).
+ *
+ * Раньше Header брал только верхний уровень (`categories.map`) → подкатегории,
+ * которые владелец создаёт в админке («Внутри категории»), НЕ показывались в
+ * навигации витрины. href ведёт на каталог, отфильтрованный по slug категории.
+ */
+export function flattenCategoryNav(
+  categories: AdmikCategoryDto[],
+  depth = 0,
+): CategoryNavItem[] {
+  const out: CategoryNavItem[] = [];
+  for (const c of categories) {
+    out.push({
+      href: `/catalog?category=${encodeURIComponent(c.slug)}`,
+      label: depth > 0 ? `${"— ".repeat(depth)}${c.name}` : c.name,
+    });
+    if (c.children?.length) {
+      out.push(...flattenCategoryNav(c.children, depth + 1));
+    }
+  }
+  return out;
+}
+
 /** Сортировка товаров (не мутирует вход). `bestseller` ещё и фильтрует. */
 export function sortProducts(
   products: StorefrontProduct[],

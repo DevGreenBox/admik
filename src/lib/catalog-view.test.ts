@@ -4,6 +4,7 @@ import {
   categoryTabs,
   sortProducts,
   applyCatalogView,
+  flattenCategoryNav,
 } from "@/lib/catalog-view";
 import type { StorefrontProduct, AdmikCategoryDto } from "@/lib/admik";
 
@@ -18,6 +19,7 @@ function mk(over: Partial<StorefrontProduct>): StorefrontProduct {
     isNew: over.isNew ?? false,
     isBestseller: over.isBestseller ?? false,
     inStock: over.inStock ?? true,
+    availableQty: over.availableQty ?? 10,
     imageUrl: over.imageUrl ?? null,
     images: over.images ?? [],
     brand: over.brand ?? null,
@@ -63,6 +65,59 @@ describe("categoryTabs", () => {
 
   it("пустое дерево → только «Все»", () => {
     expect(categoryTabs([])).toEqual([{ slug: "", name: "Все" }]);
+  });
+});
+
+describe("flattenCategoryNav", () => {
+  it("пустое дерево → []", () => {
+    expect(flattenCategoryNav([])).toEqual([]);
+  });
+
+  it("топ-уровень → ссылки на /catalog?category=<slug> без отступа", () => {
+    const cats: AdmikCategoryDto[] = [
+      { slug: "halaty", name: "Халаты", description: "", children: [] },
+      { slug: "kostyumy", name: "Костюмы", description: "", children: [] },
+    ];
+    expect(flattenCategoryNav(cats)).toEqual([
+      { href: "/catalog?category=halaty", label: "Халаты" },
+      { href: "/catalog?category=kostyumy", label: "Костюмы" },
+    ]);
+  });
+
+  it("вложенные категории в порядке обхода в глубину, дети с префиксом «— »", () => {
+    const cats: AdmikCategoryDto[] = [
+      {
+        slug: "women",
+        name: "Женское",
+        description: "",
+        children: [
+          { slug: "women-halaty", name: "Халаты", description: "", children: [] },
+          {
+            slug: "women-kostyumy",
+            name: "Костюмы",
+            description: "",
+            children: [
+              { slug: "women-scrubs", name: "Скрабы", description: "", children: [] },
+            ],
+          },
+        ],
+      },
+      { slug: "men", name: "Мужское", description: "", children: [] },
+    ];
+    expect(flattenCategoryNav(cats)).toEqual([
+      { href: "/catalog?category=women", label: "Женское" },
+      { href: "/catalog?category=women-halaty", label: "— Халаты" },
+      { href: "/catalog?category=women-kostyumy", label: "— Костюмы" },
+      { href: "/catalog?category=women-scrubs", label: "— — Скрабы" },
+      { href: "/catalog?category=men", label: "Мужское" },
+    ]);
+  });
+
+  it("экранирует slug в href (encodeURIComponent)", () => {
+    const cats: AdmikCategoryDto[] = [
+      { slug: "a b&c", name: "Спорные", description: "", children: [] },
+    ];
+    expect(flattenCategoryNav(cats)[0].href).toBe("/catalog?category=a%20b%26c");
   });
 });
 

@@ -59,6 +59,16 @@ export function ProductDetailClient({ product, related }: ProductDetailClientPro
   // отображении, и в позиции корзины — чтобы показанная цена совпала с добавленной.
   const activePrice = selectedVariant?.price ?? product.price;
 
+  // Доступный к заказу остаток текущей покупки: выбранного варианта, иначе товара
+  // (для товара без вариантов). null = неизвестно (нечего покупать) → без лимита.
+  // Ограничивает счётчик количества, чтобы нельзя было заказать больше остатка
+  // (бэкенд — последняя линия обороны, но UI не даёт превысить заранее).
+  const activeAvailable: number | null = hasVariants
+    ? selectedVariant?.availableQty ?? null
+    : canBuySimple
+      ? product.availableQty
+      : null;
+
   const handleAddToCart = () => {
     if (!canBuy) return;
     if (added) return; // не плодим дубль позиции, пока показывается «Добавлено»
@@ -71,6 +81,7 @@ export function ProductDetailClient({ product, related }: ProductDetailClientPro
           size: selectedVariant.size,
           price: selectedVariant.price,
           imageUrl: product.imageUrl,
+          available: selectedVariant.availableQty,
         },
         quantity
       );
@@ -85,6 +96,7 @@ export function ProductDetailClient({ product, related }: ProductDetailClientPro
           size: "",
           price: product.price,
           imageUrl: product.imageUrl,
+          available: product.availableQty,
         },
         quantity
       );
@@ -135,7 +147,12 @@ export function ProductDetailClient({ product, related }: ProductDetailClientPro
                       <button
                         key={variant.id}
                         disabled={!variant.inStock}
-                        onClick={() => { setSelectedVariant(variant); setAdded(false); }}
+                        onClick={() => {
+                          setSelectedVariant(variant);
+                          setAdded(false);
+                          // Не оставляем количество больше остатка нового размера.
+                          setQuantity((q) => Math.min(q, Math.max(1, variant.availableQty)));
+                        }}
                         className={`min-w-[48px] px-4 py-3 text-[10px] uppercase tracking-[0.15em] border transition-all duration-500 disabled:opacity-30 disabled:cursor-not-allowed ${
                           selectedVariant?.id === variant.id
                             ? "border-graphite bg-graphite text-white"
@@ -158,7 +175,12 @@ export function ProductDetailClient({ product, related }: ProductDetailClientPro
                       <Minus className="h-4 w-4" strokeWidth={1} />
                     </button>
                     <span className="px-8 text-sm tabular-nums">{quantity}</span>
-                    <button onClick={() => setQuantity(quantity + 1)} className="p-3 hover:opacity-50 transition-opacity duration-500" aria-label="Увеличить">
+                    <button
+                      onClick={() => setQuantity(activeAvailable == null ? quantity + 1 : Math.min(activeAvailable, quantity + 1))}
+                      disabled={activeAvailable != null && quantity >= activeAvailable}
+                      className="p-3 hover:opacity-50 transition-opacity duration-500 disabled:opacity-30 disabled:cursor-not-allowed"
+                      aria-label="Увеличить"
+                    >
                       <Plus className="h-4 w-4" strokeWidth={1} />
                     </button>
                   </div>

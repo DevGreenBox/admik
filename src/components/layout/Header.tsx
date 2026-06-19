@@ -5,7 +5,8 @@ import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import { Search, ShoppingBag, Heart, User, Menu, X } from "lucide-react";
 import { Logo } from "@/components/ui/Logo";
-import { selectCartCount, useStore } from "@/lib/store";
+import { selectCartCount, selectWishlistCount, useStore } from "@/lib/store";
+import { flattenCategoryNav } from "@/lib/catalog-view";
 import type { AdmikCategoryDto } from "@/lib/admik";
 
 type NavItem = { href: string; label: string; children?: { href: string; label: string }[] };
@@ -18,15 +19,12 @@ const NAV_RIGHT: NavItem[] = [
 export function Header({ categories = [] }: { categories?: AdmikCategoryDto[] }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const cartCount = useStore(selectCartCount);
-  const wishlistCount = useStore((s) => s.wishlist.length);
+  const wishlistCount = useStore(selectWishlistCount);
 
   // Подменю «Коллекция» — из РЕАЛЬНЫХ категорий магазина (не хардкод women/men,
   // которых может не быть → пустой каталог). Если категорий нет — «Коллекция»
   // деградирует до простой ссылки на /catalog.
-  const collectionChildren = categories.map((c) => ({
-    href: `/catalog?category=${encodeURIComponent(c.slug)}`,
-    label: c.name,
-  }));
+  const collectionChildren = flattenCategoryNav(categories);
   const NAV_LEFT: NavItem[] = [
     { href: "/catalog", label: "Каталог" },
     collectionChildren.length > 0

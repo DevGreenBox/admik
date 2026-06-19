@@ -29,6 +29,7 @@ function variant(over: Partial<AdmikVariantDto> = {}): AdmikVariantDto {
     onSale: false,
     attributes: { size: 'M' },
     inStock: true,
+    availableQty: 10,
     ...over,
   };
 }
@@ -101,7 +102,7 @@ describe('варианты-размеры', () => {
     expect(v.id).toBe('00000000-0000-0000-0000-000000000001');
   });
   it('sortVariants: канон XS<S<M<L<XL<XXL, неизвестные в конец', () => {
-    const mk = (size: string): StorefrontVariant => ({ id: size, sku: size, size, price: 0, inStock: true });
+    const mk = (size: string): StorefrontVariant => ({ id: size, sku: size, size, price: 0, inStock: true, availableQty: 5 });
     const sorted = sortVariants([mk('XL'), mk('S'), mk('ZZ'), mk('M'), mk('XS')]);
     expect(sorted.map((v) => v.size)).toEqual(['XS', 'S', 'M', 'XL', 'ZZ']);
   });
@@ -120,6 +121,7 @@ describe('fromListItem', () => {
     brand: { slug: 'the-case', name: 'THE CASE', logoUrl: null },
     imageUrl: 'https://cdn.example/img.webp',
     inStock: true,
+    availableQty: 7,
   };
   it('карточка: цены, бейджи, бренд, изображение', () => {
     const p = fromListItem(dto);
@@ -177,6 +179,7 @@ describe('fromDetail', () => {
       { url: null, type: 'image', alt: '', isPrimary: false },
     ],
     inStock: true,
+    availableQty: 25,
     meta: {
       title: 'Костюм Essential',
       description: 'Описание',

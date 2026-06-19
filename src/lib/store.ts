@@ -40,16 +40,24 @@ export const useStore = create<StoreState>()(
           const existing = state.cart.find(
             (i) => i.variantId === item.variantId
           );
+          // Лимит остатка: cap по item.available (снимок). undefined → без лимита.
+          const cap = item.available;
+          const clamp = (q: number) =>
+            cap === undefined ? q : Math.min(q, Math.max(0, cap));
           if (existing) {
             return {
               cart: state.cart.map((i) =>
                 i.variantId === item.variantId
-                  ? { ...i, quantity: i.quantity + quantity }
+                  ? {
+                      ...i,
+                      available: cap ?? i.available,
+                      quantity: clamp(i.quantity + quantity),
+                    }
                   : i
               ),
             };
           }
-          return { cart: [...state.cart, { ...item, quantity }] };
+          return { cart: [...state.cart, { ...item, quantity: clamp(quantity) }] };
         });
       },
 
@@ -66,7 +74,16 @@ export const useStore = create<StoreState>()(
         }
         set((state) => ({
           cart: state.cart.map((i) =>
-            i.variantId === variantId ? { ...i, quantity } : i
+            i.variantId === variantId
+              ? {
+                  // Не даём превысить остаток (снимок available). undefined → без лимита.
+                  ...i,
+                  quantity:
+                    i.available === undefined
+                      ? quantity
+                      : Math.min(quantity, Math.max(1, i.available)),
+                }
+              : i
           ),
         }));
       },
@@ -126,6 +143,20 @@ export function useHydrated(): boolean {
 
 export function selectCartCount(state: StoreState) {
   return state.cart.reduce((sum, item) => sum + item.quantity, 0);
+}
+
+/** Кол-во товаров в избранном (именованный селектор — единый паттерн, как cartCount). */
+export function selectWishlistCount(state: StoreState) {
+  return state.wishlist.length;
+}
+
+/** Удаляет slug-и из избранного (после ревалидации: товар скрыт/удалён → 404). */
+export function pruneWishlist(removeSlugs: string[]): void {
+  if (removeSlugs.length === 0) return;
+  const drop = new Set(removeSlugs);
+  useStore.setState((state) => ({
+    wishlist: state.wishlist.filter((s) => !drop.has(s)),
+  }));
 }
 
 export function selectCartTotal(state: StoreState) {

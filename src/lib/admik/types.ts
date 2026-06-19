@@ -38,6 +38,8 @@ export interface AdmikVariantDto {
   /** Денормализованные атрибуты варианта (напр. { size: "M" }). */
   attributes: Record<string, unknown>;
   inStock: boolean;
+  /** Доступно к заказу (quantity − reserved, ≥0). Лимит счётчика в корзине. */
+  availableQty: number;
 }
 
 export interface AdmikProductListItemDto {
@@ -52,6 +54,8 @@ export interface AdmikProductListItemDto {
   brand: AdmikBrandDto | null;
   imageUrl: string | null;
   inStock: boolean;
+  /** Доступно к заказу (≥0) — лимит счётчика в корзине. */
+  availableQty: number;
 }
 
 export interface AdmikProductDetailDto {
@@ -73,6 +77,8 @@ export interface AdmikProductDetailDto {
   variants: AdmikVariantDto[];
   media: AdmikMediaDto[];
   inStock: boolean;
+  /** Доступно к заказу на уровне товара (для товара без вариантов). */
+  availableQty: number;
   /** Готовый SEO-блок карточки (Admik уже применил фолбэки: title=имя товара и т.п.). */
   meta: AdmikSeoMeta;
 }
@@ -256,6 +262,8 @@ export interface StorefrontVariant {
   size: string;
   price: number;
   inStock: boolean;
+  /** Доступно к заказу (≥0) — лимит счётчика количества в корзине. */
+  availableQty: number;
 }
 
 /** Товар в форме, удобной компонентам витрины (адаптировано из Admik DTO). */
@@ -273,6 +281,8 @@ export interface StorefrontProduct {
   /** «Рекомендуемый» Admik = бестселлер витрины. */
   isBestseller: boolean;
   inStock: boolean;
+  /** Доступно к заказу на уровне товара (для товара без вариантов — заказ по id). */
+  availableQty: number;
   imageUrl: string | null;
   images: string[];
   brand: { slug: string; name: string } | null;

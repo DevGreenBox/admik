@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Heart } from "lucide-react";
-import { useStore, useHydrated } from "@/lib/store";
+import { useStore, useHydrated, pruneWishlist } from "@/lib/store";
 import { getProduct, fromDetail, type StorefrontProduct } from "@/lib/admik";
 import { Button } from "@/components/ui/Button";
 import { FadeIn } from "@/components/ui/Animations";
@@ -20,20 +20,27 @@ export default function WishlistPage() {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    Promise.all(
-      wishlist.map((slug) =>
-        getProduct(slug)
-          .then((dto) => (dto ? fromDetail(dto) : null))
-          .catch(() => null)
-      )
-    )
-      .then((items) => {
-        if (cancelled) return;
-        setProducts(items.filter((p): p is StorefrontProduct => p !== null));
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
+    // allSettled: getProduct резолвит null СТРОГО при 404 (товар удалён/скрыт) и
+    // БРОСАЕТ при сетевой/иной ошибке. Это даёт безопасно отличить «товара нет»
+    // (можно убрать из избранного) от «временно недоступен» (оставляем).
+    Promise.allSettled(wishlist.map((slug) => getProduct(slug))).then((results) => {
+      if (cancelled) return;
+      const live: StorefrontProduct[] = [];
+      const gone: string[] = [];
+      results.forEach((r, i) => {
+        const slug = wishlist[i];
+        if (r.status === "fulfilled") {
+          if (r.value) live.push(fromDetail(r.value));
+          else gone.push(slug); // definitive 404 → товара больше нет
+        }
+        // rejected = сетевая ошибка → НЕ удаляем (вернётся при следующей загрузке)
       });
+      setProducts(live);
+      setLoading(false);
+      // Подчищаем избранное от удалённых/скрытых товаров: иначе счётчик в шапке
+      // завышен и каждый визит ре-фетчит 404. Только definitive-404, не сеть.
+      if (gone.length > 0) pruneWishlist(gone);
+    });
     return () => {
       cancelled = true;
     };

@@ -136,6 +136,7 @@ function QuickViewModal({
         size: selectedVariant.size,
         price: selectedVariant.price,
         imageUrl: view.imageUrl,
+        available: selectedVariant.availableQty,
       });
     } else if (canBuySimple && view.id) {
       addToCart({
@@ -146,6 +147,7 @@ function QuickViewModal({
         size: "",
         price: view.price,
         imageUrl: view.imageUrl,
+        available: view.availableQty,
       });
     }
     onClose();
