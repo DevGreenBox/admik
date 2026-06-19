@@ -23,15 +23,34 @@ import type { QuoteResult } from '@/lib/orders/pricing';
 // Токен доступа к заказу (анти-перебор номеров).
 // ---------------------------------------------------------------------------
 
+/** Demo/dev-фолбэк секрета токена заказа (НЕ используется в production — fail-closed). */
+const ORDER_TOKEN_DEV_FALLBACK = 'admik-storefront-order-token';
+
 /**
- * Секрет для HMAC токена заказа. Берём APP_PASSWORD (есть в бою), иначе
- * стабильный demo-фолбэк (mock-режим витрины, docs/02 — demo без секретов).
+ * Секрет для HMAC токена заказа. Приоритет (m10):
+ *   1) ORDER_TOKEN_SECRET — выделенный секрет (развязан от пароля админки);
+ *   2) APP_PASSWORD / OWNER_PASSWORD — легаси-фолбэк (непрерывность токенов магазинов,
+ *      которые уже на нём; есть в бою);
+ *   3) в PRODUCTION без какого-либо секрета — БРОСАЕМ (fail-closed): иначе токен
+ *      считался бы по ЗАШИТОЙ В РЕПО константе → любой мог бы предсказать токен и
+ *      получить доступ к чужому заказу по номеру;
+ *   4) вне production (dev/test/demo без секретов) — стабильный фолбэк (mock-режим).
  * Токен детерминированный → пересчитывается на GET без хранения в БД.
  */
 function orderTokenSecret(
   env: Record<string, string | undefined> = process.env,
 ): string {
-  return env.APP_PASSWORD || env.OWNER_PASSWORD || 'admik-storefront-order-token';
+  const dedicated = env.ORDER_TOKEN_SECRET?.trim();
+  if (dedicated) return dedicated;
+  const legacy = (env.APP_PASSWORD || env.OWNER_PASSWORD)?.trim();
+  if (legacy) return legacy;
+  if (env.NODE_ENV === 'production') {
+    throw new Error(
+      'ORDER_TOKEN_SECRET (или APP_PASSWORD) не задан — токены доступа к заказу ' +
+        'небезопасны в production (предсказуемы по зашитой константе).',
+    );
+  }
+  return ORDER_TOKEN_DEV_FALLBACK;
 }
 
 /**

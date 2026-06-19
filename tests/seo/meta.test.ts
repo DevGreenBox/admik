@@ -45,6 +45,22 @@ describe('seo/meta — buildSeoMeta (title через title_template)', () => {
     expect(meta.title).toBe('T');
   });
 
+  it('подставляет во ВСЕ вхождения %s (m7), а не только в первое', () => {
+    const meta = buildSeoMeta(
+      { slug: 'p1', name: 'X', seoTitle: 'Кат' },
+      makeCtx({ titleTemplate: '%s | %s — Магазин' }),
+    );
+    expect(meta.title).toBe('Кат | Кат — Магазин');
+  });
+
+  it('несколько %s с $-паттерном в base → буквально, во всех позициях (m7 + баг A волны 5)', () => {
+    const meta = buildSeoMeta(
+      { slug: 'p1', name: 'X', seoTitle: 'A$&B' },
+      makeCtx({ titleTemplate: '%s/%s' }),
+    );
+    expect(meta.title).toBe('A$&B/A$&B');
+  });
+
   // --- Защита от $-паттернов замены (баг A волны 5). ---------------------------
   // Контент-контролируемый текст (seoTitle/name) идёт АРГУМЕНТОМ-заменой в
   // String.prototype.replace. Со строковым аргументом доллар-последовательности

@@ -78,6 +78,17 @@ describe('storefront/auth — authorizeStorefront по ключу', () => {
       authorizeStorefront(headers({ 'x-storefront-key': 'x' }), withKeys).ok,
     ).toBe(false);
   });
+
+  it('m9: неверный ключ ТОЙ ЖЕ длины → !ok (точное сравнение, не только длина)', () => {
+    // 'sk_secret' (9 симв.) vs 'sk_secre7' (9 симв.) — длины равны, но ключ другой.
+    expect(
+      authorizeStorefront(headers({ 'x-storefront-key': 'sk_secre7' }), withKeys).ok,
+    ).toBe(false);
+    // Префикс валидного ключа тоже не проходит.
+    expect(
+      authorizeStorefront(headers({ 'x-storefront-key': 'sk_secre' }), withKeys).ok,
+    ).toBe(false);
+  });
 });
 
 describe('storefront/auth — authorizeStorefront по Origin', () => {

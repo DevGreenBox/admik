@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
-import { SESSION_COOKIE_NAME } from '@/lib/auth/constants';
+import { SESSION_COOKIE_NAME, SESSION_TTL_MS } from '@/lib/auth/constants';
 
 /**
  * Быстрый барьер доступа к /admin/* (docs/04 §5.3, задача 1.4).
@@ -22,16 +22,31 @@ export function middleware(request: NextRequest): NextResponse {
     return NextResponse.next();
   }
 
-  const hasSession = Boolean(
-    request.cookies.get(SESSION_COOKIE_NAME)?.value,
-  );
+  const sessionId = request.cookies.get(SESSION_COOKIE_NAME)?.value;
 
-  if (!hasSession) {
+  if (!sessionId) {
     const loginUrl = new URL('/admin/login', request.url);
     return NextResponse.redirect(loginUrl);
   }
 
-  return NextResponse.next();
+  const res = NextResponse.next();
+
+  // m8: переустанавливаем cookie со СВЕЖИМ сроком (скользящее окно). Серверная
+  // validateSession продлевает сессию в БД (now()+TTL), но cookie иначе хранил бы
+  // login-time-срок → браузер «разлогинивал» бы при активной сессии. Только на GET
+  // (навигации): на POST/server-action НЕ трогаем, чтобы не перебить очистку cookie
+  // при логауте (его Set-Cookie maxAge=0 идёт в ответе того же запроса).
+  if (request.method === 'GET') {
+    res.cookies.set(SESSION_COOKIE_NAME, sessionId, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/',
+      maxAge: Math.floor(SESSION_TTL_MS / 1000),
+    });
+  }
+
+  return res;
 }
 
 /**

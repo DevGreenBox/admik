@@ -15,8 +15,23 @@
  * (HeadersLike) и источник конфигурации, не зависит от Next/Request напрямую.
  */
 
+import { timingSafeEqual } from 'node:crypto';
+
 import { getStorefrontConfig, normalizeOrigin } from './env';
 import type { StorefrontConfig } from './env';
+
+/**
+ * Сравнение API-ключей за КОНСТАНТНОЕ время (m9): `===`/`includes` сравнивают строку
+ * посимвольно с ранним выходом на первом расхождении → тайминг-сайдканал, по которому
+ * ключ можно подбирать побайтно. timingSafeEqual не зависит от позиции расхождения.
+ * Разная длина → сразу false (длина не секрет; стандартный компромисс).
+ */
+function constantTimeEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a, 'utf8');
+  const bb = Buffer.from(b, 'utf8');
+  if (ab.length !== bb.length) return false;
+  return timingSafeEqual(ab, bb);
+}
 
 /** Минимальный интерфейс заголовков (Headers / Request.headers совместимы). */
 export interface HeadersLike {
@@ -86,11 +101,19 @@ export function authorizeStorefront(
     return { ok: true, origin, mock: true, via: 'mock' };
   }
 
-  // 1) Проверка API-ключа.
+  // 1) Проверка API-ключа (constant-time, m9). Перебираем ВСЕ ключи без раннего
+  // выхода — чтобы тайминг не зависел ни от позиции совпавшего ключа, ни от первого
+  // расхождения внутри ключа (иначе побайтный/попозиционный подбор).
   if (apiKeys.length > 0) {
     const provided = extractApiKey(headers);
-    if (provided && apiKeys.some((k) => k.key === provided)) {
-      return { ok: true, origin, via: 'key' };
+    if (provided) {
+      let matched = false;
+      for (const k of apiKeys) {
+        if (constantTimeEqual(k.key, provided)) matched = true;
+      }
+      if (matched) {
+        return { ok: true, origin, via: 'key' };
+      }
     }
   }
 

@@ -212,6 +212,36 @@ describe('order-dto — verifyOrderAccess (защита от перебора)',
   });
 });
 
+describe('order-dto — orderTokenSecret (выделенный секрет, fail-closed в prod, m10)', () => {
+  const ID = 'd81f1540-1800-49de-a5c1-c08368787686';
+
+  it('ORDER_TOKEN_SECRET имеет приоритет над APP_PASSWORD', () => {
+    const withDedicated = orderAccessToken(ID, { ORDER_TOKEN_SECRET: 'dedicated', APP_PASSWORD: 'app-pwd' });
+    const onlyDedicated = orderAccessToken(ID, { ORDER_TOKEN_SECRET: 'dedicated' });
+    const onlyApp = orderAccessToken(ID, { APP_PASSWORD: 'app-pwd' });
+    expect(withDedicated).toBe(onlyDedicated); // секрет = ORDER_TOKEN_SECRET
+    expect(withDedicated).not.toBe(onlyApp); // НЕ зависит от APP_PASSWORD
+  });
+
+  it('фолбэк на APP_PASSWORD/OWNER_PASSWORD, если выделенный не задан', () => {
+    const byApp = orderAccessToken(ID, { APP_PASSWORD: 'p' });
+    const byOwner = orderAccessToken(ID, { OWNER_PASSWORD: 'p' });
+    expect(byApp).toBe(byOwner); // оба резолвятся в один секрет 'p'
+    expect(byApp).toHaveLength(32);
+  });
+
+  it('production без какого-либо секрета → бросает (fail-closed)', () => {
+    expect(() => orderAccessToken(ID, { NODE_ENV: 'production' })).toThrow(/ORDER_TOKEN_SECRET/);
+  });
+
+  it('вне production без секрета → стабильный dev-фолбэк (mock-режим), без броска', () => {
+    const a = orderAccessToken(ID, { NODE_ENV: 'test' });
+    const b = orderAccessToken(ID, { NODE_ENV: 'test' });
+    expect(a).toBe(b);
+    expect(a).toHaveLength(32);
+  });
+});
+
 // -----------------------------------------------------------------------------
 // 3) quote-DTO маппинг.
 // -----------------------------------------------------------------------------

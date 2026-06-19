@@ -41,6 +41,11 @@ const envSchema = z.object({
   APP_PASSWORD: z.string().optional(),
   MIGRATOR_PASSWORD: z.string().optional(),
 
+  // Выделенный секрет HMAC токена доступа к заказу (m10). Если не задан — фолбэк на
+  // APP_PASSWORD/OWNER_PASSWORD; в production без какого-либо секрета токены небезопасны
+  // (orderTokenSecret бросает — fail-closed). Развязывает токен заказа от пароля админки.
+  ORDER_TOKEN_SECRET: z.string().optional(),
+
   // Кеш / rate-limit.
   REDIS_URL: optionalUrl,
 
