@@ -369,3 +369,77 @@ describe('orders/delivery-cost — сбой расчёта СДЭК НЕ обн�
     expect(res.source).toBe('unavailable');
   });
 });
+
+/**
+ * M4 (полнота, цикл 3): авторитетная стоимость доставки (computeDeliveryCost, anti-
+ * tamper при создании заказа) выбирает тариф ПО РЕЖИМУ, когда явный tariffCode не
+ * передан. Раньше курьер тарифицировался ПВЗ-тарифом 136 (Calculator падал на
+ * defaultTariffCode) → клиент недоплачивал за курьерскую доставку, накладная же шла
+ * по 137. Здесь — capture tariffCode, уходящего в Calculator.calculate.
+ */
+describe('orders/delivery-cost — тариф по режиму (курьер≠ПВЗ-тариф)', () => {
+  const ORIG = process.env.ADMIK_MODULES;
+
+  async function loadCapturing(captured: { tariffCode?: number }) {
+    vi.resetModules();
+    vi.doMock('@/lib/cdek/services/calculator', () => ({
+      Calculator: class {
+        constructor(_m: unknown) {}
+        async calculate(input: { tariffCode?: number }) {
+          captured.tariffCode = input.tariffCode;
+          return { deliverySum: '500.00', tariffCode: input.tariffCode, periodMin: 2, periodMax: 5 };
+        }
+      },
+    }));
+    vi.doMock('@/lib/cdek/manager', () => ({ getCdekManager: () => ({ isMock: true }) }));
+    return import('@/lib/orders/delivery-cost');
+  }
+
+  beforeEach(() => {
+    delete process.env.CDEK_ACCOUNT;
+    delete process.env.CDEK_SECRET;
+    delete process.env.CDEK_DEFAULT_TARIFF;
+    delete process.env.CDEK_DOOR_TARIFF;
+    process.env.ADMIK_MODULES = 'orders,cdek';
+  });
+  afterEach(() => {
+    process.env.ADMIK_MODULES = ORIG;
+    vi.resetModules();
+    vi.doUnmock('@/lib/cdek/services/calculator');
+    vi.doUnmock('@/lib/cdek/manager');
+  });
+
+  it('курьер без явного tariffCode → тариф склад-дверь 137 (НЕ ПВЗ-136)', async () => {
+    const captured: { tariffCode?: number } = {};
+    const { computeDeliveryCost } = await loadCapturing(captured);
+    await computeDeliveryCost({
+      deliveryType: 'courier',
+      lines: [{ qty: 1, weightG: 500 }],
+      destination: { cityName: 'Москва', cityCode: 44 },
+    });
+    expect(captured.tariffCode).toBe(137);
+  });
+
+  it('ПВЗ без явного tariffCode → тариф 136', async () => {
+    const captured: { tariffCode?: number } = {};
+    const { computeDeliveryCost } = await loadCapturing(captured);
+    await computeDeliveryCost({
+      deliveryType: 'pvz',
+      lines: [{ qty: 1 }],
+      destination: { cityCode: 44, pvzCode: 'MSK1' },
+    });
+    expect(captured.tariffCode).toBe(136);
+  });
+
+  it('явный tariffCode имеет приоритет над режимом', async () => {
+    const captured: { tariffCode?: number } = {};
+    const { computeDeliveryCost } = await loadCapturing(captured);
+    await computeDeliveryCost({
+      deliveryType: 'courier',
+      tariffCode: 482,
+      lines: [{ qty: 1 }],
+      destination: { cityCode: 44 },
+    });
+    expect(captured.tariffCode).toBe(482);
+  });
+});

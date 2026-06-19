@@ -173,12 +173,23 @@ export async function computeDeliveryCost(
 
   // Ленивый импорт cdek ТОЛЬКО при включённом модуле — нет статической связки.
   try {
-    const [{ Calculator }, { getCdekManager }] = await Promise.all([
-      import('@/lib/cdek/services/calculator'),
-      import('@/lib/cdek/manager'),
-    ]);
+    const [{ Calculator }, { getCdekManager }, { getCdekConfig, tariffForMode }] =
+      await Promise.all([
+        import('@/lib/cdek/services/calculator'),
+        import('@/lib/cdek/manager'),
+        import('@/lib/cdek/config'),
+      ]);
     const manager = getCdekManager();
     const calc = new Calculator(manager);
+
+    // M4 (полнота): тариф ВЫБИРАЕТСЯ ПО РЕЖИМУ доставки, когда явный tariffCode не
+    // передан. Раньше при отсутствии tariffCode Calculator падал на defaultTariffCode
+    // (ПВЗ-136) для ЛЮБОГО режима — курьер тарифицировался ПВЗ-тарифом (склад-склад),
+    // хотя накладная создаётся по тарифу склад-дверь (137). Итог: клиент недоплачивал
+    // за курьерскую доставку (anti-undercharge), магазин терял разницу. Теперь стоимость
+    // заказа и накладная считаются по одному mode-aware тарифу.
+    const mode = toDeliveryMode(input.deliveryType);
+    const effectiveTariff = input.tariffCode ?? tariffForMode(getCdekConfig(), mode);
 
     const result = await calc.calculate({
       to: {
@@ -195,11 +206,8 @@ export async function computeDeliveryCost(
         widthCm: l.widthCm ?? null,
         heightCm: l.heightCm ?? null,
       })),
-      tariffCode: input.tariffCode,
+      tariffCode: effectiveTariff,
     });
-    // deliveryMode влияет лишь на формулу mock-надбавки курьера; на расчёт по
-    // конкретному тарифу режим уже зашит в tariffCode — оставляем как есть.
-    void toDeliveryMode(input.deliveryType);
 
     return {
       cost: result.deliverySum,
