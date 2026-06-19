@@ -20,6 +20,7 @@ import {
   getShipmentByCdekUuid,
   insertStatusLog,
   markStatusLogProcessed,
+  findStatusLogByKey,
 } from '../repository';
 import { getOrderByNumber } from '@/lib/orders/repository';
 import { mapCdekStatus, displayName } from './status-map';
@@ -225,20 +226,35 @@ export class WebhookService {
       ip: ip ?? null,
     });
 
+    // Идемпотентность опирается на `processed`, а не на сам факт вставки (БАГ #10,
+    // аудит волны 15): insertStatusLog коммитит дедуп-запись ДО применения перехода;
+    // если переход/пометка упали (транзиент), ретрай webhook должен ПЕРЕОБРАБОТАТЬ,
+    // а не молча скипнуть по ON CONFLICT (иначе переход статуса теряется навсегда).
+    let entry = logResult.entry;
     if (!logResult.inserted) {
-      // Дубликат: событие уже обработано — НЕ повторяем эффекты.
-      return { processed: false, duplicate: true };
+      const existing = await findStatusLogByKey(
+        event.cdekUuid,
+        event.statusCode,
+        event.statusDateTime,
+      );
+      if (!existing || existing.processed) {
+        // Настоящий дубликат (уже обработан) — НЕ повторяем эффекты.
+        return { processed: false, duplicate: true };
+      }
+      // Прошлая доставка вставила запись, но упала до markProcessed → переобрабатываем.
+      entry = existing;
     }
 
-    // 3) Маппинг + переход delivery_status (недопустимый пропускается молча).
+    // 3) Маппинг + переход delivery_status (недопустимый/повторный — молча no-op,
+    // applyDeliveryStatus идемпотентен через canTransition: статус уже продвинут → false).
     const next = mapCdekStatus(event.statusCode);
     if (next) {
       await applyDeliveryStatus(orderId, next, `cdek-webhook:${event.statusCode}`);
     }
 
-    // 4) Пометить лог обработанным.
-    if (logResult.entry) {
-      await markStatusLogProcessed(logResult.entry.id);
+    // 4) Пометить лог обработанным (точка коммита идемпотентности).
+    if (entry) {
+      await markStatusLogProcessed(entry.id);
     }
 
     return { processed: true, duplicate: false };

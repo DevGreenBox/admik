@@ -244,6 +244,29 @@ export async function markStatusLogProcessed(id: string): Promise<void> {
   await sql`UPDATE cdek_status_log SET processed = true WHERE id = ${id}`;
 }
 
+/**
+ * Находит запись лога по ключу дедупликации (cdek_uuid, status_code, status_date_time)
+ * с ТОЙ ЖЕ нормализацией date_time, что insertStatusLog (null → to_timestamp(0)). Нужна
+ * для переобработки после транзиентного сбоя: insertStatusLog коммитит дедуп-запись ДО
+ * применения перехода; если переход упал, ретрай webhook дедуплицируется (ON CONFLICT) и
+ * эффект теряется навсегда. Проверяя `processed` существующей записи, ретрай отличает
+ * НАСТОЯЩИЙ дубль (processed) от недоприменённого (БАГ #10, аудит волны 15).
+ */
+export async function findStatusLogByKey(
+  cdekUuid: string,
+  statusCode: string,
+  statusDateTime: Date | null,
+): Promise<CdekStatusLogEntry | null> {
+  const rows = await sql<Record<string, unknown>[]>`
+    SELECT * FROM cdek_status_log
+     WHERE cdek_uuid = ${cdekUuid}
+       AND status_code = ${statusCode}
+       AND status_date_time = COALESCE(${statusDateTime ?? null}::timestamptz, to_timestamp(0))
+     LIMIT 1
+  `;
+  return rows[0] ? mapStatusLog(rows[0]) : null;
+}
+
 /** История событий по заказу (хронологически), для UI/аудита. */
 export async function listStatusLogByOrderId(
   orderId: string,

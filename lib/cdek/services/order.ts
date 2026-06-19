@@ -473,6 +473,14 @@ export class OrderService {
          WHERE id = ${orderId}
       `;
 
+      // БАГ #9 (аудит волны 15): накладная создана (cdek_uuid выставлен) → переводим
+      // delivery_status pending→registered. Иначе заказ застревает в 'pending', а первое
+      // webhook-событие СДЭК (например in_transit) даёт НЕДОПУСТИМЫЙ переход из pending
+      // (машина: pending→registered/cancelled) → статус доставки навсегда залипает.
+      // Идемпотентно: applyDeliveryStatus применит переход только если он валиден
+      // (из pending); если статус уже продвинут — no-op.
+      await applyDeliveryStatus(orderId, 'registered', 'cdek-waybill-created');
+
       return saved!;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

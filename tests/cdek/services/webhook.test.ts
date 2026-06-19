@@ -11,6 +11,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // --- Моки БД-слоёв до импорта тестируемого модуля. ---
 const insertStatusLogMock = vi.fn();
 const markProcessedMock = vi.fn(async () => {});
+const findStatusLogByKeyMock = vi.fn(async (): Promise<unknown> => null);
 type ShipmentLookup = { orderId: string; cdekUuid: string } | null;
 const getShipmentByUuidMock = vi.fn(
   async (): Promise<ShipmentLookup> => ({ orderId: 'ord-1', cdekUuid: 'u-1' }),
@@ -19,6 +20,7 @@ const getShipmentByUuidMock = vi.fn(
 vi.mock('@/lib/cdek/repository', () => ({
   insertStatusLog: (...a: unknown[]) => insertStatusLogMock(...(a as [])),
   markStatusLogProcessed: (...a: unknown[]) => markProcessedMock(...(a as [])),
+  findStatusLogByKey: (...a: unknown[]) => findStatusLogByKeyMock(...(a as [])),
   getShipmentByCdekUuid: (...a: unknown[]) => getShipmentByUuidMock(...(a as [])),
 }));
 
@@ -172,13 +174,25 @@ describe('cdek/webhook — handleWebhookEvent идемпотентность', (
     );
   });
 
-  it('ДУБЛИКАТ (inserted=false) → {duplicate:true}, обработка НЕ повторяется', async () => {
+  it('ДУБЛИКАТ (inserted=false, существующая запись PROCESSED) → {duplicate:true}, обработка НЕ повторяется', async () => {
     insertStatusLogMock.mockResolvedValue({ inserted: false, entry: null });
+    findStatusLogByKeyMock.mockResolvedValue({ id: 'log-x', processed: true });
     const r = await svc.handleWebhookEvent(payload);
     expect(r).toEqual({ processed: false, duplicate: true });
     // НЕ трогаем delivery_status и не помечаем processed повторно.
     expect(applyDeliveryStatusMock).not.toHaveBeenCalled();
     expect(markProcessedMock).not.toHaveBeenCalled();
+  });
+
+  it('#10: inserted=false но запись НЕ processed (прошлый транзиентный сбой) → ПЕРЕОБРАБАТЫВАЕТ', async () => {
+    // insertStatusLog вернул дубль, но прошлая доставка упала до markProcessed →
+    // переход потерян. Ретрай находит необработанную запись и переобрабатывает.
+    insertStatusLogMock.mockResolvedValue({ inserted: false, entry: null });
+    findStatusLogByKeyMock.mockResolvedValue({ id: 'log-y', processed: false });
+    const r = await svc.handleWebhookEvent(payload);
+    expect(r).toEqual({ processed: true, duplicate: false });
+    expect(applyDeliveryStatusMock).toHaveBeenCalledWith('ord-1', 'delivered', expect.any(String));
+    expect(markProcessedMock).toHaveBeenCalledWith('log-y');
   });
 
   it('заказ не найден (ни по number, ни по uuid) → no-op', async () => {
