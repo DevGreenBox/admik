@@ -1189,10 +1189,25 @@ export const adjustInventory = defineAction({
     // (inventory_reserved_le_qty, 0010) — иначе сырой CHECK 23514. Условие в WHERE
     // `quantity+delta >= reserved` покрывает обе границы (reserved >= 0): при
     // нарушении RETURNING пуст → доменная ошибка insufficient_stock.
+    //
+    // m3: создание НОВОЙ строки разрешено только при delta >= 0 (нельзя «списать»
+    // остаток, которого ещё нет). `INSERT ... SELECT WHERE delta>=0 OR EXISTS(строка)`:
+    // при delta<0 и отсутствии строки SELECT даёт 0 строк → ни вставки, ни конфликта
+    // → RETURNING пуст → отказ (раньше вставлялась строка quantity=0 + «успех»).
+    // Для СУЩЕСТВУЮЩЕЙ строки строка всё равно предлагается (EXISTS) → срабатывает
+    // ON CONFLICT и списание идёт под защитой reserved.
     const rows = await sql<{ id: string; quantity: number }[]>`
       INSERT INTO inventory (product_id, variant_id, warehouse_code, quantity, updated_at)
-      VALUES (${data.productId}, ${data.variantId ?? null},
-              ${data.warehouseCode ?? 'main'}, GREATEST(${data.delta}, 0), now())
+      SELECT ${data.productId}, ${data.variantId ?? null},
+             ${data.warehouseCode ?? 'main'}, GREATEST(${data.delta}, 0), now()
+      WHERE ${data.delta} >= 0
+         OR EXISTS (
+           SELECT 1 FROM inventory
+           WHERE product_id = ${data.productId}
+             AND COALESCE(variant_id, '00000000-0000-0000-0000-000000000000'::uuid)
+                 = COALESCE(${data.variantId ?? null}::uuid, '00000000-0000-0000-0000-000000000000'::uuid)
+             AND warehouse_code = ${data.warehouseCode ?? 'main'}
+         )
       ON CONFLICT (product_id, COALESCE(variant_id, '00000000-0000-0000-0000-000000000000'::uuid), warehouse_code)
       DO UPDATE SET quantity = inventory.quantity + ${data.delta}, updated_at = now()
       WHERE inventory.quantity + ${data.delta} >= inventory.reserved

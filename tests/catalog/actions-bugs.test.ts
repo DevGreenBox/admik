@@ -491,6 +491,22 @@ describe('БАГ #14 — inventory учитывает reserved', () => {
     expect(res.message).toContain('списания');
   });
 
+  it('m3: adjustInventory НЕ создаёт строку при delta<0 без существующего остатка (guard delta>=0 OR EXISTS)', async () => {
+    // Нет существующей строки + отрицательная дельта → SELECT пуст → INSERT не
+    // происходит → RETURNING пуст → отказ (раньше вставлялась quantity=0 + «успех»).
+    H.state.sqlResponses.push({ match: 'INSERT INTO inventory', rows: [] });
+    const res = await adjustInventory({ productId: UUID, delta: -5 });
+    expect(res.ok).toBe(false);
+    if (res.ok) throw new Error('ожидался отказ');
+    expect(res.error).toBe('validation');
+    // SQL гейтит создание НОВОЙ строки: delta>=0 ЛИБО строка уже существует.
+    const ins = findCall('INSERT INTO inventory')!;
+    expect(ins.text).toContain('EXISTS');
+    expect(ins.text).toContain('>= 0');
+    // ON CONFLICT для существующей строки сохранён (списание под защитой reserved).
+    expect(ins.text).toContain('ON CONFLICT');
+  });
+
   it('#14: setInventory несёт защиту reserved (EXCLUDED.quantity >= inventory.reserved)', async () => {
     H.state.sqlResponses.push({
       match: 'INSERT INTO inventory',

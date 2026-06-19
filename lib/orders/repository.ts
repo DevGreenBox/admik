@@ -19,6 +19,7 @@ import { getEffectiveSettings } from '@/lib/config/settings';
 import { getProductById } from '@/lib/catalog/repository';
 import { effectiveCompareAt } from '@/lib/catalog/pricing';
 import type { Product, ProductDetail, ProductVariant } from '@/lib/catalog/types';
+import { MAIN_WAREHOUSE } from '@/lib/catalog/types';
 
 import { fromMinor, normalizeMoney, toMinor } from './money';
 import { cartLineIssueMessage } from './cart-messages';
@@ -45,7 +46,7 @@ import type { CartQuoteInput, CreateOrderInput } from './schemas';
 
 // Сентинель для COALESCE(variant_id, ...) в inventory_unit_uniq (0010).
 const NIL_UUID = '00000000-0000-0000-0000-000000000000';
-const MAIN_WAREHOUSE = 'main';
+// MAIN_WAREHOUSE — из единого источника (lib/catalog/types), общий с витриной (m5).
 
 /** Код нарушения уникального индекса PostgreSQL (как в catalog/actions). */
 const PG_UNIQUE_VIOLATION = '23505';

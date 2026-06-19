@@ -232,6 +232,42 @@ describe('pricing — calculateQuote: scoped free_delivery (баг #10, защи
   });
 });
 
+describe('pricing — calculateQuote: free_delivery без выгоды не «применяется» (m4)', () => {
+  it('самовывоз/stub (cost=0.00) → promo.applied=false (лимит не сжигается)', () => {
+    const q = calculateQuote({
+      lines: [line({ unitPrice: '500.00', qty: 1 })],
+      promo: promo({ kind: 'free_delivery', code: 'FREESHIP' }),
+      delivery: { cost: '0.00', freeThreshold: 0 },
+    });
+    expect(q.deliveryCost).toBe('0.00');
+    expect(q.promo.applied).toBe(false);
+    expect(q.promo.code).toBeNull();
+  });
+
+  it('порог бесплатной доставки уже достигнут → promo.applied=false', () => {
+    const q = calculateQuote({
+      lines: [line({ unitPrice: '5000.00', qty: 1 })],
+      promo: promo({ kind: 'free_delivery', code: 'FREESHIP' }),
+      delivery: { cost: '350.00', freeThreshold: 1000 },
+    });
+    expect(q.deliveryCost).toBe('0.00'); // бесплатно по порогу
+    expect(q.delivery.freeThresholdMet).toBe(true);
+    expect(q.promo.applied).toBe(false); // промокод ничего не добавил
+    expect(q.promo.code).toBeNull();
+  });
+
+  it('реальная выгода (доставка платная, порог не достигнут) → promo.applied=true', () => {
+    const q = calculateQuote({
+      lines: [line({ unitPrice: '500.00', qty: 1 })],
+      promo: promo({ kind: 'free_delivery', code: 'FREESHIP' }),
+      delivery: { cost: '350.00', freeThreshold: 0 },
+    });
+    expect(q.deliveryCost).toBe('0.00');
+    expect(q.promo.applied).toBe(true);
+    expect(q.promo.code).toBe('FREESHIP');
+  });
+});
+
 describe('pricing — calculateQuote (полный итог)', () => {
   it('базовый: несколько позиций без промо/порога', () => {
     const input: QuoteInput = {

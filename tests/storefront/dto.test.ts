@@ -262,7 +262,7 @@ describe('storefront/dto — карточка товара', () => {
         width: 10, height: 10, sizeBytes: 999, sort: 0, isPrimary: true, createdAt: D },
     ],
     inventory: [
-      { id: 'i1', productId: 'p1', variantId: 'v1', warehouseCode: 'W', quantity: 2, reserved: 0, updatedAt: D },
+      { id: 'i1', productId: 'p1', variantId: 'v1', warehouseCode: 'main', quantity: 2, reserved: 0, updatedAt: D },
     ],
     brand: brandRef,
   };
@@ -321,7 +321,7 @@ describe('storefront/dto — карточка товара', () => {
       ...product,
       variants: [],
       inventory: [
-        { id: 'i0', productId: 'p1', variantId: null, warehouseCode: 'W', quantity: 50, reserved: 0, updatedAt: D },
+        { id: 'i0', productId: 'p1', variantId: null, warehouseCode: 'main', quantity: 50, reserved: 0, updatedAt: D },
       ],
     };
     const dto = toProductDetailDto(simple, {
@@ -342,8 +342,8 @@ describe('storefront/dto — карточка товара', () => {
       ...product,
       variants: [variant], // активный вариант v1
       inventory: [
-        { id: 'iv', productId: 'p1', variantId: 'v1', warehouseCode: 'W', quantity: 1, reserved: 1, updatedAt: D }, // вариант распродан
-        { id: 'io', productId: 'p1', variantId: null, warehouseCode: 'W', quantity: 99, reserved: 0, updatedAt: D }, // осиротевший product-level
+        { id: 'iv', productId: 'p1', variantId: 'v1', warehouseCode: 'main', quantity: 1, reserved: 1, updatedAt: D }, // вариант распродан
+        { id: 'io', productId: 'p1', variantId: null, warehouseCode: 'main', quantity: 99, reserved: 0, updatedAt: D }, // осиротевший product-level
       ],
     };
     const dto = toProductDetailDto(withOrphan, {
@@ -422,5 +422,27 @@ describe('computeAvailableQty — доступное к заказу колич�
 
   it('пустой inventory → 0', () => {
     expect(computeAvailableQty([])).toBe(0);
+  });
+
+  it('m5: warehouseCode скоупит склад — показ совпадает с резервом (main-only)', () => {
+    const D2 = new Date('2025-01-01');
+    const rows = [
+      { id: 'a', productId: 'p', variantId: null, warehouseCode: 'main', quantity: 5, reserved: 0, updatedAt: D2 },
+      { id: 'b', productId: 'p', variantId: null, warehouseCode: 'reserve-2', quantity: 7, reserved: 0, updatedAt: D2 },
+    ];
+    // Без фильтра — сумма ВСЕХ складов (5+7=12), как было (латентный баг).
+    expect(computeAvailableQty(rows)).toBe(12);
+    // С фильтром по 'main' — только основной склад (5), как резерв/заказ.
+    expect(computeAvailableQty(rows, undefined, 'main')).toBe(5);
+
+    // main распродан, но другой склад полон: main-only показ → НЕ в наличии (нет оверселла).
+    const soldMain = [
+      { id: 'a', productId: 'p', variantId: null, warehouseCode: 'main', quantity: 3, reserved: 3, updatedAt: D2 },
+      { id: 'b', productId: 'p', variantId: null, warehouseCode: 'reserve-2', quantity: 10, reserved: 0, updatedAt: D2 },
+    ];
+    expect(computeInStock(soldMain, undefined, 'main')).toBe(false);
+    expect(computeAvailableQty(soldMain, undefined, 'main')).toBe(0);
+    // Без фильтра показал бы наличие (это и был риск оверселла на мультискладе).
+    expect(computeInStock(soldMain)).toBe(true);
   });
 });

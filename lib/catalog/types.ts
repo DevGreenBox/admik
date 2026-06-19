@@ -220,6 +220,15 @@ export interface ProductMedia {
   createdAt: Date;
 }
 
+/**
+ * Код основного склада. Единый источник правды (m5): и резерв/заказ
+ * (lib/orders/repository), и витринный показ наличия (lib/storefront/dto) считают
+ * по нему. Платформа однонкладная по умолчанию — резервирование/списание идут
+ * только по 'main'; показ наличия скоупится тем же складом, чтобы «доступно к
+ * заказу» на витрине совпадало с тем, что реально можно зарезервировать.
+ */
+export const MAIN_WAREHOUSE = 'main';
+
 /** Остаток (inventory). */
 export interface InventoryItem {
   id: string;

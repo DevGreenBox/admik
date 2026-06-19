@@ -641,13 +641,17 @@ export function calculateQuote(input: QuoteInput): QuoteResult {
     throw new Error('Ошибка расчёта: итог заказа отрицателен.');
   }
 
-  // free_delivery «применён» только если он реально обнулил доставку: для cart —
-  // всегда (если она не была бесплатной по порогу и так — всё равно его эффект),
-  // для scoped — только при совпадении товара в scope (scopeHasMatch). Иначе
-  // (scoped без товара в scope) промокод не оказал эффекта → applied=false.
+  // free_delivery «применён» только если он РЕАЛЬНО дал выгоду по доставке:
+  //  • scope подходит (cart, либо scoped с товаром в scope), И
+  //  • базовая доставка была платной (cost > 0 — самовывоз/stub 0.00 выгоды не даёт), И
+  //  • доставка НЕ была бы бесплатна по порогу и без промокода (freeThresholdMet=false).
+  // Иначе промокод эффекта не оказал → applied=false (m4: не сжигаем usage_limit /
+  // не пишем promo_redemptions за нулевую выгоду; redemption гейтится quote.promo.applied).
   const freeDeliveryApplied =
     promo?.kind === 'free_delivery' &&
-    ((promo.applyScope ?? 'cart') === 'cart' || scopeHasMatch === true);
+    ((promo.applyScope ?? 'cart') === 'cart' || scopeHasMatch === true) &&
+    toMinor(delivery.cost) > 0 &&
+    del.freeThresholdMet === false;
   const promoApplied = Boolean(promo) && (discountMinor > 0 || freeDeliveryApplied);
 
   return {

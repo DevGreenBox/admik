@@ -437,12 +437,16 @@ export async function listProducts(
       -- (variant_id IS NULL) учитываем ТОЛЬКО если у товара нет вариантов — иначе
       -- осиротевшая product-level строка (заданная до добавления вариантов)
       -- завышала бы наличие в каталоге (товар «в наличии», хотя все варианты пусты).
+      -- m5: только основной склад ('main') — показ наличия совпадает с резервом/
+      -- заказом (тоже main-only); мультисклад потребует отдельной логики.
       COALESCE((SELECT sum(i.quantity) FROM inventory i
         WHERE i.product_id = p.id
+          AND i.warehouse_code = 'main'
           AND (i.variant_id IS NOT NULL
                OR NOT EXISTS (SELECT 1 FROM product_variants v WHERE v.product_id = p.id))), 0) AS total_stock,
       COALESCE((SELECT sum(GREATEST(i.quantity - i.reserved, 0)) FROM inventory i
         WHERE i.product_id = p.id
+          AND i.warehouse_code = 'main'
           AND (i.variant_id IS NOT NULL
                OR NOT EXISTS (SELECT 1 FROM product_variants v WHERE v.product_id = p.id))), 0) AS available_stock,
       (SELECT m.url FROM product_media m

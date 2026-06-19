@@ -30,6 +30,7 @@ import type {
   ProductMedia,
   ProductVariant,
 } from '@/lib/catalog/types';
+import { MAIN_WAREHOUSE } from '@/lib/catalog/types';
 
 // ---------------------------------------------------------------------------
 // Типы публичных DTO.
@@ -306,15 +307,21 @@ export function toMediaDto(media: ProductMedia): MediaDto {
  * Доступно = quantity − reserved: зарезервированное под незавершённые заказы НЕ
  * показывается витрине как «в наличии» (иначе оверселл). Разность > 0 корректно
  * отсекает и полный резерв (=0), и рассинхрон reserved > quantity (< 0).
+ *
+ * `warehouseCode` (m5): если задан — учитываются только строки этого склада. Витрина
+ * передаёт MAIN_WAREHOUSE, чтобы показ совпадал с резервом/заказом (тоже main-only);
+ * без него (undefined) считаются все склады (обратная совместимость).
  */
 export function computeInStock(
   inventory: InventoryItem[],
   variantId?: string | null,
+  warehouseCode?: string,
 ): boolean {
   return inventory.some(
     (i) =>
       i.quantity - i.reserved > 0 &&
-      (variantId === undefined || (i.variantId ?? null) === (variantId ?? null)),
+      (variantId === undefined || (i.variantId ?? null) === (variantId ?? null)) &&
+      (warehouseCode === undefined || i.warehouseCode === warehouseCode),
   );
 }
 
@@ -325,14 +332,19 @@ export function computeInStock(
  * не доступно (иначе оверселл); отрицательный рассинхрон reserved>quantity
  * отсекается в 0. Та же база, что и computeInStock (булева версия), но число —
  * витрина ограничивает им счётчик количества в корзине.
+ *
+ * `warehouseCode` (m5): если задан — суммируются только строки этого склада
+ * (витрина передаёт MAIN_WAREHOUSE — совпадает с резервом/заказом main-only).
  */
 export function computeAvailableQty(
   inventory: InventoryItem[],
   variantId?: string | null,
+  warehouseCode?: string,
 ): number {
   return inventory.reduce(
     (sum, i) =>
-      variantId === undefined || (i.variantId ?? null) === (variantId ?? null)
+      (variantId === undefined || (i.variantId ?? null) === (variantId ?? null)) &&
+      (warehouseCode === undefined || i.warehouseCode === warehouseCode)
         ? sum + Math.max(0, i.quantity - i.reserved)
         : sum,
     0,
@@ -378,8 +390,8 @@ export function toVariantDto(
     discountPct: discountPercent(price, compareAtStr),
     onSale: isOnSale(price, compareAtStr),
     attributes: variant.attributesCache ?? {},
-    inStock: computeInStock(product.inventory, variant.id),
-    availableQty: computeAvailableQty(product.inventory, variant.id),
+    inStock: computeInStock(product.inventory, variant.id, MAIN_WAREHOUSE),
+    availableQty: computeAvailableQty(product.inventory, variant.id, MAIN_WAREHOUSE),
   };
 }
 
@@ -423,9 +435,9 @@ export function toProductDetailDto(
       .filter((v) => v.isActive)
       .map((v) => toVariantDto(v, product)),
     media: product.media.map(toMediaDto),
-    inStock: computeInStock(orderableInventory),
+    inStock: computeInStock(orderableInventory, undefined, MAIN_WAREHOUSE),
     // Уровень товара (для товара без вариантов — заказ по productId).
-    availableQty: computeAvailableQty(orderableInventory),
+    availableQty: computeAvailableQty(orderableInventory, undefined, MAIN_WAREHOUSE),
     meta: entityMeta(product, opts.seoCtx),
   };
 }
