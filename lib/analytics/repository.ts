@@ -73,13 +73,22 @@ async function dbToday(): Promise<string> {
   return rows[0]!.today;
 }
 
-/** Заказов по дням за последние `days` суток (включая сегодня). Карта day→count. */
+/**
+ * Заказов по дням за последние `days` суток (включая сегодня). Карта day→count.
+ *
+ * ⚠️ `current_date - ${days}::int` — каст ОБЯЗАТЕЛЕН. Без него postgres.js шлёт
+ * `${days}` bound-параметром, тип которого Postgres в выражении `current_date - $1`
+ * выводит как `date` (есть оператор `date - date → integer`) → выражение даёт
+ * integer → `created_at::date > integer` падает с `operator does not exist`. Ошибка
+ * глоталась `catch` ниже → пустая Map → оба графика дашборда ВСЕГДА «нет данных»
+ * даже при наличии заказов/посещений. Каст `::int` форсит `date - int → date`.
+ */
 async function ordersByDay(days: number): Promise<Map<string, number>> {
   try {
     const rows = await sql<{ day: string; n: number }[]>`
       SELECT to_char(created_at::date, 'YYYY-MM-DD') AS day, count(*)::bigint AS n
         FROM orders
-       WHERE created_at::date > current_date - ${days}
+       WHERE created_at::date > current_date - ${days}::int
        GROUP BY 1
     `;
     return new Map(rows.map((r) => [r.day, Number(r.n)]));
@@ -94,7 +103,7 @@ async function viewsByDay(days: number): Promise<Map<string, number>> {
     const rows = await sql<{ day: string; n: number }[]>`
       SELECT to_char(day, 'YYYY-MM-DD') AS day, views::bigint AS n
         FROM storefront_pageviews
-       WHERE day > current_date - ${days}
+       WHERE day > current_date - ${days}::int
     `;
     return new Map(rows.map((r) => [r.day, Number(r.n)]));
   } catch {

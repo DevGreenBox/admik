@@ -75,6 +75,27 @@ describe('analytics/repository — bigint касты счётчиков', () => 
     });
   });
 
+  /**
+   * РЕГРЕСС (BUG, correctness): параметр `days` в `current_date - ${days}` ОБЯЗАН
+   * кастоваться `::int`. Без каста postgres.js шлёт его bound-параметром, и
+   * Postgres выводит тип $1 как `date` (есть оператор `date - date → integer`) →
+   * выражение даёт integer → `created_at::date > integer` падает (`operator does
+   * not exist: date > integer`). Ошибка глоталась catch → пустая карта → ОБА
+   * графика дашборда ВСЕГДА «нет данных» даже при наличии заказов/посещений.
+   */
+  it('параметр days кастится ::int в обоих запросах (иначе date - $1 = date-date = integer → запрос падает)', () => {
+    H.state.results = [{ marker: 'current_date', rows: [{ today: '2026-06-17' }] }];
+
+    return getDashboardSeries(14).then(() => {
+      const ordersQ = H.state.queries.find(
+        (q) => q.includes('FROM orders') && q.includes('count(*)'),
+      );
+      const viewsQ = H.state.queries.find((q) => q.includes('storefront_pageviews'));
+      expect(ordersQ).toMatch(/current_date\s*-\s*\?::int/);
+      expect(viewsQ).toMatch(/current_date\s*-\s*\?::int/);
+    });
+  });
+
   it('большое значение views (3_000_000_000 > int4 max) не обрезается и попадает в ряд', async () => {
     H.state.results = [
       { marker: 'today', rows: [{ today: '2026-06-17' }] },
