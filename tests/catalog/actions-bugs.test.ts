@@ -441,6 +441,24 @@ describe('БАГ #13 — attachMedia снимает прежнее главно�
     expect(findCall('UPDATE product_media SET is_primary')).toBeUndefined();
   });
 
+  it('C5-5: isPrimary=false → проверка наличия главного идёт под FOR UPDATE (сериализация attach↔delete)', async () => {
+    // Без блокировки строки конкурентный deleteMedia (удаляющий последнее главное) мог
+    // оставить товар без обложки. Проверка-авто-главное должна держать строку FOR UPDATE.
+    H.state.sqlResponses.push({
+      match: 'INSERT INTO product_media',
+      rows: [{ id: 'media-3' }],
+    });
+    const res = await attachMedia({ ...baseInput(), isPrimary: false });
+    expect(res.ok).toBe(true);
+    const lockSel = H.state.sqlCalls.find(
+      (c) =>
+        /SELECT id FROM product_media/i.test(c.text) &&
+        /is_primary/i.test(c.text) &&
+        /FOR UPDATE/i.test(c.text),
+    );
+    expect(lockSel, 'проверка наличия главного должна блокировать строку (FOR UPDATE)').toBeDefined();
+  });
+
   it('#3: демоут+INSERT в ОДНОЙ транзакции — при сбое INSERT откат демоута, файл удалён', async () => {
     // INSERT падает → sql.begin реджектит → снятие is_primary не коммитится
     // (товар не остаётся без главного фото). Загруженный объект компенсируется.

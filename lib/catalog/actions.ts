@@ -1007,11 +1007,18 @@ export const attachMedia = defineAction({
         // сценарий: владелец грузит фото, не трогая чекбокс «сделать главным».
         let makePrimary = data.isPrimary === true;
         if (!makePrimary) {
-          const existing = await tx<{ n: number }[]>`
-            SELECT count(*)::int AS n FROM product_media
+          // FOR UPDATE (C5-5, аудит цикла 5): блокируем строку текущего главного фото,
+          // чтобы конкурентный deleteMedia (удаляющий последнее главное) не проскользнул
+          // между этой проверкой и INSERT и не оставил товар без обложки (primary_media_url
+          // → NULL в каталоге/витрине). Сериализует attach↔delete на общей строке: одно из
+          // них ждёт коммита другого → ровно одно фото остаётся главным. Пустой результат
+          // (нет главного / нет медиа) → новое фото становится главным (как было).
+          const existingPrimary = await tx<{ id: string }[]>`
+            SELECT id FROM product_media
             WHERE product_id = ${data.productId} AND is_primary
+            FOR UPDATE
           `;
-          if ((existing[0]?.n ?? 0) === 0) makePrimary = true;
+          if (existingPrimary.length === 0) makePrimary = true;
         }
         const rows = await tx<{ id: string }[]>`
           INSERT INTO product_media
