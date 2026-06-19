@@ -364,6 +364,47 @@ describe('резерв остатков при переходах', () => {
     expect(commitReservationMock).not.toHaveBeenCalled();
   });
 
+  it('отмена ОПЛАЧЕННОГО заказа (payment=paid) оформляет возврат: payment→refunded + история оплаты', async () => {
+    H.state.getOrderByIdQueue = [
+      orderDetail({ status: 'paid', paymentStatus: 'paid' }),
+      orderDetail({ status: 'cancelled', paymentStatus: 'refunded' }),
+    ];
+    const res = await cancelOrder({ id: UUID, reason: 'возврат денег' });
+    expect(res.ok).toBe(true);
+    // UPDATE orders выставил payment_status='refunded' (деньги не «зависли»).
+    const upd = H.state.txCallsWithArgs.find(
+      (c) => c.strings.join('|').includes('UPDATE orders') && c.strings.join('|').includes('payment_status'),
+    );
+    expect(upd).toBeTruthy();
+    expect(upd!.args).toContain('refunded');
+    // Запись истории ОПЛАТЫ (kind='payment', paid→refunded) — возврат виден в истории.
+    const payHist = H.state.txCallsWithArgs.find(
+      (c) => c.strings.join('|').includes('order_status_history') && c.strings.join('|').includes("'payment'"),
+    );
+    expect(payHist).toBeTruthy();
+    expect(payHist!.args).toContain('refunded');
+    expect(payHist!.args).toContain('paid');
+  });
+
+  it('возврат COD-заказа (payment=pending) НЕ штампует refunded и не пишет ложную историю оплаты', async () => {
+    H.state.getOrderByIdQueue = [
+      orderDetail({ status: 'paid', paymentStatus: 'pending' }),
+      orderDetail({ status: 'refunded', paymentStatus: 'pending' }),
+    ];
+    const res = await refundOrder({ id: UUID });
+    expect(res.ok).toBe(true);
+    // UPDATE НЕ трогает payment_status (деньги не получены — нечего возвращать).
+    const updWithPay = H.state.txCallsWithArgs.find(
+      (c) => c.strings.join('|').includes('UPDATE orders') && c.strings.join('|').includes('payment_status'),
+    );
+    expect(updWithPay).toBeFalsy();
+    // Нет истории оплаты (нет запрещённого pending→refunded).
+    const payHist = H.state.txCallsWithArgs.find(
+      (c) => c.strings.join('|').includes('order_status_history') && c.strings.join('|').includes("'payment'"),
+    );
+    expect(payHist).toBeFalsy();
+  });
+
   it('отгрузка (packed→shipped) вызывает commitReservation (списание)', async () => {
     H.state.getOrderByIdQueue = [
       orderDetail({ status: 'packed' }),

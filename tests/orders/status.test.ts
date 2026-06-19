@@ -10,6 +10,7 @@ import {
   canTransitionOrder,
   canTransitionPayment,
   isTerminal,
+  paymentStatusOnSettle,
   nextDeliveryStatuses,
   nextOrderStatuses,
   nextPaymentStatuses,
@@ -26,6 +27,24 @@ import {
  * Покрывают разрешённые/запрещённые переходы, терминальные статусы, согласие
  * таблиц переходов с whitelist-значениями из types.ts.
  */
+
+describe('orders/status — paymentStatusOnSettle (сетл оплаты при отмене/возврате)', () => {
+  it('paid + отмена/возврат → refunded (деньги получены — возвращаем)', () => {
+    expect(paymentStatusOnSettle('paid', 'cancelled')).toBe('refunded');
+    expect(paymentStatusOnSettle('paid', 'refunded')).toBe('refunded');
+  });
+  it('НЕ оплачено (pending/failed/authorized) → null (деньги не списаны, refunded не штампуем)', () => {
+    // Главное: COD-возврат (pending) НЕ даёт запрещённый pending→refunded.
+    expect(paymentStatusOnSettle('pending', 'refunded')).toBeNull();
+    expect(paymentStatusOnSettle('pending', 'cancelled')).toBeNull();
+    expect(paymentStatusOnSettle('failed', 'cancelled')).toBeNull();
+    expect(paymentStatusOnSettle('authorized', 'refunded')).toBeNull();
+  });
+  it('переход НЕ в отмену/возврат → null (оплату не трогаем)', () => {
+    expect(paymentStatusOnSettle('paid', 'packed')).toBeNull();
+    expect(paymentStatusOnSettle('paid', 'shipped')).toBeNull();
+  });
+});
 
 describe('orders/status — статус ЗАКАЗА (§2.8 A)', () => {
   it('разрешает переходы строго по таблице docs/07 §2.8 A', () => {

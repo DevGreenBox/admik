@@ -25,7 +25,7 @@ import {
   createOrder,
   type OrderWithItems,
 } from './repository';
-import { canTransition } from './status';
+import { canTransition, paymentStatusOnSettle } from './status';
 import { OrderError } from './errors';
 import type { Order, OrderItem, PromoCode } from './types';
 
@@ -175,8 +175,6 @@ async function applyOrderStatusTransition(args: {
   to: Order['status'];
   comment: string;
   actorUserId: string | null;
-  /** Доп. синхронизация payment_status (refund → 'refunded'). */
-  syncPaymentRefunded?: boolean;
 }): Promise<{ before: Order; after: OrderWithItems }> {
   const current = await getOrderById(args.id);
   if (!current) {
@@ -194,13 +192,20 @@ async function applyOrderStatusTransition(args: {
   const promoCodeId = current.order.promoCodeId;
   const revertPromo = args.to === 'cancelled' || args.to === 'refunded';
 
+  // Сетл оплаты при отмене/возврате: 'refunded' ТОЛЬКО для реально оплаченного
+  // (payment='paid'); для pending/failed/authorized — не трогаем (см.
+  // paymentStatusOnSettle). Это чинит «отмену оплаченного без возврата» и
+  // ложный refunded по COD одновременно.
+  const fromPayment = current.order.paymentStatus;
+  const toPayment = paymentStatusOnSettle(fromPayment, args.to);
+
   await sql.begin(async (tx: TransactionSql) => {
     // (a) GUARDED UPDATE: переход применяется ТОЛЬКО если статус не сменился
     // конкурентным запросом (WHERE ... AND status = from). 0 строк → конфликт.
-    const updated = args.syncPaymentRefunded
+    const updated = toPayment
       ? await tx<{ id: string }[]>`
           UPDATE orders
-             SET status = ${args.to}, payment_status = 'refunded', updated_at = now()
+             SET status = ${args.to}, payment_status = ${toPayment}, updated_at = now()
            WHERE id = ${args.id} AND status = ${from}
           RETURNING id
         `
@@ -251,13 +256,24 @@ async function applyOrderStatusTransition(args: {
       await revertPromoUsage(tx, args.id, promoCodeId);
     }
 
-    // (d) История статуса.
+    // (d) История статуса заказа.
     await tx`
       INSERT INTO order_status_history
         (order_id, kind, from_status, to_status, actor_user_id, comment)
       VALUES
         (${args.id}, 'order', ${from}, ${args.to}, ${args.actorUserId}, ${args.comment})
     `;
+
+    // (d2) История ОПЛАТЫ — когда отмена/возврат повлёк возврат денег
+    // (paid → refunded). Без этой записи возврат не виден в истории/отчётности.
+    if (toPayment) {
+      await tx`
+        INSERT INTO order_status_history
+          (order_id, kind, from_status, to_status, actor_user_id, comment)
+        VALUES
+          (${args.id}, 'payment', ${fromPayment}, ${toPayment}, ${args.actorUserId}, ${args.comment})
+      `;
+    }
   });
 
   const after = await getOrderById(args.id);
@@ -332,7 +348,6 @@ export const changeOrderStatus = defineAction({
       to: data.to,
       comment: data.comment ?? '',
       actorUserId: ctx.user.id,
-      syncPaymentRefunded: data.to === 'refunded',
     });
     return {
       result: orderDetailResult(after),
@@ -383,7 +398,6 @@ export const refundOrder = defineAction({
       to: 'refunded',
       comment: data.reason ?? '',
       actorUserId: ctx.user.id,
-      syncPaymentRefunded: true,
     });
     return {
       result: orderDetailResult(after),

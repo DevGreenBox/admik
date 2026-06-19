@@ -163,3 +163,22 @@ export function nextPaymentStatuses(from: PaymentStatus): readonly PaymentStatus
 export function nextDeliveryStatuses(from: DeliveryStatus): readonly DeliveryStatus[] {
   return DELIVERY_STATUS_TRANSITIONS[from] ?? [];
 }
+
+/**
+ * Новый статус ОПЛАТЫ при отмене/возврате заказа (или null = не менять).
+ *
+ * Деньги возвращаем (payment → 'refunded') ТОЛЬКО если они реально получены
+ * (payment === 'paid'). Для pending/failed/authorized (деньги НЕ списаны) —
+ * оставляем как есть: иначе (а) фиксировался бы фантомный «возврат» по
+ * неоплаченному заказу (завышение сумм возвратов в отчётности), (б) писался бы
+ * запрещённый машиной переход pending→refunded. Симметрично закрывает два бага:
+ *  - отмена ОПЛАЧЕННОГО заказа теперь оформляет возврат (а не «теряет» деньги);
+ *  - возврат COD-заказа (payment='pending') НЕ штампует ложный 'refunded'.
+ */
+export function paymentStatusOnSettle(
+  payment: PaymentStatus,
+  toOrderStatus: OrderStatus,
+): PaymentStatus | null {
+  if (toOrderStatus !== 'cancelled' && toOrderStatus !== 'refunded') return null;
+  return payment === 'paid' ? 'refunded' : null;
+}
