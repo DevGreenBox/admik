@@ -21,6 +21,7 @@ import { effectiveCompareAt } from '@/lib/catalog/pricing';
 import type { Product, ProductDetail, ProductVariant } from '@/lib/catalog/types';
 
 import { fromMinor, normalizeMoney, toMinor } from './money';
+import { cartLineIssueMessage } from './cart-messages';
 import {
   calculateQuote,
   effectiveUnitPriceMinor,
@@ -843,7 +844,9 @@ export async function createOrder(
   for (const item of input.items) {
     const res = await resolveCartLine(item);
     if (!res.ok) {
-      return { ok: false, code: 'invalid_item', message: `Позиция недоступна: ${res.reason}.` };
+      // Понятный покупателю текст вместо сырого кода (`out_of_stock` и т.п.) —
+      // единый словарь cart-messages (общий корень разбора дефектов).
+      return { ok: false, code: 'invalid_item', message: cartLineIssueMessage(res.reason) };
     }
     resolved.push(res.line);
   }
