@@ -389,17 +389,28 @@ export async function listProducts(
   // Поддерево категории (сама + потомки) для рекурсивного фильтра. null = без фильтра.
   const categoryIds = f.categoryId ? await categorySubtreeIds(f.categoryId) : null;
 
+  // «Новизна» для фасета «Новинки» (?new=1) и бейджа — ЕДИНЫЙ источник: эффективная
+  // новизна = COALESCE(ручной override is_new, created_at >= порог newProductDays).
+  // Фасет ОБЯЗАН совпадать с бейджем effective_is_new (БАГ #1, аудит волны 15): раньше
+  // фасет смотрел только override is_new=true, без даты → товар, новый ПО ДАТЕ (с бейджем
+  // «New»), не попадал в фильтр «Новинки». newThreshold считаем в JS тем же now/днями,
+  // что и resolveIsNew (бейдж) — точное совпадение порога.
+  const newDays = (await getEffectiveSettings()).catalog.newProductDays;
+  const now = new Date();
+  const newThreshold = new Date(now.getTime() - Math.max(0, newDays) * 24 * 60 * 60 * 1000);
+
   // Условия фильтрации — каждое значение параметризовано.
   // onSale/isFeatured/isNew — булевы фасеты витрины (docs/06 §3.1–§3.2):
   //  - onSale: вычисляемый предикат compare_at_price > base_price;
   //  - isFeatured: ручной флаг is_featured;
-  //  - isNew: явный override is_new = true (без даты — это фасет витрины «Новинки»).
+  //  - isNew: effective_is_new = COALESCE(override is_new, created_at >= порог) — как бейдж.
   const where = sql`
     WHERE (${searchTerm}::text IS NULL OR p.name ILIKE ${searchTerm} OR p.sku ILIKE ${searchTerm})
       AND (${f.status ?? null}::text IS NULL OR p.status = ${f.status ?? null})
       AND (${f.brandId ?? null}::uuid IS NULL OR p.brand_id = ${f.brandId ?? null})
       AND (${f.isFeatured ?? null}::boolean IS NULL OR p.is_featured = ${f.isFeatured ?? null})
-      AND (${f.isNew ?? null}::boolean IS NULL OR p.is_new = ${f.isNew ?? null})
+      AND (${f.isNew ?? null}::boolean IS NULL
+           OR ${f.isNew ?? null} = COALESCE(p.is_new, p.created_at >= ${newThreshold}))
       AND (${f.onSale ?? null}::boolean IS NULL
            OR (${f.onSale ?? null} = (p.compare_at_price IS NOT NULL AND p.compare_at_price > p.base_price)))
       AND (${categoryIds === null}::boolean OR EXISTS (
@@ -449,9 +460,7 @@ export async function listProducts(
   `;
 
   // «Новизна» товара — из эффективных настроек (env ⊕ БД), docs/11 §5.4.4.
-  const newDays = (await getEffectiveSettings()).catalog.newProductDays;
-  const now = new Date();
-
+  // newDays/now уже вычислены выше (используются и в фасете «Новинки»).
   const mapped: ProductListRow[] = rows.map((r: any) => {
     const createdAt =
       r.created_at instanceof Date ? r.created_at : new Date(r.created_at);

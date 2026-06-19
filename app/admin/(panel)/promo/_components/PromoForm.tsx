@@ -179,9 +179,13 @@ export function PromoForm({
       stackable,
       minQty: numOrUndef(minQty) ?? null,
       targets: targetsPayload,
-      giftProductId: SHOW_GIFT_BLOCK ? giftProductId.trim() || null : null,
-      giftVariantId: SHOW_GIFT_BLOCK ? giftVariantId.trim() || null : null,
-      giftQty: SHOW_GIFT_BLOCK ? numOrUndef(giftQty) ?? null : null,
+      // БАГ #8 (аудит волны 15): когда UI-блок «Подарок» СКРЫТ (фичефлаг off, дефолт),
+      // НЕ затираем подарок — сохраняем существующее значение редактируемого промокода
+      // (иначе любое редактирование молча стирало бы gift_*). Для нового промокода
+      // promo === undefined → null (подарка нет). При показанном блоке — из формы.
+      giftProductId: SHOW_GIFT_BLOCK ? giftProductId.trim() || null : (promo?.giftProductId ?? null),
+      giftVariantId: SHOW_GIFT_BLOCK ? giftVariantId.trim() || null : (promo?.giftVariantId ?? null),
+      giftQty: SHOW_GIFT_BLOCK ? numOrUndef(giftQty) ?? null : (promo?.giftQty ?? null),
       comment,
     };
 
