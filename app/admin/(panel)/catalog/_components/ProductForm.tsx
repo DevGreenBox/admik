@@ -9,6 +9,7 @@ import type {
   ProductDetail,
 } from '@/lib/catalog/types';
 import { PRODUCT_STATUSES, type ProductStatus } from '@/lib/catalog/types';
+import { isPubliclyVisible } from '@/lib/catalog/visibility';
 import type { ActionResult } from '@/lib/server/action';
 
 import {
@@ -252,21 +253,24 @@ export function ProductForm({
     }
   }
 
-  // Виден ли товар покупателям прямо сейчас и что мешает публикации (подсказка).
-  // Для появления на витрине нужен ОСТАТОК (наличие), а НЕ обязательно вариант:
-  // остаток можно задать на уровне товара («Товар без вариантов») или варианта.
+  // Виден ли товар покупателям прямо сейчас.
+  // ЕДИНЫЙ предикат видимости (lib/catalog/visibility): на витрине товар виден ⇔
+  // статус «active» — РОВНО как фильтр Storefront API. Остаток и цена на видимость
+  // НЕ влияют: активный товар с остатком 0 витрина ПОКАЗЫВАЕТ (с «Нет в наличии»).
+  // Раньше индикатор требовал ещё цену>0 и остаток>0 → ложно писал «скрыт с сайта»
+  // про товар, который на витрине ЕСТЬ (рассинхрон предиката).
   const priceNum = Number(String(basePrice).replace(',', '.'));
   const hasPrice = Number.isFinite(priceNum) && priceNum > 0;
-  const totalStock = (product?.inventory ?? []).reduce(
-    (sum, i) => sum + (i.quantity ?? 0),
+  const totalAvailable = (product?.inventory ?? []).reduce(
+    (sum, i) => sum + Math.max(0, (i.quantity ?? 0) - (i.reserved ?? 0)),
     0,
   );
-  const publishBlockers: string[] = [];
-  if (status !== 'active') publishBlockers.push('выберите статус «Активен — виден на сайте»');
-  if (!hasPrice) publishBlockers.push('укажите цену больше 0');
-  if (isEdit && totalStock <= 0)
-    publishBlockers.push('укажите наличие на вкладке «Варианты» (остаток хотя бы 1 шт.)');
-  const isLiveOnSite = publishBlockers.length === 0;
+  const isLiveOnSite = isPubliclyVisible(status);
+  // НЕ-блокирующие заметки: товар виден, но есть на что обратить внимание.
+  const storefrontNotes: string[] = [];
+  if (!hasPrice) storefrontNotes.push('Цена не задана — на витрине покажется как 0. Укажите цену.');
+  if (isEdit && totalAvailable <= 0)
+    storefrontNotes.push('На складе 0 — на витрине показывается «Нет в наличии» (кнопка покупки недоступна). Задайте остаток на вкладке «Варианты».');
 
   const tabs: Array<{ key: Section; label: string; editOnly?: boolean }> = [
     { key: 'main', label: 'Основное' },
@@ -296,18 +300,23 @@ export function ProductForm({
       {isEdit ? (
         isLiveOnSite ? (
           <div className="mb-4 rounded border border-green-200 bg-green-50 p-3 text-sm text-green-800">
-            ✓ Товар <strong>виден покупателям</strong> на сайте в каталоге.
+            <p>
+              ✓ Товар <strong>виден покупателям</strong> на сайте в каталоге.
+            </p>
+            {storefrontNotes.length > 0 ? (
+              <ul className="mt-1 list-disc pl-5 text-amber-800">
+                {storefrontNotes.map((n) => (
+                  <li key={n}>{n}</li>
+                ))}
+              </ul>
+            ) : null}
           </div>
         ) : (
           <div className="mb-4 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
             <p>
-              ⚠ Товар <strong>скрыт с сайта</strong>. Чтобы он появился в каталоге на витрине:
+              ⚠ Товар <strong>скрыт с сайта</strong>. Чтобы он появился в каталоге на витрине,
+              выберите статус «Активен — виден на сайте».
             </p>
-            <ul className="mt-1 list-disc pl-5">
-              {publishBlockers.map((b) => (
-                <li key={b}>{b}</li>
-              ))}
-            </ul>
           </div>
         )
       ) : null}
