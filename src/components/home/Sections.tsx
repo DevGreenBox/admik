@@ -9,6 +9,8 @@ import { HEADER_OFFSET } from "@/components/layout/Header";
 import { CategoryInfographics } from "@/components/home/CategoryInfographic";
 import { IMAGES, EDITORIAL_HOVER, categoryViewHover } from "@/lib/images";
 import { LuxuryImageSwap } from "@/components/ui/LuxuryImageSwap";
+import { resolveCategoryHref } from "@/lib/catalog-view";
+import type { AdmikCategoryDto } from "@/lib/admik";
 
 /** Full-width banner — первый блок под меню (+ CTA «смотреть коллекцию») */
 export function HomeBanner() {
@@ -236,7 +238,11 @@ function EditorialCard({
 }
 
 /** Editorial — asymmetric TOTEME-style */
-export function EditorialPair() {
+export function EditorialPair({
+  categories = [],
+}: {
+  categories?: AdmikCategoryDto[];
+}) {
   return (
     <section className="section-space-sm">
       <div className="container-brand">
@@ -252,7 +258,7 @@ export function EditorialPair() {
               hoverSrc={EDITORIAL_HOVER.women}
               alt="Women"
               label="Women"
-              href="/catalog?category=women"
+              href={resolveCategoryHref(categories, "women")}
               aspect="aspect-[3/4]"
               delay={0}
             />
@@ -263,7 +269,7 @@ export function EditorialPair() {
               hoverSrc={EDITORIAL_HOVER.men}
               alt="Men"
               label="Men"
-              href="/catalog?category=men"
+              href={resolveCategoryHref(categories, "men")}
               aspect="aspect-[3/5] md:aspect-[4/5]"
               delay={0.1}
             />
@@ -287,21 +293,25 @@ export function EditorialPair() {
 
 function CategoryViews({
   label,
-  slug,
+  hint,
   views,
+  categories,
 }: {
   label: string;
-  slug: string;
+  hint: string;
   views: readonly string[];
+  categories: AdmikCategoryDto[];
 }) {
   const viewLabels = ["Front", "Side", "Back"];
+  // Ссылка резолвится в РЕАЛЬНУЮ категорию (по теме hint), иначе /catalog.
+  const href = resolveCategoryHref(categories, hint);
 
   return (
     <>
       <FadeIn>
         <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-6 mb-12 md:mb-16">
           <h3 className="heading-lg heading-rule">{label}</h3>
-          <Link href={`/catalog?category=${slug}`} className="link-editorial self-start md:self-auto">
+          <Link href={href} className="link-editorial self-start md:self-auto">
             Смотреть все
           </Link>
         </div>
@@ -310,7 +320,7 @@ function CategoryViews({
       <div className="mx-auto grid max-w-3xl grid-cols-1 gap-4 md:grid-cols-3 md:gap-6 lg:gap-8">
         {views.map((src, i) => (
           <FadeIn key={src} delay={i * 0.1}>
-            <Link href={`/catalog?category=${slug}`} className="group block">
+            <Link href={href} className="group block">
               <LuxuryImageSwap
                 primary={src}
                 secondary={categoryViewHover(views, i)}
@@ -330,7 +340,11 @@ function CategoryViews({
 }
 
 /** Shop — Women */
-export function CollectionWomen() {
+export function CollectionWomen({
+  categories = [],
+}: {
+  categories?: AdmikCategoryDto[];
+}) {
   return (
     <section id="shop" className="section-space">
       <div className="container-brand">
@@ -340,32 +354,40 @@ export function CollectionWomen() {
             <TextReveal text="Коллекция" />
           </h2>
         </FadeIn>
-        <CategoryViews label="Women" slug="women" views={IMAGES.categories.womenViews} />
+        <CategoryViews label="Women" hint="women" views={IMAGES.categories.womenViews} categories={categories} />
       </div>
     </section>
   );
 }
 
 /** Shop — Men */
-export function CollectionMen() {
+export function CollectionMen({
+  categories = [],
+}: {
+  categories?: AdmikCategoryDto[];
+}) {
   return (
     <section className="section-space-sm border-t border-border">
       <div className="container-brand">
-        <CategoryViews label="Men" slug="men" views={IMAGES.categories.menViews} />
+        <CategoryViews label="Men" hint="men" views={IMAGES.categories.menViews} categories={categories} />
       </div>
     </section>
   );
 }
 
 /** Shop — category links */
-export function ShopCategories() {
+export function ShopCategories({
+  categories = [],
+}: {
+  categories?: AdmikCategoryDto[];
+}) {
   return (
     <section className="section-space-sm pb-28 md:pb-36 lg:pb-44">
       <div className="container-brand">
         <FadeIn>
           <p className="eyebrow mb-6 text-center md:text-left">Categories</p>
         </FadeIn>
-        <CategoryInfographics />
+        <CategoryInfographics categories={categories} />
       </div>
     </section>
   );

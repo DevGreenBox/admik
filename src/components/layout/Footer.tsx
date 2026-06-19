@@ -5,15 +5,10 @@ import Link from "next/link";
 import { FadeIn } from "@/components/ui/Animations";
 import { Logo } from "@/components/ui/Logo";
 import { IMAGES } from "@/lib/images";
+import { categoryLinks } from "@/lib/catalog-view";
+import type { AdmikCategoryDto } from "@/lib/admik";
 
 const FOOTER_LINKS = {
-  shop: [
-    { href: "/catalog", label: "Коллекция" },
-    { href: "/catalog?category=women", label: "Женская форма" },
-    { href: "/catalog?category=men", label: "Мужская форма" },
-    { href: "/catalog?category=suits", label: "Костюмы" },
-    { href: "/catalog?category=coats", label: "Халаты" },
-  ],
   service: [
     { href: "/#delivery", label: "Доставка" },
     { href: "/payment", label: "Оплата" },
@@ -32,8 +27,20 @@ const FOOTER_LINKS = {
 const SUPPORT_TELEGRAM = "https://t.me/thecase_support";
 const SUPPORT_PHONE = "+70000000000";
 
-export function Footer() {
+export function Footer({
+  categories = [],
+}: {
+  categories?: AdmikCategoryDto[];
+}) {
   const [email, setEmail] = useState("");
+
+  // Ссылки «Shop» строятся из РЕАЛЬНЫХ категорий магазина (не зашитые slug
+  // women/men/suits, которых в каталоге нет → пустой каталог). «Коллекция» —
+  // всегда; далее до 4 реальных категорий. Пустое дерево → только «Коллекция».
+  const shopLinks = [
+    { href: "/catalog", label: "Коллекция" },
+    ...categoryLinks(categories, 4).map((c) => ({ href: c.href, label: c.name })),
+  ];
 
   return (
     <footer id="contacts" className="relative bg-graphite text-white mt-32 md:mt-40 lg:mt-48 overflow-hidden">
@@ -53,7 +60,7 @@ export function Footer() {
             <div className="md:col-span-2">
               <h4 className="eyebrow text-white/40 mb-6">Shop</h4>
               <ul className="space-y-3">
-                {FOOTER_LINKS.shop.map((link) => (
+                {shopLinks.map((link) => (
                   <li key={link.href}>
                     <Link href={link.href} className="text-[11px] tracking-[0.1em] text-white/55 hover:text-white transition-colors duration-500">
                       {link.label}

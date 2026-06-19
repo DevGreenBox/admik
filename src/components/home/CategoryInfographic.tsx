@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { resolveCategoryHref } from "@/lib/catalog-view";
+import type { AdmikCategoryDto } from "@/lib/admik";
 
 type InfographicProps = {
   index: number;
@@ -65,32 +67,43 @@ function AccessoriesGraphic() {
   );
 }
 
+// `hint` (а не зашитый slug): тема плитки резолвится в РЕАЛЬНУЮ категорию каталога
+// (resolveCategoryHref) — иначе ссылка вела бы на несуществующий slug и пустой
+// каталог. Графика/подпись/статы — фирменный декор, остаются.
 const INFOGRAPHICS = [
   {
-    slug: "suits",
+    hint: "suits",
     label: "Костюмы",
     stats: ["3 кроя", "Premium ткань"],
     Graphic: SuitsGraphic,
   },
   {
-    slug: "coats",
+    hint: "coats",
     label: "Халаты",
     stats: ["4 длины", "Клинический крой"],
     Graphic: CoatsGraphic,
   },
   {
-    slug: "accessories",
+    hint: "accessories",
     label: "Аксессуары",
     stats: ["12+ позиций", "Минимализм"],
     Graphic: AccessoriesGraphic,
   },
 ] as const;
 
-export function CategoryInfographics() {
+export function CategoryInfographics({
+  categories = [],
+}: {
+  categories?: AdmikCategoryDto[];
+}) {
   return (
     <div className="flex flex-row items-stretch gap-2 md:gap-6 lg:gap-8">
-      {INFOGRAPHICS.map(({ slug, label, stats, Graphic }, i) => (
-        <Link key={slug} href={`/catalog?category=${slug}`} className="group flex flex-1 flex-col">
+      {INFOGRAPHICS.map(({ hint, label, stats, Graphic }, i) => (
+        <Link
+          key={hint}
+          href={resolveCategoryHref(categories, hint)}
+          className="group flex flex-1 flex-col"
+        >
           <InfographicCard index={i + 1} stats={stats}>
             <Graphic />
           </InfographicCard>

@@ -6,8 +6,24 @@ import {
   applyCatalogView,
   flattenCategoryNav,
   topLevelAncestorSlug,
+  resolveCategoryHref,
+  categoryLinks,
 } from "@/lib/catalog-view";
 import type { StorefrontProduct, AdmikCategoryDto } from "@/lib/admik";
+
+/** Реальное дерево категорий стенда THE CASE (для эвристик главной). */
+const REAL_CATS: AdmikCategoryDto[] = [
+  { slug: "meditsinskie-kostyumy", name: "Медицинские костюмы", description: "", children: [] },
+  {
+    slug: "hirurgicheskie-operatsionnye",
+    name: "Хирургические (операционные)",
+    description: "",
+    children: [
+      { slug: "hirurgicheskie-zhen", name: "Хирургические (жен)", description: "", children: [] },
+      { slug: "hirurgicheskie-muzh", name: "Хирургические (муж)", description: "", children: [] },
+    ],
+  },
+];
 
 function mk(over: Partial<StorefrontProduct>): StorefrontProduct {
   return {
@@ -66,6 +82,75 @@ describe("categoryTabs", () => {
 
   it("пустое дерево → только «Все»", () => {
     expect(categoryTabs([])).toEqual([{ slug: "", name: "Все" }]);
+  });
+});
+
+describe("resolveCategoryHref — тематическая ссылка главной → реальная категория", () => {
+  it("women → реальная женская подкатегория (по 'zhen')", () => {
+    expect(resolveCategoryHref(REAL_CATS, "women")).toBe(
+      "/catalog?category=hirurgicheskie-zhen",
+    );
+  });
+
+  it("men → реальная мужская подкатегория ('muzh'), НЕ путается с women", () => {
+    expect(resolveCategoryHref(REAL_CATS, "men")).toBe(
+      "/catalog?category=hirurgicheskie-muzh",
+    );
+  });
+
+  it("suits → реальные «Медицинские костюмы» (по 'kostyum')", () => {
+    expect(resolveCategoryHref(REAL_CATS, "suits")).toBe(
+      "/catalog?category=meditsinskie-kostyumy",
+    );
+  });
+
+  it("coats/accessories без совпадения → фолбэк /catalog (НЕ пустой каталог)", () => {
+    expect(resolveCategoryHref(REAL_CATS, "coats")).toBe("/catalog");
+    expect(resolveCategoryHref(REAL_CATS, "accessories")).toBe("/catalog");
+  });
+
+  it("точное совпадение slug имеет приоритет", () => {
+    expect(resolveCategoryHref(REAL_CATS, "meditsinskie-kostyumy")).toBe(
+      "/catalog?category=meditsinskie-kostyumy",
+    );
+  });
+
+  it("пустое дерево → всегда /catalog (никаких битых ссылок)", () => {
+    expect(resolveCategoryHref([], "women")).toBe("/catalog");
+    expect(resolveCategoryHref([], "suits")).toBe("/catalog");
+  });
+
+  it("неизвестная тема без паттерна → /catalog", () => {
+    expect(resolveCategoryHref(REAL_CATS, "zzz-unknown")).toBe("/catalog");
+  });
+
+  it("совпадение по ИМЕНИ категории (английский каталог)", () => {
+    const en: AdmikCategoryDto[] = [
+      { slug: "tops", name: "Women's Scrubs", description: "", children: [] },
+    ];
+    expect(resolveCategoryHref(en, "women")).toBe("/catalog?category=tops");
+  });
+});
+
+describe("categoryLinks — реальные категории ссылками (главная/футер)", () => {
+  it("плоский DFS: топ + дети, href по slug, до max", () => {
+    expect(categoryLinks(REAL_CATS, 6)).toEqual([
+      { slug: "meditsinskie-kostyumy", name: "Медицинские костюмы", href: "/catalog?category=meditsinskie-kostyumy" },
+      { slug: "hirurgicheskie-operatsionnye", name: "Хирургические (операционные)", href: "/catalog?category=hirurgicheskie-operatsionnye" },
+      { slug: "hirurgicheskie-zhen", name: "Хирургические (жен)", href: "/catalog?category=hirurgicheskie-zhen" },
+      { slug: "hirurgicheskie-muzh", name: "Хирургические (муж)", href: "/catalog?category=hirurgicheskie-muzh" },
+    ]);
+  });
+
+  it("ограничение max", () => {
+    expect(categoryLinks(REAL_CATS, 2).map((l) => l.slug)).toEqual([
+      "meditsinskie-kostyumy",
+      "hirurgicheskie-operatsionnye",
+    ]);
+  });
+
+  it("пустое дерево → []", () => {
+    expect(categoryLinks([])).toEqual([]);
   });
 });
 

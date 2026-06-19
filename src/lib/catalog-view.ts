@@ -112,6 +112,83 @@ export function flattenCategoryNav(
   return out;
 }
 
+/**
+ * Эвристики «тематическая ссылка главной → РЕАЛЬНАЯ категория».
+ *
+ * Главная THE CASE содержит редизайн-блоки (Women/Men, Костюмы/Халаты/Аксессуары),
+ * чьи ссылки РАНЬШЕ вели на ЖЁСТКО ЗАШИТЫЕ slug (women/men/suits/coats/accessories).
+ * В каталоге магазина таких slug нет → каждая ссылка открывала ПУСТОЙ каталог
+ * (битая клиентская навигация, жалоба владельца). Теперь тема резолвится в slug
+ * реальной категории магазина по паттерну (slug ИЛИ имя), иначе деградирует к
+ * /catalog — полный каталог, ссылка НИКОГДА не ведёт «в пустоту». Универсально:
+ * совпадения ищутся в реальном дереве категорий Admik (любой ИМ, не только THE CASE).
+ */
+const CATEGORY_HINT_PATTERNS: Record<string, RegExp> = {
+  women: /(women|female|zhensk|zhen|жен)/i,
+  men: /(\bmen\b|male|muzhsk|muzh|муж)/i,
+  suits: /(suit|kostyum|костюм)/i,
+  coats: /(coat|gown|halat|халат)/i,
+  accessories: /(accessor|aksessuar|аксессуар)/i,
+};
+
+/** Плоский обход дерева категорий (родители + дети любой глубины, DFS). */
+function flattenCategories(categories: AdmikCategoryDto[]): AdmikCategoryDto[] {
+  const out: AdmikCategoryDto[] = [];
+  const walk = (nodes: AdmikCategoryDto[]) => {
+    for (const c of nodes) {
+      out.push(c);
+      if (c.children?.length) walk(c.children);
+    }
+  };
+  walk(categories);
+  return out;
+}
+
+function catHref(slug: string): string {
+  return `/catalog?category=${encodeURIComponent(slug)}`;
+}
+
+/**
+ * Резолвит тематическую ссылку главной в href РЕАЛЬНОЙ категории:
+ *   1) точное совпадение slug === hint (если тема уже = реальному slug);
+ *   2) паттерн темы (women/men/suits/coats/accessories) по slug ИЛИ имени;
+ *   3) фолбэк /catalog (полный каталог — ссылка не ведёт в пустоту).
+ */
+export function resolveCategoryHref(
+  categories: AdmikCategoryDto[],
+  hint: string,
+): string {
+  const all = flattenCategories(categories);
+  const exact = all.find((c) => c.slug === hint);
+  if (exact) return catHref(exact.slug);
+  const pattern = CATEGORY_HINT_PATTERNS[hint.toLowerCase()];
+  if (pattern) {
+    const m = all.find((c) => pattern.test(c.slug) || pattern.test(c.name));
+    if (m) return catHref(m.slug);
+  }
+  return "/catalog";
+}
+
+/** Ссылка на реальную категорию (для плиток главной/футера). */
+export interface CategoryLink {
+  slug: string;
+  name: string;
+  href: string;
+}
+
+/**
+ * Реальные категории (топ + дети, DFS) ссылками для главной/футера: до `max`.
+ * Пустой вход → пустой массив (вызывающий деградирует к статичным ссылкам).
+ */
+export function categoryLinks(
+  categories: AdmikCategoryDto[],
+  max = 6,
+): CategoryLink[] {
+  return flattenCategories(categories)
+    .slice(0, Math.max(0, max))
+    .map((c) => ({ slug: c.slug, name: c.name, href: catHref(c.slug) }));
+}
+
 /** Сортировка товаров (не мутирует вход). `bestseller` ещё и фильтрует. */
 export function sortProducts(
   products: StorefrontProduct[],
