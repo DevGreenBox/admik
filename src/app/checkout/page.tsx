@@ -110,6 +110,9 @@ export default function CheckoutPage() {
     setCities([]);
     setSelectedPickup(null);
     setDeliveryCost(null);
+    // m11: сбрасываем и quote — иначе устаревший quote.delivery.available от прежнего
+    // города/ПВЗ держал бы «Уточняется» поверх свежерасчитанной цены нового города.
+    setQuote(null);
     setDeliveryEta("");
     setError("");
     setLoading(true);
@@ -298,6 +301,7 @@ export default function CheckoutPage() {
                   setSelectedPickup(null);
                   setPickupPoints([]);
                   setDeliveryCost(null);
+                  setQuote(null); // m11: стоимость/доступность от прежнего города — недействительны
                   setDeliveryEta("");
                 }} placeholder="Начните вводить..."
                   className="w-full border border-border px-4 py-3 text-sm focus:border-graphite outline-none" />
