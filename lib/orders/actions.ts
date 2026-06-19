@@ -26,6 +26,7 @@ import {
   type OrderWithItems,
 } from './repository';
 import { canTransition, paymentStatusOnSettle } from './status';
+import { settleRefundEffectsTx } from './refund-settle';
 import { OrderError } from './errors';
 import type { Order, OrderItem, PromoCode } from './types';
 
@@ -495,6 +496,18 @@ export const setPaymentStatus = defineAction({
         VALUES
           (${data.id}, 'payment', ${from}, ${data.to}, ${ctx.user.id}, ${data.comment ?? ''})
       `;
+
+      // ОСТАТОЧНЫЙ ПРОБЕЛ СЕТЛА (аудит цикла 2). Делегация выше (стр. 447) ловит
+      // возврат только когда order.status допускает переход → 'refunded'. Но Т-Банк
+      // CONFIRMED-webhook ставит payment_status='paid', НЕ продвигая order.status —
+      // заказ может быть 'new'/'awaiting_payment' при оплаченном статусе. Тогда
+      // canTransition('order', ...,'refunded') = false → попадаем сюда, и без этого
+      // вызова резерв НЕ освобождался бы, промокод НЕ откатывался, order.status НЕ
+      // менялся (резерв заблокирован навсегда). settleRefundEffectsTx идемпотентна
+      // (FOR UPDATE; refunded/cancelled/нет заказа → no-op), поэтому безопасна и тут.
+      if (data.to === 'refunded') {
+        await settleRefundEffectsTx(tx, data.id, ctx.user.id);
+      }
     });
 
     const after = await getOrderById(data.id);

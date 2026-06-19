@@ -386,6 +386,64 @@ describe('резерв остатков при переходах', () => {
     expect(payHist!.args).toContain('paid');
   });
 
+  it('V1: setPaymentStatus(→refunded) для paid-заказа в awaiting_payment СЕТТЛИТ резерв/промо/статус', async () => {
+    // Заказ оплачен (payment=paid через webhook), но order.status НЕ продвинут
+    // ('awaiting_payment'): canTransition('order','awaiting_payment','refunded')=false
+    // → делегация выше пропускает, попадаем в fall-through. БЕЗ фикса резерв оставался
+    // бы заблокирован. Проверяем, что settleRefundEffectsTx отрабатывает и тут.
+    const PROMO = '22222222-2222-4222-8222-222222222222';
+    H.state.getOrderByIdQueue = [
+      orderDetail({ status: 'awaiting_payment', paymentStatus: 'paid' }),
+      orderDetail({ status: 'refunded', paymentStatus: 'refunded' }),
+    ];
+    H.state.txResultQueue = [
+      [{ id: 'pay' }], // 1) UPDATE payment_status RETURNING id (1 строка = успех)
+      [{ id: 'hist' }], // 2) INSERT payment history
+      [{ status: 'awaiting_payment', promo_code_id: PROMO }], // 3) settle: SELECT orders FOR UPDATE
+      [{ product_id: 'p-1', variant_id: null, quantity: 2 }], // 4) settle: SELECT order_items
+      [{ id: 'red-1' }], // 5) settle: DELETE promo_redemptions RETURNING id
+    ];
+    const res = await setPaymentStatus({ id: UUID, to: 'refunded' });
+    expect(res.ok, JSON.stringify(res)).toBe(true);
+
+    // (a) Резерв освобождён по позиции снимка заказа.
+    expect(releaseReservationMock).toHaveBeenCalledWith(expect.anything(), {
+      productId: 'p-1',
+      variantId: null,
+      qty: 2,
+    });
+    // (b) Промокод откатан (DELETE promo_redemptions + GREATEST used_count).
+    const joined = H.state.txCalls.map((s) => s.join(' ')).join('\n');
+    expect(joined).toContain('promo_redemptions');
+    expect(joined).toContain('used_count');
+    // (c) order.status → 'refunded' + история ЗАКАЗА (kind='order'). to_status
+    // 'refunded' — литерал шаблона; from ('awaiting_payment') — интерполированный арг.
+    const ordHist = H.state.txCallsWithArgs.find(
+      (c) => c.strings.join('|').includes('order_status_history') && c.strings.join('|').includes("'order'"),
+    );
+    expect(ordHist).toBeTruthy();
+    expect(ordHist!.strings.join('')).toContain('refunded');
+    expect(ordHist!.args).toContain('awaiting_payment');
+    // И UPDATE orders SET status='refunded' прошёл (статус заказа переведён).
+    const ordUpd = H.state.txCalls.map((s) => s.join(' ')).join('\n');
+    expect(ordUpd).toContain("status = 'refunded'");
+  });
+
+  it('V1: идемпотентно — заказ уже cancelled → сетл no-op (без release)', async () => {
+    H.state.getOrderByIdQueue = [
+      orderDetail({ status: 'cancelled', paymentStatus: 'paid' }),
+      orderDetail({ status: 'cancelled', paymentStatus: 'refunded' }),
+    ];
+    H.state.txResultQueue = [
+      [{ id: 'pay' }], // UPDATE payment_status
+      [{ id: 'hist' }], // INSERT payment history
+      [{ status: 'cancelled', promo_code_id: null }], // settle SELECT → терминальный → no-op
+    ];
+    const res = await setPaymentStatus({ id: UUID, to: 'refunded' });
+    expect(res.ok).toBe(true);
+    expect(releaseReservationMock).not.toHaveBeenCalled();
+  });
+
   it('возврат COD-заказа (payment=pending) НЕ штампует refunded и не пишет ложную историю оплаты', async () => {
     H.state.getOrderByIdQueue = [
       orderDetail({ status: 'paid', paymentStatus: 'pending' }),
