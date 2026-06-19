@@ -22,7 +22,8 @@ import { sql } from '@/lib/db/client';
 import type { TransactionSql } from 'postgres';
 import { canTransition } from '@/lib/orders/status';
 import { settleRefundEffectsTx } from '@/lib/orders/refund-settle';
-import type { PaymentStatus } from '@/lib/orders/types';
+import type { OrderStatus, PaymentStatus } from '@/lib/orders/types';
+import { logger } from '@/lib/logger';
 
 // -----------------------------------------------------------------------------
 // Лог webhook (идемпотентность).
@@ -92,13 +93,34 @@ async function applyPaymentStatusTx(
   to: PaymentStatus,
   comment: string,
 ): Promise<boolean> {
-  const rows = await tx<{ payment_status: string }[]>`
-    SELECT payment_status FROM orders WHERE id = ${orderId} FOR UPDATE
+  const rows = await tx<{ payment_status: string; status: string }[]>`
+    SELECT payment_status, status FROM orders WHERE id = ${orderId} FOR UPDATE
   `;
   const from = rows[0]?.payment_status as PaymentStatus | undefined;
+  const orderStatus = rows[0]?.status as OrderStatus | undefined;
   if (!from) return false;
   if (from === to) return false;
   if (!canTransition('payment', from, to)) return false;
+
+  // C4-1 (аудит цикла 4, ДЕНЬГИ): гард мёртвого заказа на сетл-пути. Переход в
+  // «деньги получены» (paid/authorized) НЕ применяется к ОТМЕНЁННОМУ/ВОЗВРАЩЁННОМУ
+  // заказу. Гонка: клиент на шлюзе → админ отменяет заказ (резерв отпущен, payment
+  // остаётся pending/authorized) → клиент дожимает оплату → подписанный CONFIRMED-
+  // webhook метил бы мёртвый заказ paid (деньги за отменённый заказ + риск оверселла).
+  // Зеркалит isOrderPayable (lib/orders/status) — прежде гард был ТОЛЬКО в initPayment,
+  // не на сетле. Возврат (refunded) НЕ блокируем — это легитимный пост-отменный переход.
+  // Webhook всё равно отвечает OK идемпотентно; warn — для ручной сверки (оператор
+  // инициирует возврат поступивших денег).
+  if (
+    (to === 'paid' || to === 'authorized') &&
+    (orderStatus === 'cancelled' || orderStatus === 'refunded')
+  ) {
+    logger.warn(
+      'tbank: пропущен переход payment_status на отменённом/возвращённом заказе — требуется ручная сверка/возврат',
+      { module: 'payments/tbank', orderId, orderStatus, from, to },
+    );
+    return false;
+  }
 
   const updated =
     to === 'paid'

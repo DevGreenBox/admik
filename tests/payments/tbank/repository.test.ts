@@ -26,6 +26,9 @@ const h = vi.hoisted(() => {
   const state = {
     // Значение, которое вернёт SELECT ... FOR UPDATE (фактическое в БД на момент tx).
     selectStatus: 'authorized' as string | null,
+    // orders.status того же SELECT (C4-1: гард мёртвого заказа на сетле). Дефолт —
+    // активный (не cancelled/refunded), чтобы существующие сценарии не блокировались.
+    selectOrderStatus: 'awaiting_payment' as string,
     // Сколько строк «затронул» guarded UPDATE orders (0 → конкурентная гонка проиграна).
     updateCount: 1,
     // id, который вернёт INSERT INTO tbank_payment_log ... RETURNING id (null → дубликат).
@@ -41,7 +44,10 @@ const h = vi.hoisted(() => {
     const text = strings.join('?').trim();
     state.queries.push({ text });
     if (/^SELECT/i.test(text)) {
-      const rows = state.selectStatus === null ? [] : [{ payment_status: state.selectStatus }];
+      const rows =
+        state.selectStatus === null
+          ? []
+          : [{ payment_status: state.selectStatus, status: state.selectOrderStatus }];
       return Promise.resolve(rows);
     }
     if (/^INSERT/i.test(text) && /tbank_payment_log/i.test(text)) {
@@ -89,6 +95,7 @@ const { state } = h;
 
 function reset(): void {
   state.selectStatus = 'authorized';
+  state.selectOrderStatus = 'awaiting_payment';
   state.updateCount = 1;
   state.logInsertId = 'log-1';
   state.throwOnUpdateOrders = false;
@@ -268,5 +275,89 @@ describe('tbank/repository — recordWebhookEvent (атомарность)', () 
       (q) => /^UPDATE/i.test(q.text) && /tbank_payment_log/i.test(q.text),
     );
     expect(logUpdate).toBeUndefined();
+  });
+});
+
+describe('tbank/repository — гард мёртвого заказа на сетле (C4-1, деньги)', () => {
+  // Гонка: клиент на шлюзе → админ отменяет заказ (резерв отпущен, payment остаётся
+  // pending/authorized) → клиент дожимает оплату → CONFIRMED-webhook. Прежде гард
+  // order.status был ТОЛЬКО в initPayment, не на сетл-пути → отменённый заказ метился
+  // paid (деньги за мёртвый заказ + риск оверселла). Зеркалит isOrderPayable.
+  function hasOrderUpdate(): boolean {
+    return state.queries.some(
+      (q) => /^UPDATE/i.test(q.text) && /orders/i.test(q.text) && !/tbank_payment_log/i.test(q.text),
+    );
+  }
+  function hasPaymentHistory(): boolean {
+    return state.queries.some(
+      (q) => /^INSERT/i.test(q.text) && /order_status_history/i.test(q.text),
+    );
+  }
+
+  it('CONFIRMED (authorized→paid) на ОТМЕНЁННОМ заказе → НЕ применяется (false), без UPDATE orders и истории', async () => {
+    state.selectStatus = 'authorized';
+    state.selectOrderStatus = 'cancelled';
+    const ok = await applyPaymentStatus('ord-1', 'paid');
+    expect(ok).toBe(false);
+    expect(hasOrderUpdate()).toBe(false);
+    expect(hasPaymentHistory()).toBe(false);
+  });
+
+  it('CONFIRMED (pending→paid) на ВОЗВРАЩЁННОМ заказе → false', async () => {
+    state.selectStatus = 'pending';
+    state.selectOrderStatus = 'refunded';
+    const ok = await applyPaymentStatus('ord-1', 'paid');
+    expect(ok).toBe(false);
+    expect(hasOrderUpdate()).toBe(false);
+  });
+
+  it('AUTHORIZED (pending→authorized) на отменённом заказе → false (авто-холд денег тоже блокируем)', async () => {
+    state.selectStatus = 'pending';
+    state.selectOrderStatus = 'cancelled';
+    const ok = await applyPaymentStatus('ord-1', 'authorized');
+    expect(ok).toBe(false);
+    expect(hasOrderUpdate()).toBe(false);
+  });
+
+  it('paid на АКТИВНОМ заказе (awaiting_payment) применяется как обычно (гард не мешает)', async () => {
+    state.selectStatus = 'authorized';
+    state.selectOrderStatus = 'awaiting_payment';
+    const ok = await applyPaymentStatus('ord-1', 'paid');
+    expect(ok).toBe(true);
+    expect(hasOrderUpdate()).toBe(true);
+  });
+
+  it('REFUNDED (paid→refunded) на отменённом заказе ВСЁ РАВНО применяется — возврат денег не пере-блокируем', async () => {
+    // Гард завязан только на target paid/authorized; возврат — легитимный пост-отменный
+    // переход (оператор оформляет возврат). from='paid', settle no-op (заказ уже cancelled).
+    state.selectStatus = 'paid';
+    state.selectOrderStatus = 'cancelled';
+    const ok = await applyPaymentStatus('ord-1', 'refunded');
+    expect(ok).toBe(true);
+  });
+
+  it('webhook: CONFIRMED на отменённом заказе → лог записан, переход НЕ применён (inserted:true, processed:false), лог помечен обработанным (идемпотентный OK)', async () => {
+    state.selectStatus = 'authorized';
+    state.selectOrderStatus = 'cancelled';
+    state.logInsertId = 'log-9';
+    const res = await recordWebhookEvent({
+      log: {
+        orderId: 'ord-1',
+        paymentId: '900000099',
+        status: 'CONFIRMED',
+        amountKop: 150000,
+        isMock: false,
+        rawPayload: null,
+      },
+      nextStatus: 'paid',
+      comment: 'tbank-webhook:CONFIRMED',
+    });
+    expect(res).toEqual({ inserted: true, processed: false });
+    expect(hasOrderUpdate()).toBe(false);
+    const logUpdate = state.queries.find(
+      (q) => /^UPDATE/i.test(q.text) && /tbank_payment_log/i.test(q.text),
+    );
+    expect(logUpdate).toBeDefined();
+    expect(logUpdate!.text.toLowerCase()).toContain('processed = true');
   });
 });
