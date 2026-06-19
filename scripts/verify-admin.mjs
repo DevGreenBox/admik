@@ -413,11 +413,14 @@ async function slugByName(name) {
 }
 
 async function storeGoto(sp, path) {
-  await sp.goto(`${STORE_ORIGIN}${path}`, { waitUntil: 'networkidle' });
+  // `domcontentloaded` + load, НЕ `networkidle`: на главной hero/анимации
+  // (framer-motion) не дают сети «затихнуть» → ложный timeout навигации.
+  await sp.goto(`${STORE_ORIGIN}${path}`, { waitUntil: 'domcontentloaded' });
+  await sp.waitForLoadState('load', { timeout: 12000 }).catch(() => {});
   // Пауза на регидрацию persist-хранилища (skipHydration): иначе добавление в
   // корзину СРАЗУ после полной перезагрузки могло гонкой затереть прежние позиции
   // (реальные юзеры ходят client-nav без перезагрузки — это артефакт харнеса).
-  await sp.waitForTimeout(900);
+  await sp.waitForTimeout(1200);
   const txt = (await sp.locator('body').innerText().catch(() => '')) || '';
   const broken = /Application error|Unhandled Runtime|client-side exception|Internal Server Error/i.test(txt);
   if (broken) throw new Error(`страница ${path} с ошибкой рендера`);
@@ -631,13 +634,20 @@ async function runE2E(browser, adminPage) {
     else PASS('e2e консоль витрины', 'без ошибок в консоли');
   } finally {
     await ctx.close();
-  }
-
-  // --- CLEANUP ---
-  for (const k of ['simple', 'sized', 'oos']) {
-    if (!ids[k]) continue;
-    const ok = await deleteProductUI(adminPage, ids[k]);
-    rec(ok ? 'PASS' : 'FAIL', `e2e cleanup ${k}`, ids[k]);
+    // --- CLEANUP (ВНУТРИ finally) ---
+    // Раньше блок стоял ПОСЛЕ finally: при падении любого шага e2e (timeout
+    // waitForURL и т.п.) исключение всплывало наверх — чистка НЕ выполнялась, и
+    // тест-товары zz-qa-e2e-* утекали в БОЕВОЙ каталог, где их видел клиент
+    // (реальный инцидент волны 15). Теперь каждый шаг в своём try; плюс
+    // search-based свип ловит товары, чей id не захватился / утёк в прошлый раз.
+    for (const k of ['simple', 'sized', 'oos']) {
+      if (!ids[k]) continue;
+      try {
+        const ok = await deleteProductUI(adminPage, ids[k]);
+        rec(ok ? 'PASS' : 'FAIL', `e2e cleanup ${k}`, ids[k]);
+      } catch (e) { FAIL(`e2e cleanup ${k}`, e.message); }
+    }
+    try { await runCleanup(adminPage); } catch (e) { INFO('e2e cleanup sweep', e.message); }
   }
 }
 
