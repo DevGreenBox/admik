@@ -1000,6 +1000,19 @@ export const attachMedia = defineAction({
             WHERE product_id = ${data.productId} AND is_primary
           `;
         }
+        // АВТО-ГЛАВНОЕ: если явно не просили «сделать главным», но у товара ещё НЕТ
+        // ни одного главного фото — первое загруженное становится главным. Иначе
+        // каталог витрины (берёт ТОЛЬКО is_primary → primary_media_url) показал бы
+        // товар без обложки, хотя фото загружено и видно в карточке. Типичный
+        // сценарий: владелец грузит фото, не трогая чекбокс «сделать главным».
+        let makePrimary = data.isPrimary === true;
+        if (!makePrimary) {
+          const existing = await tx<{ n: number }[]>`
+            SELECT count(*)::int AS n FROM product_media
+            WHERE product_id = ${data.productId} AND is_primary
+          `;
+          if ((existing[0]?.n ?? 0) === 0) makePrimary = true;
+        }
         const rows = await tx<{ id: string }[]>`
           INSERT INTO product_media
             (product_id, variant_id, storage_key, url, type, mime, alt,
@@ -1007,7 +1020,7 @@ export const attachMedia = defineAction({
           VALUES (
             ${data.productId}, ${data.variantId ?? null}, ${put.key}, ${put.url},
             ${data.type ?? 'image'}, ${'image/webp'}, ${data.alt ?? ''},
-            ${main.width}, ${main.height}, ${put.size}, ${data.isPrimary ?? false}
+            ${main.width}, ${main.height}, ${put.size}, ${makePrimary}
           )
           RETURNING id
         `;
