@@ -24,6 +24,7 @@ import {
   fullName,
   isContactStepValid,
   isDeliveryStepValid,
+  formatDeliveryCost,
 } from "@/lib/checkout";
 import { Button } from "@/components/ui/Button";
 import { FadeIn } from "@/components/ui/Animations";
@@ -313,7 +314,9 @@ export default function CheckoutPage() {
               {selectedCity && deliveryCost !== null && (
                 <div className="bg-surface p-4 flex justify-between text-sm">
                   <span className="text-muted">Доставка СДЭК{deliveryEta ? ` · ${deliveryEta}` : ""}</span>
-                  <span>{deliveryCost === 0 ? "Бесплатно" : formatPrice(deliveryCost)}</span>
+                  {/* m11: «Бесплатно» только если доставка ДОСТУПНА; иначе «Уточняется»
+                      (как шаг 3) — не показываем «Бесплатно» за непосчитанную доставку. */}
+                  <span>{formatDeliveryCost(deliveryCost, !deliveryUnavailable, formatPrice)}</span>
                 </div>
               )}
               {pickupPoints.length > 0 && (

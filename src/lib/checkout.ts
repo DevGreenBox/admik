@@ -83,3 +83,22 @@ export function isDeliveryStepValid(
 export function fullName(form: Pick<ContactForm, 'firstName' | 'lastName'>): string {
   return `${form.firstName} ${form.lastName}`.trim();
 }
+
+/**
+ * Отображение стоимости доставки на шаге 2 чекаута (m11).
+ *
+ * «Уточняется» — когда доставка недоступна (расчёт СДЭК soft-fail, available=false)
+ * ИЛИ стоимость ещё не известна (cost=null): нельзя обещать «Бесплатно» за непосчитанную
+ * доставку. Раньше шаг 2 показывал «Бесплатно» при cost===0, ИГНОРИРУЯ доступность —
+ * хотя шаг 3 уже корректно показывал «Уточняется» (рассинхрон, вводил покупателя в
+ * заблуждение). «Бесплатно» — только при реально нулевой И доступной стоимости.
+ * `format` инъектируется (formatPrice) — модуль остаётся чистым/без React/сети.
+ */
+export function formatDeliveryCost(
+  cost: number | null,
+  available: boolean,
+  format: (n: number) => string,
+): string {
+  if (!available || cost === null) return 'Уточняется';
+  return cost === 0 ? 'Бесплатно' : format(cost);
+}

@@ -5,6 +5,7 @@ import {
   isContactStepValid,
   isDeliveryStepValid,
   fullName,
+  formatDeliveryCost,
 } from './checkout';
 import type { CartItem } from '@/types';
 
@@ -96,5 +97,27 @@ describe('fullName', () => {
   it('склеивает имя и фамилию, тримит', () => {
     expect(fullName({ firstName: 'Иван', lastName: 'Петров' })).toBe('Иван Петров');
     expect(fullName({ firstName: 'Иван', lastName: '' })).toBe('Иван');
+  });
+});
+
+describe('formatDeliveryCost (m11)', () => {
+  const fmt = (n: number) => `${n}₽`;
+
+  it('доступна и cost>0 → отформатированная цена', () => {
+    expect(formatDeliveryCost(350, true, fmt)).toBe('350₽');
+  });
+
+  it('доступна и cost=0 → «Бесплатно» (реально бесплатная)', () => {
+    expect(formatDeliveryCost(0, true, fmt)).toBe('Бесплатно');
+  });
+
+  it('НЕдоступна (available=false) → «Уточняется», даже если cost=0', () => {
+    expect(formatDeliveryCost(0, false, fmt)).toBe('Уточняется');
+    expect(formatDeliveryCost(350, false, fmt)).toBe('Уточняется');
+  });
+
+  it('стоимость не известна (cost=null) → «Уточняется»', () => {
+    expect(formatDeliveryCost(null, true, fmt)).toBe('Уточняется');
+    expect(formatDeliveryCost(null, false, fmt)).toBe('Уточняется');
   });
 });
