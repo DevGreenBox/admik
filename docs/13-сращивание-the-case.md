@@ -308,6 +308,16 @@ Storefront API Admik; её собственный коммерческий бэ�
 - **Параметр `GET /products?category=<slug>`** (Wave B, серверный фасетинг по категории):
   резолвер `getActiveCategoryIdBySlug` в `lib/storefront/queries.ts`; в роуте `products`
   `categoryId` (uuid) имеет приоритет, иначе slug резолвится в id (нет такой → пустой список).
+- **Пагинация `GET /products` со свободным `offset`** (fix minor): `limit`/`offset` query —
+  `offset` пробрасывается в `listProducts` КАК ЕСТЬ (clamp `>= 0`), без молчаливого округления
+  до границы страницы. Ранее роут считал `page = floor(offset/limit)+1` и НЕ передавал offset,
+  а `listProducts` брал `offset = (page-1)*pageSize` — свободный (не кратный `limit`) offset
+  обнулялся до границы страницы → товары пропускались/дублировались между «страницами».
+  В `ProductListFilter` добавлено опц. поле `offset` (приоритет над `page`; не задано → фолбэк
+  на `page`, контракт админки не меняется). Ответ отражает фактический offset в
+  `pagination.offset`. Тесты: `tests/storefront/products-route.test.ts` (проброс/clamp/фолбэк),
+  `tests/catalog/integration.test.ts` (DB-gated: смежные окна со свободным offset без
+  пропусков/дублей).
 
 ### Открытый организационный вопрос
 
