@@ -164,18 +164,11 @@ const SETTINGS_PATH = '/admin/settings';
  */
 export async function defaultHasPublishedCmsPages(): Promise<boolean> {
   try {
-    // C8-2: to_regclass-гард ВНУТРИ подзапроса EXISTS (там есть FROM cms_pages) — как в
-    // lib/seo/repository.ts getSitemapPages. Прежде гард стоял на верхнем уровне
-    // `SELECT EXISTS(...) WHERE …` БЕЗ FROM → синтаксическая ошибка PostgreSQL → запрос
-    // ВСЕГДА падал в catch → возвращался false даже при наличии опубликованных страниц
-    // (предупреждение при выключении модуля cms не показывалось). Отсутствие таблицы
-    // по-прежнему ловит catch (ссылка на cms_pages не парсится → undefined_table).
     const rows = await sql<{ exists: boolean }[]>`
       SELECT EXISTS (
-        SELECT 1 FROM cms_pages
-         WHERE status = 'published'
-           AND to_regclass('public.cms_pages') IS NOT NULL
+        SELECT 1 FROM cms_pages WHERE status = 'published'
       ) AS exists
+      WHERE to_regclass('public.cms_pages') IS NOT NULL
     `;
     return rows[0]?.exists ?? false;
   } catch {

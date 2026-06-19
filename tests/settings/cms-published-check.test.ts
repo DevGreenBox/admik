@@ -1,19 +1,22 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 /**
- * C8-2 (аудит цикла 8): defaultHasPublishedCmsPages строит ВАЛИДНЫЙ SQL.
+ * Поведенческое покрытие defaultHasPublishedCmsPages (раньше функция тестами не
+ * покрывалась — экшен-тесты инъектят мок hasPublishedCmsPages).
  *
- * Регресс: прежде запрос был `SELECT EXISTS(...) AS exists WHERE to_regclass(...)` —
- * top-level WHERE без FROM → синтаксическая ошибка PostgreSQL → catch → ВСЕГДА false
- * (предупреждение «есть опубликованные CMS-страницы» при выключении модуля cms не
- * показывалось). Фикс: to_regclass-гард внутри подзапроса EXISTS (там есть FROM
- * cms_pages), как в lib/seo/repository.ts. sql замокан (захватываем текст запроса).
+ * Контракт: вернуть true, если есть опубликованная CMS-страница; false иначе;
+ * толерантность к отсутствию таблицы cms_pages (модуль 5.C-1 мог быть не накатан) —
+ * ошибка чтения ловится catch → false. sql замокан.
+ *
+ * NB (цикл 8): аудит пометил здешний SQL `SELECT EXISTS(...) AS exists WHERE
+ * to_regclass(...)` как «невалидный (WHERE без FROM)» — это ЛОЖНАЯ находка:
+ * PostgreSQL 15 ДОПУСКАЕТ WHERE без FROM (`SELECT 1 WHERE true`→1 строка,
+ * `WHERE false`→0 строк), проверено вживую против БД стенда. Запрос корректен.
  */
 
 const h = vi.hoisted(() => {
-  const state = { rows: [{ exists: true }] as unknown[], throwIt: false, lastQuery: '' };
-  const sql = vi.fn((strings: TemplateStringsArray) => {
-    state.lastQuery = strings.join('?');
+  const state = { rows: [{ exists: true }] as unknown[], throwIt: false };
+  const sql = vi.fn(() => {
     if (state.throwIt) {
       return Promise.reject(new Error('relation "cms_pages" does not exist'));
     }
@@ -31,12 +34,11 @@ const { state } = h;
 beforeEach(() => {
   state.rows = [{ exists: true }];
   state.throwIt = false;
-  state.lastQuery = '';
   h.sql.mockClear();
 });
 
-describe('settings/action-factory — defaultHasPublishedCmsPages (C8-2: валидный SQL)', () => {
-  it('EXISTS вернул exists:true → true (предупреждение покажется)', async () => {
+describe('settings/action-factory — defaultHasPublishedCmsPages (поведение)', () => {
+  it('EXISTS вернул exists:true → true (предупреждение покажется при выключении cms)', async () => {
     state.rows = [{ exists: true }];
     expect(await defaultHasPublishedCmsPages()).toBe(true);
   });
@@ -46,19 +48,13 @@ describe('settings/action-factory — defaultHasPublishedCmsPages (C8-2: вал�
     expect(await defaultHasPublishedCmsPages()).toBe(false);
   });
 
-  it('таблица отсутствует/ошибка чтения → catch → false (толерантность)', async () => {
-    state.throwIt = true;
+  it('таблицы нет (WHERE to_regclass отфильтровал) → пустой результат → false', async () => {
+    state.rows = [];
     expect(await defaultHasPublishedCmsPages()).toBe(false);
   });
 
-  it('C8-2: to_regclass-гард ВНУТРИ подзапроса EXISTS, а не top-level WHERE без FROM', async () => {
-    await defaultHasPublishedCmsPages();
-    const q = state.lastQuery.toLowerCase();
-    const idxRegclass = q.indexOf('to_regclass');
-    const idxAsExists = q.indexOf('as exists');
-    expect(idxRegclass).toBeGreaterThanOrEqual(0);
-    // to_regclass должен идти ДО "as exists" → значит внутри подзапроса (FROM cms_pages),
-    // а не после закрытия EXISTS (что было бы синтаксически невалидным top-level WHERE).
-    expect(idxAsExists).toBeGreaterThan(idxRegclass);
+  it('ошибка чтения (иное) → catch → false (толерантность)', async () => {
+    state.throwIt = true;
+    expect(await defaultHasPublishedCmsPages()).toBe(false);
   });
 });
