@@ -41,10 +41,14 @@ export const STATUS_TO_PAYMENT_STATUS: Readonly<Record<string, PaymentStatus>> =
   REVERSED: 'failed',
   CANCELED: 'failed',
 
-  // Возврат (полный/частичный/в процессе) — refunded.
-  REFUNDING: 'refunded',
+  // Возврат. ТОЛЬКО полный REFUNDED → 'refunded' (терминальный сетл: освобождение
+  // резерва + откат промокода + order.status='refunded', см. settleRefundEffectsTx).
+  // REFUNDING (возврат В ПРОЦЕССЕ — деньги ещё НЕ вернулись) и PARTIAL_REFUNDED
+  // (частичный возврат) НАМЕРЕННО не в карте → null: иначе транзиентный/частичный
+  // возврат преждевременно или ЦЕЛИКОМ закрывал бы заказ и высвобождал ВЕСЬ остаток
+  // (БАГ #5/#12 + регресс сетла волны 15; docs/15 §4.3: частичный — БЕЗ авто-смены
+  // статуса). Событие всё равно логируется (insertStatusLog), оператор решает вручную.
   REFUNDED: 'refunded',
-  PARTIAL_REFUNDED: 'refunded',
 };
 
 /**

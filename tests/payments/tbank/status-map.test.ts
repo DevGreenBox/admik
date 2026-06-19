@@ -24,9 +24,9 @@ const EXPECTED: Record<string, PaymentStatus> = {
   REVERSING: 'failed',
   REVERSED: 'failed',
   CANCELED: 'failed',
-  REFUNDING: 'refunded',
+  // Только ПОЛНЫЙ возврат → 'refunded' (терминальный сетл). REFUNDING/PARTIAL_REFUNDED
+  // намеренно НЕ в карте (→ null) — см. отдельный тест ниже (БАГ #5/#12 + регресс волны 15).
   REFUNDED: 'refunded',
-  PARTIAL_REFUNDED: 'refunded',
 };
 
 describe('tbank/status-map — полная матрица Status → payment_status', () => {
@@ -40,6 +40,14 @@ describe('tbank/status-map — полная матрица Status → payment_st
     expect(Object.keys(EXPECTED).sort()).toEqual(
       Object.keys(STATUS_TO_PAYMENT_STATUS).sort(),
     );
+  });
+
+  it('REFUNDING (в процессе) и PARTIAL_REFUNDED → null (НЕ терминальный сетл, БАГ #5/#12)', () => {
+    // Иначе транзиентный/частичный возврат целиком закрывал бы заказ и высвобождал
+    // ВЕСЬ остаток (settleRefundEffectsTx срабатывает на payment_status='refunded').
+    expect(mapTbankStatus('REFUNDING')).toBeNull();
+    expect(mapTbankStatus('PARTIAL_REFUNDED')).toBeNull();
+    expect(mapTbankStatus('REFUNDED')).toBe('refunded');
   });
 
   it('каждый результат — валидный PaymentStatus', () => {
