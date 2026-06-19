@@ -437,6 +437,33 @@ export const setPaymentStatus = defineAction({
       );
     }
 
+    // ВОЗВРАТ ОПЛАТЫ = ВОЗВРАТ ЗАКАЗА (БАГ #3, аудит волны 15). Раньше paid→refunded
+    // через статус-машину ОПЛАТЫ менял только payment_status — резерв остатков НЕ
+    // освобождался (склад навсегда заблокирован) и промокод НЕ откатывался. Делегируем
+    // единой, протестированной логике сетла заказа: она освобождает/списывает резерв по
+    // текущему статусу, откатывает промокод, ставит order.status='refunded' И
+    // payment_status='refunded' (через paymentStatusOnSettle). Тот же эффект, что у
+    // кнопки «Статус заказа → Возврат».
+    if (data.to === 'refunded' && canTransition('order', current.order.status, 'refunded')) {
+      const { before, after } = await applyOrderStatusTransition({
+        id: data.id,
+        to: 'refunded',
+        comment: data.comment ?? '',
+        actorUserId: ctx.user.id,
+      });
+      return {
+        result: orderDetailResult(after),
+        revalidate: [ORDERS_LIST_PATH, orderPath(data.id)],
+        audit: {
+          action: 'order.payment.change',
+          entityType: 'order',
+          entityId: data.id,
+          before: { status: before.status, paymentStatus: before.paymentStatus },
+          after: { status: after.order.status, paymentStatus: after.order.paymentStatus },
+        },
+      };
+    }
+
     await sql.begin(async (tx: TransactionSql) => {
       // GUARDED UPDATE (Fix 1, TOCTOU): переход применяется только если
       // payment_status всё ещё равен прочитанному `from`; иначе конкурентный

@@ -21,6 +21,7 @@
 import { sql } from '@/lib/db/client';
 import type { TransactionSql } from 'postgres';
 import { canTransition } from '@/lib/orders/status';
+import { settleRefundEffectsTx } from '@/lib/orders/refund-settle';
 import type { PaymentStatus } from '@/lib/orders/types';
 
 // -----------------------------------------------------------------------------
@@ -123,6 +124,13 @@ async function applyPaymentStatusTx(
     VALUES
       (${orderId}, 'payment', ${from}, ${to}, NULL, ${comment})
   `;
+
+  // БАГ #4 (аудит волны 15): возврат денег (webhook Т-Банка REFUNDED) обязан
+  // выполнить складско-промо-сетл В ТОЙ ЖЕ транзакции — иначе резерв остатков
+  // навсегда заблокирован, промокод не откатан, заказ остаётся 'paid'. Идемпотентно.
+  if (to === 'refunded') {
+    await settleRefundEffectsTx(tx, orderId, null);
+  }
   return true;
 }
 
