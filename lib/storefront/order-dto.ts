@@ -54,6 +54,20 @@ function orderTokenSecret(
 }
 
 /**
+ * Fail-closed ПРЕДпроверка: секрет токена заказа настроен (C7-1). Вызывать в начале
+ * POST /orders — ДО createOrder. Иначе мисконфигурация (в production не задан ни
+ * ORDER_TOKEN_SECRET, ни APP_PASSWORD, ни OWNER_PASSWORD) приводила бы к 500 ПОСЛЕ
+ * коммита заказа (orderTokenSecret бросает в toOrderCreatedDto уже после createOrder):
+ * заказ-сирота в БД, клиент без accessToken и без 201. Проверка тем же резолвером и тем
+ * же env, что и реальная генерация токена → если прошла, toOrderCreatedDto не бросит.
+ */
+export function assertOrderTokenConfigured(
+  env: Record<string, string | undefined> = process.env,
+): void {
+  orderTokenSecret(env);
+}
+
+/**
  * Непредсказуемый токен доступа к заказу из его id (HMAC-SHA256, base64url, 32
  * символа). Выдаётся при создании заказа (POST /orders) и сверяется на
  * GET /orders/:number. Без секрета его нельзя угадать по номеру заказа.

@@ -21,7 +21,7 @@ import {
 import { STOREFRONT_WRITE_METHODS } from '@/lib/storefront/cors';
 import { CreateOrderSchema } from '@/lib/orders/schemas';
 import { createOrder } from '@/lib/orders/repository';
-import { toOrderCreatedDto } from '@/lib/storefront/order-dto';
+import { toOrderCreatedDto, assertOrderTokenConfigured } from '@/lib/storefront/order-dto';
 import { normalizeClientIp } from '@/lib/server/request-ip';
 
 export const dynamic = 'force-dynamic';
@@ -70,6 +70,11 @@ export async function POST(req: Request): Promise<Response> {
           cors,
         );
       }
+
+      // C7-1: fail-closed ДО createOrder. Иначе при мисконфигурации (в production не
+      // задан секрет токена) orderTokenSecret бросил бы в toOrderCreatedDto уже ПОСЛЕ
+      // коммита → заказ-сирота в БД + 500 без accessToken. Проверяем заранее тем же env.
+      assertOrderTokenConfigured();
 
       const result = await createOrder(parsed.data, {
         source: 'storefront',

@@ -12,6 +12,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 import {
   orderAccessToken,
+  assertOrderTokenConfigured,
   verifyOrderAccess,
   toOrderItemDto,
   toOrderPublicDto,
@@ -239,6 +240,19 @@ describe('order-dto — orderTokenSecret (выделенный секрет, fai
     const b = orderAccessToken(ID, { NODE_ENV: 'test' });
     expect(a).toBe(b);
     expect(a).toHaveLength(32);
+  });
+
+  it('C7-1: assertOrderTokenConfigured в production БЕЗ секрета → бросает ДО createOrder (fail-closed, без заказа-сироты)', () => {
+    expect(() => assertOrderTokenConfigured({ NODE_ENV: 'production' })).toThrow(/ORDER_TOKEN_SECRET/);
+  });
+
+  it('C7-1: assertOrderTokenConfigured в production С секретом → не бросает (заказ создастся)', () => {
+    expect(() => assertOrderTokenConfigured({ NODE_ENV: 'production', ORDER_TOKEN_SECRET: 's' })).not.toThrow();
+    expect(() => assertOrderTokenConfigured({ NODE_ENV: 'production', APP_PASSWORD: 'p' })).not.toThrow();
+  });
+
+  it('C7-1: assertOrderTokenConfigured вне production без секрета → не бросает (dev-фолбэк)', () => {
+    expect(() => assertOrderTokenConfigured({ NODE_ENV: 'test' })).not.toThrow();
   });
 });
 
