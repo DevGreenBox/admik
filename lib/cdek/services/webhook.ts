@@ -24,7 +24,7 @@ import {
 } from '../repository';
 import { getOrderByNumber } from '@/lib/orders/repository';
 import { mapCdekStatus, displayName } from './status-map';
-import { applyDeliveryStatus } from './delivery-status';
+import { advanceDeliveryStatus } from './delivery-status';
 
 // =============================================================================
 // verifyWebhookIp — ЧИСТАЯ. IP-whitelist (точные IPv4 + CIDR). docs/08 §8.2.
@@ -245,11 +245,12 @@ export class WebhookService {
       entry = existing;
     }
 
-    // 3) Маппинг + переход delivery_status (недопустимый/повторный — молча no-op,
-    // applyDeliveryStatus идемпотентен через canTransition: статус уже продвинут → false).
+    // 3) Маппинг + докрутка delivery_status ПО ШАГАМ до актуального (C4-2): если СДЭК
+    // прислал статус с прыжком (потерян in_transit), advanceDeliveryStatus пройдёт цепь
+    // по шагам, а не дропнет переход молча. Повторный/уже-достигнутый — идемпотентный no-op.
     const next = mapCdekStatus(event.statusCode);
     if (next) {
-      await applyDeliveryStatus(orderId, next, `cdek-webhook:${event.statusCode}`);
+      await advanceDeliveryStatus(orderId, next, `cdek-webhook:${event.statusCode}`);
     }
 
     // 4) Пометить лог обработанным (точка коммита идемпотентности).

@@ -20,9 +20,11 @@ vi.mock('@/lib/cdek/repository', () => ({
   updateShipmentByOrderId: (...a: unknown[]) => updateShipmentMock(...(a as [])),
 }));
 
-const applyDeliveryStatusMock = vi.fn(async () => true);
+// C4-2: tracking докручивает delivery_status до актуального статуса СДЭК через
+// advanceDeliveryStatus (пошагово по канонической цепи), а не одношагово.
+const advanceDeliveryStatusMock = vi.fn(async () => true);
 vi.mock('@/lib/cdek/services/delivery-status', () => ({
-  applyDeliveryStatus: (...a: unknown[]) => applyDeliveryStatusMock(...(a as [])),
+  advanceDeliveryStatus: (...a: unknown[]) => advanceDeliveryStatusMock(...(a as [])),
 }));
 
 import {
@@ -79,18 +81,18 @@ describe('cdek/tracking — refreshStatus (mock-трекинг)', () => {
     getShipmentMock.mockResolvedValue({ orderId: 'ord-1', cdekUuid: 'u-1' });
   });
 
-  it('mock: берёт последний статус (DELIVERED) → маппит в delivered', async () => {
-    applyDeliveryStatusMock.mockResolvedValue(true);
+  it('mock: берёт последний статус (DELIVERED) → докручивает до delivered', async () => {
+    advanceDeliveryStatusMock.mockResolvedValue(true);
     const svc = new TrackingService(new CdekManager({ config: mockCfg }));
     const r = await svc.refreshStatus('ord-1');
     expect(r.statusCode).toBe('DELIVERED'); // последний в mockTrackStatuses
     expect(r.transitioned).toBe(true);
-    expect(applyDeliveryStatusMock).toHaveBeenCalledWith('ord-1', 'delivered', expect.any(String));
+    expect(advanceDeliveryStatusMock).toHaveBeenCalledWith('ord-1', 'delivered', expect.any(String));
     expect(updateShipmentMock).toHaveBeenCalled();
   });
 
-  it('недопустимый переход → applyDeliveryStatus=false → transitioned=false', async () => {
-    applyDeliveryStatusMock.mockResolvedValue(false);
+  it('нет применённого перехода (уже в целевом) → advanceDeliveryStatus=false → transitioned=false', async () => {
+    advanceDeliveryStatusMock.mockResolvedValue(false);
     const svc = new TrackingService(new CdekManager({ config: mockCfg }));
     const r = await svc.refreshStatus('ord-1');
     expect(r.transitioned).toBe(false);

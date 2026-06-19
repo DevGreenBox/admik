@@ -16,6 +16,7 @@ import {
   nextOrderStatuses,
   nextPaymentStatuses,
   nextStatuses,
+  deliveryForwardPath,
 } from '@/lib/orders/status';
 import {
   DELIVERY_STATUSES,
@@ -229,5 +230,61 @@ describe('isOrderPayable — backend-инвариант оплачиваемос
     expect(isOrderPayable('awaiting_payment', 'pending')).toBe(true);
     expect(isOrderPayable('paid', 'failed')).toBe(true); // ретрай неуспешной оплаты
     expect(isOrderPayable('new', 'authorized')).toBe(true);
+  });
+});
+
+describe('deliveryForwardPath — пошаговая докрутка доставки до target (C4-2)', () => {
+  it('канонический прыжок registered → delivered докручивается через in_transit', () => {
+    // СДЭК прислал сразу DELIVERED (потерян in_transit): путь должен пройти его.
+    expect(deliveryForwardPath('registered', 'delivered')).toEqual([
+      'in_transit',
+      'delivered',
+    ]);
+  });
+
+  it('pending → delivered = вся цепь [registered, in_transit, delivered]', () => {
+    expect(deliveryForwardPath('pending', 'delivered')).toEqual([
+      'registered',
+      'in_transit',
+      'delivered',
+    ]);
+  });
+
+  it('смежный шаг in_transit → delivered = [delivered]', () => {
+    expect(deliveryForwardPath('in_transit', 'delivered')).toEqual(['delivered']);
+  });
+
+  it('прямое ребро registered → cancelled = [cancelled] (без синтетических шагов)', () => {
+    expect(deliveryForwardPath('registered', 'cancelled')).toEqual(['cancelled']);
+  });
+
+  it('ветвь возврата registered → returned проходит через in_transit', () => {
+    expect(deliveryForwardPath('registered', 'returned')).toEqual([
+      'in_transit',
+      'returned',
+    ]);
+  });
+
+  it('from === to → [] (уже в целевом статусе, нечего применять)', () => {
+    expect(deliveryForwardPath('delivered', 'delivered')).toEqual([]);
+  });
+
+  it('назад недостижимо: delivered → registered → []', () => {
+    expect(deliveryForwardPath('delivered', 'registered')).toEqual([]);
+  });
+
+  it('нет ребра вперёд: in_transit → cancelled → []', () => {
+    expect(deliveryForwardPath('in_transit', 'cancelled')).toEqual([]);
+  });
+
+  it('каждый шаг пути — валидный переход canTransition(delivery)', () => {
+    // Инвариант: применяя путь по шагам, мы НЕ нарушаем статус-машину.
+    const path = deliveryForwardPath('pending', 'delivered');
+    let prev = 'pending';
+    for (const step of path) {
+      expect(canTransition('delivery', prev, step)).toBe(true);
+      prev = step;
+    }
+    expect(prev).toBe('delivered');
   });
 });

@@ -8,9 +8,10 @@
  *
  * Берём ПОСЛЕДНИЙ (актуальный) статус, маппим через status-map.mapCdekStatus,
  * обновляем cdek_shipments.status_* и orders.delivery_status (через
- * applyDeliveryStatus — соблюдает canTransition, недопустимый переход не
- * применяется). БД-зависимое → интеграционные тесты (skipIf); маппинг/выбор
- * последнего статуса — чистые тестируемые функции.
+ * advanceDeliveryStatus — докручивает цепь ПО ШАГАМ до актуального статуса, чтобы
+ * прыжок registered→delivered при потерянном in_transit не дропался молча, C4-2).
+ * БД-зависимое → интеграционные тесты (skipIf); маппинг/выбор последнего статуса —
+ * чистые тестируемые функции.
  */
 
 import type { CdekManager } from '../manager';
@@ -18,7 +19,7 @@ import { getCdekManager } from '../manager';
 import { CdekError } from '../errors';
 import { getShipmentByOrderId, getShipmentByCdekUuid, updateShipmentByOrderId } from '../repository';
 import { mapCdekStatus, displayName } from './status-map';
-import { applyDeliveryStatus } from './delivery-status';
+import { advanceDeliveryStatus } from './delivery-status';
 import type { CdekShipment } from '../types';
 
 /** Один статус трекинга (нормализованный). */
@@ -133,7 +134,7 @@ export class TrackingService {
     const next = mapCdekStatus(latest.code);
     let transitioned = false;
     if (next) {
-      transitioned = await applyDeliveryStatus(orderId, next, `cdek:${latest.code}`);
+      transitioned = await advanceDeliveryStatus(orderId, next, `cdek:${latest.code}`);
     }
 
     return {

@@ -62,7 +62,10 @@ const h = vi.hoisted(() => {
 
 vi.mock('@/lib/db/client', () => ({ sql: h.sqlFn }));
 
-import { applyDeliveryStatus } from '@/lib/cdek/services/delivery-status';
+import {
+  applyDeliveryStatus,
+  advanceDeliveryStatus,
+} from '@/lib/cdek/services/delivery-status';
 
 const { state } = h;
 
@@ -163,5 +166,62 @@ describe('cdek/delivery-status — applyDeliveryStatus (атомарность, 
     const insert = state.queries.find((q) => /^INSERT/i.test(q.text));
     expect(insert).toBeDefined();
     expect(insert!.text.toLowerCase()).toContain('order_status_history');
+  });
+});
+
+describe('cdek/delivery-status — advanceDeliveryStatus (докрутка до target, C4-2)', () => {
+  it('registered + target delivered → докручивает через in_transit: 2 UPDATE + 2 истории, true, одна транзакция', async () => {
+    // C4-2: СДЭК прислал сразу DELIVERED (потерян in_transit). Прежний одношаговый
+    // applyDeliveryStatus дропнул бы переход (canTransition registered→delivered=false)
+    // → у клиента навсегда «registered». advance проходит цепь по шагам.
+    state.selectStatus = 'registered';
+    state.updateCount = 1;
+    const ok = await advanceDeliveryStatus('ord-1', 'delivered', 'cdek:DELIVERED');
+    expect(ok).toBe(true);
+    expect(state.beginCalls).toBe(1); // всё в ОДНОЙ транзакции под FOR UPDATE
+    const updates = state.queries.filter((q) => /^UPDATE/i.test(q.text));
+    expect(updates).toHaveLength(2); // registered→in_transit, in_transit→delivered
+    const history = state.queries.filter(
+      (q) => /^INSERT/i.test(q.text) && /order_status_history/i.test(q.text),
+    );
+    expect(history).toHaveLength(2);
+    // Каждый guarded UPDATE несёт «AND delivery_status =» (анти-гонка на каждом шаге).
+    expect(updates.every((u) => u.text.toLowerCase().includes('and delivery_status ='))).toBe(true);
+  });
+
+  it('смежный одиночный шаг in_transit → delivered: 1 UPDATE + 1 история', async () => {
+    state.selectStatus = 'in_transit';
+    const ok = await advanceDeliveryStatus('ord-1', 'delivered', 'cdek:DELIVERED');
+    expect(ok).toBe(true);
+    expect(state.queries.filter((q) => /^UPDATE/i.test(q.text))).toHaveLength(1);
+  });
+
+  it('уже delivered (from === target) → no-op (false), без UPDATE/INSERT', async () => {
+    state.selectStatus = 'delivered';
+    const ok = await advanceDeliveryStatus('ord-1', 'delivered', 'x');
+    expect(ok).toBe(false);
+    expect(state.queries.some((q) => /^UPDATE/i.test(q.text))).toBe(false);
+    expect(state.queries.some((q) => /^INSERT/i.test(q.text))).toBe(false);
+  });
+
+  it('out-of-order назад: delivered, target in_transit → недостижимо вперёд → false, без эффектов', async () => {
+    state.selectStatus = 'delivered';
+    const ok = await advanceDeliveryStatus('ord-1', 'in_transit', 'x');
+    expect(ok).toBe(false);
+    expect(state.queries.some((q) => /^UPDATE/i.test(q.text))).toBe(false);
+  });
+
+  it('гонка: первый шаг затронул 0 строк → false, история НЕ пишется', async () => {
+    state.selectStatus = 'registered';
+    state.updateCount = 0;
+    const ok = await advanceDeliveryStatus('ord-1', 'delivered', 'x');
+    expect(ok).toBe(false);
+    expect(state.queries.some((q) => /^INSERT/i.test(q.text))).toBe(false);
+  });
+
+  it('заказ не найден (SELECT пуст) → false', async () => {
+    state.selectStatus = null;
+    const ok = await advanceDeliveryStatus('ord-x', 'delivered', 'x');
+    expect(ok).toBe(false);
   });
 });

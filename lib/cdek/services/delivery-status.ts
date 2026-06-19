@@ -25,7 +25,7 @@
 
 import { sql } from '@/lib/db/client';
 import type { TransactionSql } from 'postgres';
-import { canTransition } from '@/lib/orders/status';
+import { canTransition, deliveryForwardPath } from '@/lib/orders/status';
 import type { DeliveryStatus } from '@/lib/orders/types';
 
 /**
@@ -65,5 +65,67 @@ export async function applyDeliveryStatus(
         (${orderId}, 'delivery', ${from}, ${to}, NULL, ${comment})
     `;
     return true;
+  });
+}
+
+/**
+ * Докручивает delivery_status заказа ДО `target` ПО ШАГАМ канонической цепи (C4-2).
+ *
+ * В отличие от одношагового applyDeliveryStatus, проходит весь кратчайший forward-путь
+ * (deliveryForwardPath) от текущего статуса до `target`, применяя каждый промежуточный
+ * шаг отдельным guarded UPDATE + записью истории. Нужно на pull/push-путях СДЭК
+ * (tracking.refreshStatus + webhook), где источник истины сообщает АКТУАЛЬНЫЙ статус,
+ * а промежуточные события могли потеряться/прийти не по порядку (best-effort вебхуки,
+ * быстрая доставка). Без докрутки прыжок registered→delivered молча дропался бы
+ * (canTransition false) → клиент навсегда видел «registered» для доставленной посылки.
+ *
+ * Всё в ОДНОЙ транзакции под SELECT ... FOR UPDATE (как applyDeliveryStatus): блокировка
+ * строки на время докрутки сериализует конкурентные источники. Каждый шаг — guarded
+ * UPDATE (WHERE delivery_status = <предыдущий шаг>); 0 строк → останавливаемся (гонка).
+ *
+ * Возвращает true, если применён хотя бы один шаг; false — если цель недостижима вперёд
+ * / совпадает с текущим / заказ не найден. Идемпотентно (повторный вызов из target → no-op).
+ */
+export async function advanceDeliveryStatus(
+  orderId: string,
+  target: DeliveryStatus,
+  comment = '',
+): Promise<boolean> {
+  return await sql.begin<boolean>(async (tx: TransactionSql) => {
+    const rows = await tx<{ delivery_status: string }[]>`
+      SELECT delivery_status FROM orders WHERE id = ${orderId} FOR UPDATE
+    `;
+    const from = rows[0]?.delivery_status as DeliveryStatus | undefined;
+    if (!from) return false;
+    if (from === target) return false;
+
+    const path = deliveryForwardPath(from, target);
+    if (path.length === 0) return false; // цель недостижима вперёд → no-op
+
+    let current = from;
+    let applied = false;
+    for (const step of path) {
+      // GUARDED UPDATE: применяем шаг лишь если статус всё ещё равен предыдущему. 0 строк
+      // → конкурентный источник сменил статус → останавливаем докрутку (частичный прогресс
+      // сохраняется и валиден).
+      const updated = await tx`
+        UPDATE orders
+           SET delivery_status = ${step}, updated_at = now()
+         WHERE id = ${orderId} AND delivery_status = ${current}
+      `;
+      if (updated.count !== 1) return applied;
+
+      // Промежуточные (синтетические) шаги помечаем явно — честный аудит-трейл докрутки.
+      const stepComment = step === target ? comment : `${comment} (авто-докрутка)`;
+      await tx`
+        INSERT INTO order_status_history
+          (order_id, kind, from_status, to_status, actor_user_id, comment)
+        VALUES
+          (${orderId}, 'delivery', ${current}, ${step}, NULL, ${stepComment})
+      `;
+      current = step;
+      applied = true;
+    }
+    return applied;
   });
 }

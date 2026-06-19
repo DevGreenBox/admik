@@ -169,6 +169,43 @@ export function nextDeliveryStatuses(from: DeliveryStatus): readonly DeliverySta
 }
 
 /**
+ * Кратчайший forward-путь машины ДОСТАВКИ из `from` в `to` (C4-2): список статусов,
+ * которые надо применить ПО ШАГАМ (исключая `from`, включая `to`). `[]`, если цель
+ * недостижима вперёд или совпадает с `from`.
+ *
+ * Зачем: СДЭК (best-effort вебхуки / быстрая доставка) может прислать сразу
+ * DELIVERED, потеряв промежуточный IN_TRANSIT. Машина допускает только пошаговый
+ * forward (registered→in_transit→delivered), поэтому одношаговый
+ * applyDeliveryStatus(registered→delivered) молча дропнул бы переход (canTransition
+ * false) → у клиента навсегда «registered» для уже доставленной посылки. Этот путь
+ * докручивает цепь, записывая каждый промежуточный шаг (история сохраняется).
+ *
+ * Корректность: DELIVERY_STATUS_TRANSITIONS — ацикличный граф (все рёбра ведут к
+ * терминалам), поэтому BFS даёт кратчайший forward-путь, а каждое его ребро —
+ * валидный canTransition('delivery', …). Прямое ребро (registered→cancelled) даёт
+ * путь длины 1 без синтетических шагов.
+ */
+export function deliveryForwardPath(
+  from: DeliveryStatus,
+  to: DeliveryStatus,
+): DeliveryStatus[] {
+  if (from === to) return [];
+  const queue: DeliveryStatus[][] = [[from]];
+  const visited = new Set<DeliveryStatus>([from]);
+  while (queue.length > 0) {
+    const path = queue.shift()!;
+    const node = path[path.length - 1]!;
+    for (const next of DELIVERY_STATUS_TRANSITIONS[node] ?? []) {
+      if (next === to) return [...path.slice(1), next];
+      if (visited.has(next)) continue;
+      visited.add(next);
+      queue.push([...path, next]);
+    }
+  }
+  return []; // цель недостижима вперёд (например, попытка отката назад)
+}
+
+/**
  * Новый статус ОПЛАТЫ при отмене/возврате заказа (или null = не менять).
  *
  * Деньги возвращаем (payment → 'refunded') ТОЛЬКО если они реально получены

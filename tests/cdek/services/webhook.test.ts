@@ -32,9 +32,9 @@ vi.mock('@/lib/orders/repository', () => ({
   getOrderByNumber: (...a: unknown[]) => getOrderByNumberMock(...(a as [])),
 }));
 
-const applyDeliveryStatusMock = vi.fn(async () => true);
+const advanceDeliveryStatusMock = vi.fn(async () => true);
 vi.mock('@/lib/cdek/services/delivery-status', () => ({
-  applyDeliveryStatus: (...a: unknown[]) => applyDeliveryStatusMock(...(a as [])),
+  advanceDeliveryStatus: (...a: unknown[]) => advanceDeliveryStatusMock(...(a as [])),
 }));
 
 import {
@@ -147,14 +147,14 @@ describe('cdek/webhook — handleWebhookEvent идемпотентность', (
   beforeEach(() => {
     vi.clearAllMocks();
     getOrderByNumberMock.mockResolvedValue({ order: { id: 'ord-1' } });
-    applyDeliveryStatusMock.mockResolvedValue(true);
+    advanceDeliveryStatusMock.mockResolvedValue(true);
   });
 
   it('новое событие (inserted=true) → processed, статус применён', async () => {
     insertStatusLogMock.mockResolvedValue({ inserted: true, entry: { id: 'log-1' } });
     const r = await svc.handleWebhookEvent(payload);
     expect(r).toEqual({ processed: true, duplicate: false });
-    expect(applyDeliveryStatusMock).toHaveBeenCalledWith('ord-1', 'delivered', expect.any(String));
+    expect(advanceDeliveryStatusMock).toHaveBeenCalledWith('ord-1', 'delivered', expect.any(String));
     expect(markProcessedMock).toHaveBeenCalledWith('log-1');
   });
 
@@ -180,7 +180,7 @@ describe('cdek/webhook — handleWebhookEvent идемпотентность', (
     const r = await svc.handleWebhookEvent(payload);
     expect(r).toEqual({ processed: false, duplicate: true });
     // НЕ трогаем delivery_status и не помечаем processed повторно.
-    expect(applyDeliveryStatusMock).not.toHaveBeenCalled();
+    expect(advanceDeliveryStatusMock).not.toHaveBeenCalled();
     expect(markProcessedMock).not.toHaveBeenCalled();
   });
 
@@ -191,7 +191,7 @@ describe('cdek/webhook — handleWebhookEvent идемпотентность', (
     findStatusLogByKeyMock.mockResolvedValue({ id: 'log-y', processed: false });
     const r = await svc.handleWebhookEvent(payload);
     expect(r).toEqual({ processed: true, duplicate: false });
-    expect(applyDeliveryStatusMock).toHaveBeenCalledWith('ord-1', 'delivered', expect.any(String));
+    expect(advanceDeliveryStatusMock).toHaveBeenCalledWith('ord-1', 'delivered', expect.any(String));
     expect(markProcessedMock).toHaveBeenCalledWith('log-y');
   });
 
@@ -217,6 +217,6 @@ describe('cdek/webhook — handleWebhookEvent идемпотентность', (
     getShipmentByUuidMock.mockResolvedValue({ orderId: 'ord-9', cdekUuid: 'u-1' });
     const r = await svc.handleWebhookEvent(payload);
     expect(r.processed).toBe(true);
-    expect(applyDeliveryStatusMock).toHaveBeenCalledWith('ord-9', 'delivered', expect.any(String));
+    expect(advanceDeliveryStatusMock).toHaveBeenCalledWith('ord-9', 'delivered', expect.any(String));
   });
 });
