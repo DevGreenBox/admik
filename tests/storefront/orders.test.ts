@@ -349,7 +349,8 @@ describe('order-dto — toPublicPromotionDto (без утечки приватн
       targetBrandSlugs: ['gang'],
     });
     expect(dto).toEqual({
-      publicLabel: 'BOGO32',
+      // m6: безопасная метка из bogo-полей, НЕ секретный код 'BOGO32'.
+      publicLabel: '3 по цене 2',
       kind: 'bogo',
       applyScope: 'category',
       bogoBuyQty: 3,
@@ -361,6 +362,7 @@ describe('order-dto — toPublicPromotionDto (без утечки приватн
     });
 
     const json = JSON.stringify(dto);
+    expect(json).not.toContain('BOGO32'); // m6: секретный код НЕ утекает
     expect(json).not.toContain('internal-secret-comment'); // comment
     expect(json).not.toContain(PROMO_ID); // id
     expect(json).not.toContain('37'); // usedCount
@@ -380,6 +382,22 @@ describe('order-dto — toPublicPromotionDto (без утечки приватн
     expect(dto.targetCategorySlugs).toEqual([]);
     expect(dto.targetBrandSlugs).toEqual([]);
     expect(dto.bogoBuyQty).toBeNull();
+    // m6: percent → безопасная метка «−10%», НЕ код промокода.
+    expect(dto.publicLabel).toBe('−10%');
+  });
+
+  it('m6: метка по типу акции, код НЕ раскрывается (percent/fixed/free_delivery)', () => {
+    const pct = toPublicPromotionDto({ promo: makePromoCode({ code: 'SECRET50', kind: 'percent', value: '50.00', bogoBuyQty: null, bogoPayQty: null }) });
+    expect(pct.publicLabel).toBe('−50%');
+    expect(JSON.stringify(pct)).not.toContain('SECRET50');
+
+    const fixed = toPublicPromotionDto({ promo: makePromoCode({ code: 'MINUS500', kind: 'fixed', value: '500.00', bogoBuyQty: null, bogoPayQty: null }) });
+    expect(fixed.publicLabel).toBe('−500 ₽');
+    expect(JSON.stringify(fixed)).not.toContain('MINUS500');
+
+    const free = toPublicPromotionDto({ promo: makePromoCode({ code: 'FREESHIP', kind: 'free_delivery', value: '0', bogoBuyQty: null, bogoPayQty: null }) });
+    expect(free.publicLabel).toBe('Бесплатная доставка');
+    expect(JSON.stringify(free)).not.toContain('FREESHIP');
   });
 });
 

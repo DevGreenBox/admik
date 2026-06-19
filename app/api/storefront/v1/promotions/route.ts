@@ -3,9 +3,10 @@
  * «3 по 2» / «−10% на бренд X» (docs/11 §5.2.4, ADR-014). Read-only. Конвейер:
  * authorizeStorefront → модуль `orders` (иначе 404) → rate-limit → CORS.
  *
- * Отдаёт ТОЛЬКО публично-безопасные поля (toPublicPromotionDto): publicLabel, kind,
- * applyScope, bogoBuyQty/bogoPayQty, target*Slugs, activeFrom/activeTo. СКРЫВАЕТ
- * usageLimit/usedCount/perCustomerLimit/comment/id (анти-утечка, как dto.ts каталога).
+ * Отдаёт ТОЛЬКО публично-безопасные поля (toPublicPromotionDto): publicLabel
+ * (БЕЗОПАСНАЯ маркетинговая метка, НЕ секретный код — m6), kind, applyScope,
+ * bogoBuyQty/bogoPayQty, target*Slugs, activeFrom/activeTo. СКРЫВАЕТ сам код промокода
+ * и usageLimit/usedCount/perCustomerLimit/comment/id (анти-утечка, как dto.ts каталога).
  */
 
 import { runStorefront, jsonData, handlePreflight } from '@/lib/storefront/response';

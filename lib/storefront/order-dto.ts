@@ -239,7 +239,7 @@ export function toOrderCreatedDto(
  * только маркетинговые поля + резолвнутые slug категорий/брендов таргетов.
  */
 export interface PublicPromotionDto {
-  /** Человекочитаемая метка (промокод как публичный лейбл). */
+  /** Безопасная маркетинговая метка (НЕ секретный код промокода; m6). */
   publicLabel: string;
   kind: PromoKind;
   applyScope: PromoApplyScope;
@@ -253,6 +253,36 @@ export interface PublicPromotionDto {
   activeTo: string | null;
 }
 
+/** Число из NUMERIC-строки без хвостовых нулей ('10.00'→'10', '10.50'→'10.5'). */
+function trimNumStr(value: string): string {
+  const n = Number(value);
+  return Number.isFinite(n) ? String(n) : value;
+}
+
+/**
+ * БЕЗОПАСНАЯ публичная метка акции (m6). РАНЬШЕ publicLabel = promo.code — публичный
+ * GET /promotions раскрывал СЕКРЕТНУЮ строку промокода (любой активный код можно было
+ * вычитать и применить). Метка строится из маркетинговых, не-секретных полей
+ * (kind/value/bogo) — самого кода НЕ содержит. Те же поля уже отдаются в DTO (kind,
+ * bogoBuyQty/PayQty), так что новой утечки нет, а код больше не покидает сервер.
+ */
+export function publicPromoLabel(promo: PromoCode): string {
+  switch (promo.kind) {
+    case 'percent':
+      return `−${trimNumStr(promo.value)}%`;
+    case 'fixed':
+      return `−${trimNumStr(promo.value)} ₽`;
+    case 'free_delivery':
+      return 'Бесплатная доставка';
+    case 'bogo':
+      return promo.bogoBuyQty && promo.bogoPayQty
+        ? `${promo.bogoBuyQty} по цене ${promo.bogoPayQty}`
+        : 'Акция';
+    default:
+      return 'Акция';
+  }
+}
+
 /** Промокод + резолвнутые slug таргетов → публичный DTO акции (без приватных полей). */
 export function toPublicPromotionDto(input: {
   promo: PromoCode;
@@ -261,7 +291,7 @@ export function toPublicPromotionDto(input: {
 }): PublicPromotionDto {
   const { promo } = input;
   return {
-    publicLabel: promo.code,
+    publicLabel: publicPromoLabel(promo),
     kind: promo.kind,
     applyScope: promo.applyScope,
     bogoBuyQty: promo.bogoBuyQty,
