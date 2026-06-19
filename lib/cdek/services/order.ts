@@ -28,6 +28,7 @@ import {
   bumpShipmentRetry,
 } from '../repository';
 import { getOrderById, type OrderWithItems } from '@/lib/orders/repository';
+import { tariffForMode } from '../config';
 import { canTransitionDelivery } from '@/lib/orders/status';
 import type { Order, OrderItem } from '@/lib/orders/types';
 import type {
@@ -149,7 +150,10 @@ export interface BuildPayloadOptions {
   defaultDimensions: { weightG: number; lengthCm: number; widthCm: number; heightCm: number };
   fromLocationCode: number;
   shipmentPoint: string | null;
+  /** Тариф ПВЗ/постамата (склад-склад, 136). */
   defaultTariffCode: number;
+  /** Тариф курьера «до двери» (склад-дверь, 137) — выбирается для mode==='door'. */
+  doorTariffCode: number;
   sender: {
     name: string | null;
     contactName: string | null;
@@ -180,10 +184,15 @@ export function buildPayload(
     heightCm: opts.defaultDimensions.heightCm,
   });
 
+  // Тариф по режиму (M4): курьер (door) → doorTariffCode (склад-дверь), иначе
+  // ПВЗ/постамат → defaultTariffCode (склад-склад). Раньше всегда defaultTariffCode
+  // → курьер уходил с ПВЗ-тарифом.
+  const tariffCode = mode === 'door' ? opts.doorTariffCode : opts.defaultTariffCode;
+
   const payload: CdekOrderPayload = {
     type: 1,
     number: order.number,
-    tariff_code: opts.defaultTariffCode,
+    tariff_code: tariffCode,
     recipient: {
       name: order.customerName,
       phones: [{ number: normalizePhone(order.customerPhone) }],
@@ -434,6 +443,7 @@ export class OrderService {
           fromLocationCode: cfg.fromLocationCode,
           shipmentPoint: cfg.shipmentPoint,
           defaultTariffCode: cfg.defaultTariffCode,
+          doorTariffCode: cfg.doorTariffCode,
           sender: cfg.sender,
         });
         const created = await this.create(payload);
@@ -445,7 +455,7 @@ export class OrderService {
       const shipmentFields = {
         cdekUuid,
         cdekNumber,
-        tariffCode: order.deliveryType === 'pickup' ? null : cfg.defaultTariffCode,
+        tariffCode: order.deliveryType === 'pickup' ? null : tariffForMode(cfg, mode),
         pvzCode: order.deliveryPvzCode,
         deliveryMode: mode,
         weightG: pkg.weight,

@@ -145,6 +145,7 @@ import {
   setProductAttributes,
   attachMedia,
   deleteMedia,
+  reorderMedia,
   adjustInventory,
   setInventory,
 } from '@/lib/catalog/actions';
@@ -508,5 +509,43 @@ describe('БАГ #14 — inventory учитывает reserved', () => {
     if (res.ok) throw new Error('ожидался отказ');
     expect(res.error).toBe('validation');
     expect(res.message).toContain('зарезервированного');
+  });
+});
+
+// =============================================================================
+// m1 (цикл 2) — reorderMedia атомарен: перестановка sort + смена главного фото
+// должны идти в ОДНОЙ транзакции (sql.begin). Иначе сбой между демоутом прежнего
+// главного и промоутом нового оставил бы 0 главных (или частично переставленный
+// порядок) — сиблинг бага #2 (deleteMedia уже в транзакции).
+// =============================================================================
+
+describe('m1 — reorderMedia атомарен (демоут+промоут главного в транзакции)', () => {
+  const MEDIA_A = '77777777-7777-4777-8777-777777777777';
+  const MEDIA_B = '88888888-8888-4888-8888-888888888888';
+
+  it('m1: смена главного → демоут+промоут внутри sql.begin (beginCalls=1), демоут ДО промоута', async () => {
+    const res = await reorderMedia({
+      productId: UUID,
+      order: [MEDIA_A, MEDIA_B],
+      primaryId: MEDIA_B,
+    });
+    expect(res.ok, JSON.stringify(res)).toBe(true);
+    // Вся операция — в одной транзакции.
+    expect(H.state.beginCalls).toBe(1);
+    // Демоут прежнего главного и промоут нового присутствуют...
+    expect(findCall('SET is_primary = false')).toBeDefined();
+    expect(findCall('SET is_primary = true')).toBeDefined();
+    // ...и демоут идёт ДО промоута.
+    const demoteIdx = H.state.sqlCalls.findIndex((c) => c.text.includes('SET is_primary = false'));
+    const promoteIdx = H.state.sqlCalls.findIndex((c) => c.text.includes('SET is_primary = true'));
+    expect(demoteIdx).toBeGreaterThanOrEqual(0);
+    expect(promoteIdx).toBeGreaterThan(demoteIdx);
+  });
+
+  it('m1: без primaryId → флаги is_primary не трогаются, но операция всё равно в транзакции', async () => {
+    const res = await reorderMedia({ productId: UUID, order: [MEDIA_A, MEDIA_B] });
+    expect(res.ok).toBe(true);
+    expect(H.state.beginCalls).toBe(1);
+    expect(findCall('SET is_primary')).toBeUndefined();
   });
 });

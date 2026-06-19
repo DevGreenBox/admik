@@ -4,6 +4,7 @@ import {
   getCdekConfig,
   parseCsvInts,
   parseCsvStrings,
+  tariffForMode,
   CDEK_FALLBACK_DIMENSIONS,
 } from '@/lib/cdek/config';
 
@@ -45,6 +46,7 @@ describe('cdek/config — getCdekConfig (чтение env)', () => {
     expect(cfg.testMode).toBe(false);
     expect(cfg.fromLocationCode).toBe(44);
     expect(cfg.defaultTariffCode).toBe(136);
+    expect(cfg.doorTariffCode).toBe(137); // M4: курьер ≠ ПВЗ-тариф
     expect(cfg.allowedTariffs).toEqual([]);
     expect(cfg.createEnabled).toBe(true);
     expect(cfg.webhookAllowedIps).toEqual([]);
@@ -116,6 +118,20 @@ describe('cdek/config — getCdekConfig (чтение env)', () => {
   it('белый список тарифов из csv', () => {
     const cfg = getCdekConfig({ NODE_ENV: 'test', CDEK_ALLOWED_TARIFFS: '136, 137 ,233' });
     expect(cfg.allowedTariffs).toEqual([136, 137, 233]);
+  });
+
+  it('M4: doorTariffCode из CDEK_DOOR_TARIFF (override)', () => {
+    const cfg = getCdekConfig({ NODE_ENV: 'test', CDEK_DOOR_TARIFF: '139', CDEK_DEFAULT_TARIFF: '136' });
+    expect(cfg.defaultTariffCode).toBe(136);
+    expect(cfg.doorTariffCode).toBe(139);
+  });
+
+  it('M4: tariffForMode — door→doorTariffCode, pvz/postamat/undefined→defaultTariffCode', () => {
+    const cfg = getCdekConfig({ NODE_ENV: 'test' });
+    expect(tariffForMode(cfg, 'door')).toBe(137);
+    expect(tariffForMode(cfg, 'pvz')).toBe(136);
+    expect(tariffForMode(cfg, 'postamat')).toBe(136);
+    expect(tariffForMode(cfg, undefined)).toBe(136);
   });
 
   it('IP-whitelist webhook парсится из csv', () => {

@@ -28,26 +28,34 @@ import {
 } from '@/lib/storefront/response';
 import { STOREFRONT_WRITE_METHODS } from '@/lib/storefront/cors';
 import { getCdekManager } from '@/lib/cdek/manager';
-import { getCdekConfig } from '@/lib/cdek/config';
+import { getCdekConfig, tariffForMode } from '@/lib/cdek/config';
+import type { CdekDeliveryMode } from '@/lib/cdek/types';
 import { Calculator, type CartLineDims } from '@/lib/cdek/services/calculator';
 import { resolveCartLine } from '@/lib/orders/repository';
 import { MAX_CART_ITEMS } from '@/lib/orders/schemas';
 
 /**
- * Нормализует клиентский tariffCode против белого списка (config.allowedTariffs):
- *   • allowedTariffs пуст → разрешены любые коды (обратная совместимость);
- *   • входной код отсутствует → defaultTariffCode (как раньше);
- *   • входной код вне whitelist → НЕ доверяем клиенту, подменяем на
- *     defaultTariffCode (defensive: расчёт не падает, но тарифом управляет сервер).
+ * Нормализует клиентский tariffCode против белого списка (config.allowedTariffs)
+ * с учётом РЕЖИМА доставки (M4):
+ *   • входной код отсутствует → тариф ПО РЕЖИМУ (door→doorTariffCode 137,
+ *     pvz/postamat→defaultTariffCode 136) — раньше всегда defaultTariffCode, из-за
+ *     чего курьерский расчёт шёл по ПВЗ-тарифу;
+ *   • allowedTariffs пуст → доверяем переданному коду (обратная совместимость);
+ *   • входной код вне whitelist → НЕ доверяем клиенту, подменяем на mode-default
+ *     (defensive: расчёт не падает, тарифом управляет сервер).
  * Дублирует политику create-flow: витрина не должна считать по произвольному
- * тарифу (ADR-010 anti-tamper, finding #4).
+ * тарифу (ADR-010 anti-tamper, finding #4 + M4).
  */
-function resolveAllowedTariff(input: number | undefined): number | undefined {
+function resolveAllowedTariff(
+  input: number | undefined,
+  mode: CdekDeliveryMode | undefined,
+): number | undefined {
   const cfg = getCdekConfig();
+  const modeDefault = tariffForMode(cfg, mode);
+  if (input === undefined) return modeDefault;
   if (cfg.allowedTariffs.length === 0) return input; // whitelist выключен
-  if (input === undefined) return cfg.defaultTariffCode;
   if (cfg.allowedTariffs.includes(input)) return input;
-  return cfg.defaultTariffCode;
+  return modeDefault;
 }
 
 export const dynamic = 'force-dynamic';
@@ -107,7 +115,7 @@ export async function POST(req: Request): Promise<Response> {
         );
       }
 
-      const { to, items, tariffCode } = parsed.data;
+      const { to, items, tariffCode, deliveryMode } = parsed.data;
       // Вес/габариты позиций — СЕРВЕРНЫЕ (anti-tamper): резолвим из каталога по
       // variantId/productId (приоритет вариант→товар→дефолт магазина). Позиции, не
       // найденные/неактивные/без идентификатора → qty без габаритов (дефолт
@@ -136,8 +144,9 @@ export async function POST(req: Request): Promise<Response> {
       );
 
       // tariffCode из тела — НЕ доверяем напрямую: нормализуем по whitelist
-      // (config.allowedTariffs), иначе fallback на defaultTariffCode (finding #4).
-      const effectiveTariff = resolveAllowedTariff(tariffCode);
+      // (config.allowedTariffs) с учётом режима доставки — иначе fallback на
+      // mode-default (door→137, pvz/postamat→136; finding #4 + M4).
+      const effectiveTariff = resolveAllowedTariff(tariffCode, deliveryMode);
 
       const calc = new Calculator(getCdekManager());
       // from_location — серверный (внутри Calculator), здесь только назначение.

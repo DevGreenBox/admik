@@ -124,6 +124,25 @@ describe('ProductUpdateSchema', () => {
     expect(ProductUpdateSchema.safeParse({ name: 'X' }).success).toBe(false);
     expect(ProductUpdateSchema.safeParse({ id: UUID, name: 'X' }).success).toBe(true);
   });
+
+  it('primaryCategoryId должна входить в categoryIds (на update тоже, m2)', () => {
+    // Невалидная пара: основная категория не в списке → отказ (как на create).
+    expect(
+      ProductUpdateSchema.safeParse({ id: UUID, categoryIds: [UUID], primaryCategoryId: UUID2 })
+        .success,
+    ).toBe(false);
+    // Валидная пара: основная входит в список.
+    expect(
+      ProductUpdateSchema.safeParse({ id: UUID, categoryIds: [UUID, UUID2], primaryCategoryId: UUID2 })
+        .success,
+    ).toBe(true);
+    // Частичный апдейт без categoryIds (категории не трогаем) — не блокируется.
+    expect(
+      ProductUpdateSchema.safeParse({ id: UUID, primaryCategoryId: UUID2 }).success,
+    ).toBe(true);
+    // Апдейт без категорий вовсе — валиден.
+    expect(ProductUpdateSchema.safeParse({ id: UUID, name: 'X' }).success).toBe(true);
+  });
 });
 
 describe('ProductCreate/Update — новые поля (docs/06 §3.1–§3.3)', () => {

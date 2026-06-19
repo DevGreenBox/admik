@@ -11,7 +11,7 @@
  */
 
 import { getEnv, type Env } from '@/lib/config/env';
-import type { PackageDims } from './types';
+import type { PackageDims, CdekDeliveryMode } from './types';
 
 /** Конфигурация отправителя (CDEK_SENDER_*). */
 export interface CdekSenderConfig {
@@ -32,7 +32,10 @@ export interface CdekConfig {
   fromLocationCode: number;
   shipmentPoint: string | null;
 
+  /** Тариф ПВЗ/постамата (склад-склад, дефолт 136). */
   defaultTariffCode: number;
+  /** Тариф курьерской доставки «до двери» (склад-дверь, дефолт 137). */
+  doorTariffCode: number;
   allowedTariffs: number[];
 
   sender: CdekSenderConfig;
@@ -129,6 +132,7 @@ export function getCdekConfig(source?: Record<string, string | undefined>): Cdek
     shipmentPoint: nonEmpty(env.CDEK_SHIPMENT_POINT),
 
     defaultTariffCode: env.CDEK_DEFAULT_TARIFF,
+    doorTariffCode: env.CDEK_DOOR_TARIFF,
     allowedTariffs: parseCsvInts(env.CDEK_ALLOWED_TARIFFS),
 
     sender: buildSender(env),
@@ -142,4 +146,19 @@ export function getCdekConfig(source?: Record<string, string | undefined>): Cdek
     cronSecret: nonEmpty(env.CDEK_CRON_SECRET),
     createEnabled: env.CDEK_CREATE_ENABLED,
   };
+}
+
+/**
+ * Тариф СДЭК по режиму доставки (M4): курьер «до двери» (door) → doorTariffCode
+ * (склад-дверь, 137); ПВЗ/постамат → defaultTariffCode (склад-склад, 136).
+ *
+ * Раньше тариф был mode-agnostic (всегда defaultTariffCode) → курьерская доставка
+ * тарифицировалась ПВЗ-тарифом. Чистая и конфигурируемая (коды — из env, не зашиты
+ * под конкретный магазин): мультитенантно переносится на любой ИМ.
+ */
+export function tariffForMode(
+  cfg: CdekConfig,
+  mode: CdekDeliveryMode | undefined,
+): number {
+  return mode === 'door' ? cfg.doorTariffCode : cfg.defaultTariffCode;
 }

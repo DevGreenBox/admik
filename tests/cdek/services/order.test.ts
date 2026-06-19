@@ -135,6 +135,7 @@ const buildOpts: BuildPayloadOptions = {
   fromLocationCode: mockCfg.fromLocationCode,
   shipmentPoint: null,
   defaultTariffCode: mockCfg.defaultTariffCode,
+  doorTariffCode: mockCfg.doorTariffCode,
   sender: { name: 'ООО Тест', contactName: 'Менеджер', phone: '+79000000000', email: 's@e.ru', inn: '7700000000' },
 };
 
@@ -212,6 +213,23 @@ describe('cdek/order — buildPayload (чистая)', () => {
     expect(p.delivery_point).toBeUndefined();
     expect(p.to_location).toBeDefined();
     expect(p.to_location?.address).toBe('ул. Ленина, 1');
+  });
+
+  it('M4: ПВЗ-режим → tariff_code = defaultTariffCode (склад-склад 136)', () => {
+    const p = buildPayload(makeOrder({ deliveryType: 'pvz', deliveryPvzCode: 'MSK1' }), [makeItem()], buildOpts);
+    expect(p.tariff_code).toBe(buildOpts.defaultTariffCode);
+    expect(p.tariff_code).toBe(136);
+  });
+
+  it('M4: курьер (door) → tariff_code = doorTariffCode (склад-дверь 137), НЕ ПВЗ-тариф', () => {
+    const p = buildPayload(
+      makeOrder({ deliveryType: 'courier', deliveryAddress: 'ул. Ленина, 1', deliveryPvzCode: null }),
+      [makeItem()],
+      buildOpts,
+    );
+    expect(p.tariff_code).toBe(buildOpts.doorTariffCode);
+    expect(p.tariff_code).toBe(137);
+    expect(p.tariff_code).not.toBe(buildOpts.defaultTariffCode);
   });
 
   it('from_location из конфига (нет shipment_point)', () => {

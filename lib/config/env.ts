@@ -109,8 +109,11 @@ const envSchema = z.object({
   CDEK_FROM_LOCATION_CODE: z.coerce.number().int().min(0).default(44),
   // Код склада отправителя (если задан — используется вместо from_location).
   CDEK_SHIPMENT_POINT: z.string().optional(),
-  // Тариф по умолчанию (дефолт 136).
+  // Тариф по умолчанию для ПВЗ/постамата (склад-склад, дефолт 136).
   CDEK_DEFAULT_TARIFF: z.coerce.number().int().min(0).default(136),
+  // Тариф курьерской доставки «до двери» (склад-дверь, дефолт 137). Раньше
+  // курьер тарифицировался ПВЗ-тарифом 136 (склад-склад) — недотариф/ошибка СДЭК.
+  CDEK_DOOR_TARIFF: z.coerce.number().int().min(0).default(137),
   // Белый список тарифов (csv); пусто = разрешены все. Парсится в config.ts.
   CDEK_ALLOWED_TARIFFS: z.string().optional(),
   // Отправитель (для buildPayload, пакет D).

@@ -195,7 +195,25 @@ export const ProductUpdateSchema = z.object({
   seoDescription,
   ...seoEntityFields,
   ...dimensionFields,
-});
+})
+  // Зеркало refine из ProductCreateSchema: основная категория обязана входить в
+  // список категорий товара (иначе syncProductCategories не пометит ни одну строку
+  // is_primary=true → товар «имеет основную категорию, к которой не принадлежит»).
+  // Правило срабатывает ТОЛЬКО когда заданы И primaryCategoryId, И categoryIds —
+  // частичный апдейт, не трогающий категории (categoryIds === undefined), не ломаем.
+  .superRefine((v, ctx) => {
+    if (
+      v.primaryCategoryId &&
+      v.categoryIds !== undefined &&
+      !v.categoryIds.includes(v.primaryCategoryId)
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['primaryCategoryId'],
+        message: 'primaryCategoryId должна входить в categoryIds',
+      });
+    }
+  });
 export type ProductUpdateInput = z.infer<typeof ProductUpdateSchema>;
 
 export const ProductIdSchema = z.object({ id: uuidSchema });

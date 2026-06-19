@@ -1096,24 +1096,31 @@ export const reorderMedia = defineAction({
   input: MediaReorderSchema,
   handler: async (data, _ctx) => {
     await assertCatalogEnabled();
-    // Назначаем sort по индексу в массиве.
-    for (let i = 0; i < data.order.length; i++) {
-      await sql`
-        UPDATE product_media SET sort = ${i}
-        WHERE id = ${data.order[i]!} AND product_id = ${data.productId}
-      `;
-    }
-    if (data.primaryId) {
-      // Снимаем прежнее главное, ставим новое (уникальный частичный индекс защищает).
-      await sql`
-        UPDATE product_media SET is_primary = false
-        WHERE product_id = ${data.productId} AND is_primary
-      `;
-      await sql`
-        UPDATE product_media SET is_primary = true
-        WHERE id = ${data.primaryId} AND product_id = ${data.productId}
-      `;
-    }
+    // Перестановка sort + смена главного фото — в ОДНОЙ транзакции (как deleteMedia,
+    // баг #2). Иначе сбой между демоутом прежнего главного и промоутом нового мог бы
+    // оставить 0 главных, либо частично применённый порядок sort. Уникальный
+    // частичный индекс product_media_primary_uniq защищает от 2 главных, но не от
+    // интервала с 0 главных при разрыве между двумя отдельными UPDATE.
+    await sql.begin(async (tx: TransactionSql) => {
+      // Назначаем sort по индексу в массиве.
+      for (let i = 0; i < data.order.length; i++) {
+        await tx`
+          UPDATE product_media SET sort = ${i}
+          WHERE id = ${data.order[i]!} AND product_id = ${data.productId}
+        `;
+      }
+      if (data.primaryId) {
+        // Снимаем прежнее главное, ставим новое (демоут ДО промоута).
+        await tx`
+          UPDATE product_media SET is_primary = false
+          WHERE product_id = ${data.productId} AND is_primary
+        `;
+        await tx`
+          UPDATE product_media SET is_primary = true
+          WHERE id = ${data.primaryId} AND product_id = ${data.productId}
+        `;
+      }
+    });
     return {
       result: { productId: data.productId },
       revalidate: [productPath(data.productId)],
