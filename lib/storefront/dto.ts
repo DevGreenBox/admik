@@ -394,6 +394,15 @@ export function toProductDetailDto(
   product: ProductDetail,
   opts: { effectiveIsNew: boolean; categorySlugs: string[]; seoCtx: SeoCtx },
 ): ProductDetailDto {
+  // При наличии активных вариантов наличие/доступное количество ТОВАРА считаем
+  // ТОЛЬКО по вариантам: осиротевший product-level остаток (variant_id IS NULL)
+  // не заказуем (заказ идёт по variantId) и завышал бы наличие — тот же инвариант,
+  // что в listProducts (волна 14). Без вариантов остаток на уровне товара —
+  // единственный и заказуется по productId.
+  const hasActiveVariants = product.variants.some((v) => v.isActive);
+  const orderableInventory = hasActiveVariants
+    ? product.inventory.filter((i) => (i.variantId ?? null) !== null)
+    : product.inventory;
   return {
     id: product.id,
     slug: product.slug,
@@ -414,9 +423,9 @@ export function toProductDetailDto(
       .filter((v) => v.isActive)
       .map((v) => toVariantDto(v, product)),
     media: product.media.map(toMediaDto),
-    inStock: computeInStock(product.inventory),
+    inStock: computeInStock(orderableInventory),
     // Уровень товара (для товара без вариантов — заказ по productId).
-    availableQty: computeAvailableQty(product.inventory),
+    availableQty: computeAvailableQty(orderableInventory),
     meta: entityMeta(product, opts.seoCtx),
   };
 }

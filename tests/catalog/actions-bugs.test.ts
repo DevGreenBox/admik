@@ -144,6 +144,7 @@ import {
   duplicateProduct,
   setProductAttributes,
   attachMedia,
+  deleteMedia,
   adjustInventory,
   setInventory,
 } from '@/lib/catalog/actions';
@@ -367,6 +368,33 @@ describe('БАГ #11 — setProductAttributes заменяет и привязк
 // storage. ФИКС: UPDATE ... SET is_primary=false WHERE product_id=$1 AND is_primary
 // перед INSERT (как reorderMedia).
 // =============================================================================
+
+describe('БАГ #2 (волна 15) — deleteMedia повышает новое главное при удалении главного', () => {
+  const MEDIA_ID = '66666666-6666-4666-8666-666666666666';
+
+  it('#2: удаление is_primary=true → UPDATE ... SET is_primary=true (повышение оставшегося)', async () => {
+    H.state.sqlResponses.push({
+      match: 'DELETE FROM product_media',
+      rows: [{ id: MEDIA_ID, product_id: UUID, storage_key: 'k.webp', is_primary: true }],
+    });
+    const res = await deleteMedia({ id: MEDIA_ID });
+    expect(res.ok).toBe(true);
+    const promote = findCall('SET is_primary = true');
+    expect(promote, 'удалив главное — повышаем следующее, иначе товар теряет обложку').toBeDefined();
+    expect(promote!.text).toContain('SELECT id FROM product_media');
+    expect(H.state.beginCalls).toBe(1); // атомарно (DELETE+промоут в одной транзакции)
+  });
+
+  it('#2: удаление НЕ главного (is_primary=false) → повышения нет', async () => {
+    H.state.sqlResponses.push({
+      match: 'DELETE FROM product_media',
+      rows: [{ id: MEDIA_ID, product_id: UUID, storage_key: 'k.webp', is_primary: false }],
+    });
+    const res = await deleteMedia({ id: MEDIA_ID });
+    expect(res.ok).toBe(true);
+    expect(findCall('SET is_primary = true')).toBeUndefined();
+  });
+});
 
 describe('БАГ #13 — attachMedia снимает прежнее главное при isPrimary', () => {
   const baseInput = () => ({

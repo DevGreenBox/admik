@@ -1049,18 +1049,39 @@ export const deleteMedia = defineAction({
   input: MediaDeleteSchema,
   handler: async (data, _ctx) => {
     await assertCatalogEnabled();
-    const rows = await sql<{ id: string; product_id: string; storage_key: string }[]>`
-      DELETE FROM product_media WHERE id = ${data.id}
-      RETURNING id, product_id, storage_key
-    `;
-    if (!rows[0]) {
-      throw new CatalogError('not_found', 'Медиа не найдено.');
-    }
-    // Физическое удаление объекта в хранилище (§4.6).
-    await getStorage().delete(rows[0].storage_key).catch(() => {});
+    const row = await sql.begin(async (tx: TransactionSql) => {
+      const rows = await tx<
+        { id: string; product_id: string; storage_key: string; is_primary: boolean }[]
+      >`
+        DELETE FROM product_media WHERE id = ${data.id}
+        RETURNING id, product_id, storage_key, is_primary
+      `;
+      if (!rows[0]) {
+        throw new CatalogError('not_found', 'Медиа не найдено.');
+      }
+      // Удалили ГЛАВНОЕ фото → повышаем следующее (по sort, затем дате) в главное,
+      // иначе у товара с оставшимися фото пропадёт обложка в каталоге/витрине
+      // (там берут ТОЛЬКО is_primary → primary_media_url → NULL). Симметрия к
+      // авто-главному в attachMedia. Частичный UNIQUE product_media_primary_uniq
+      // соблюдён: прежнее главное уже удалено в этой же транзакции, ставим ровно одно.
+      if (rows[0].is_primary) {
+        await tx`
+          UPDATE product_media SET is_primary = true
+          WHERE id = (
+            SELECT id FROM product_media
+            WHERE product_id = ${rows[0].product_id}
+            ORDER BY sort ASC, created_at ASC
+            LIMIT 1
+          )
+        `;
+      }
+      return rows[0];
+    });
+    // Физическое удаление объекта в хранилище (§4.6) — вне транзакции БД.
+    await getStorage().delete(row.storage_key).catch(() => {});
     return {
       result: { id: data.id },
-      revalidate: [productPath(rows[0].product_id)],
+      revalidate: [productPath(row.product_id)],
       audit: {
         action: 'catalog.media.delete',
         entityType: 'product_media',

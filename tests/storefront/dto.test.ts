@@ -334,6 +334,28 @@ describe('storefront/dto — карточка товара', () => {
     expect(dto.inStock).toBe(true);
   });
 
+  // Регресс #13 (волна 15): осиротевший product-level остаток (variant_id=null) НЕ
+  // должен завышать наличие ТОВАРА при наличии вариантов — заказ идёт по варианту,
+  // product-level остаток не заказуем (тот же инвариант, что в listProducts, волна 14).
+  it('варианты распроданы + осиротевший product-level остаток → inStock=false, availableQty=0', () => {
+    const withOrphan: ProductDetail = {
+      ...product,
+      variants: [variant], // активный вариант v1
+      inventory: [
+        { id: 'iv', productId: 'p1', variantId: 'v1', warehouseCode: 'W', quantity: 1, reserved: 1, updatedAt: D }, // вариант распродан
+        { id: 'io', productId: 'p1', variantId: null, warehouseCode: 'W', quantity: 99, reserved: 0, updatedAt: D }, // осиротевший product-level
+      ],
+    };
+    const dto = toProductDetailDto(withOrphan, {
+      effectiveIsNew: false,
+      categorySlugs: [],
+      seoCtx: TEST_SEO_CTX,
+    });
+    expect(dto.inStock).toBe(false); // без фикса: true (осиротевший остаток)
+    expect(dto.availableQty).toBe(0); // без фикса: 99
+    expect(dto.variants[0]!.inStock).toBe(false);
+  });
+
   it('toVariantDto наследует compareAtPrice товара, считает скидку', () => {
     const dto = toVariantDto(variant, product);
     // variant.compareAtPrice=null → наследует product 1500.
