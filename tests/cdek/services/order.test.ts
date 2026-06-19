@@ -23,6 +23,13 @@ const updateShipmentMock = vi.fn(async (_id: string, patch: Record<string, unkno
 const getShipmentMock = vi.fn(async () => repoState.shipment);
 const bumpRetryMock = vi.fn(async () => repoState.shipment);
 
+// Состояние tx-мока для applyDeliveryStatus (C6-1): SELECT delivery_status FOR UPDATE
+// отдаёт deliveryStatus (фактический под локом), guarded UPDATE — updateCount строк.
+const txState: { deliveryStatus: string | null; updateCount: number } = {
+  deliveryStatus: null,
+  updateCount: 1,
+};
+
 vi.mock('@/lib/cdek/repository', () => ({
   getShipmentByOrderId: (...a: unknown[]) => getShipmentMock(...(a as [])),
   getShipmentByCdekUuid: vi.fn(async () => null),
@@ -45,7 +52,18 @@ vi.mock('@/lib/orders/repository', () => ({
 vi.mock('@/lib/db/client', () => {
   const tx = vi.fn(async (strings: TemplateStringsArray) => {
     const text = Array.isArray(strings) ? strings.join('') : String(strings);
-    return text.includes('pg_try_advisory_xact_lock') ? [{ locked: true }] : [];
+    if (text.includes('pg_try_advisory_xact_lock')) return [{ locked: true }];
+    // applyDeliveryStatus: SELECT delivery_status FOR UPDATE → фактический статус под локом.
+    if (/SELECT\s+delivery_status/i.test(text)) {
+      return txState.deliveryStatus === null ? [] : [{ delivery_status: txState.deliveryStatus }];
+    }
+    // applyDeliveryStatus: guarded UPDATE orders SET delivery_status → .count строк.
+    if (/UPDATE\s+orders/i.test(text) && /delivery_status/i.test(text)) {
+      const arr: unknown[] = [];
+      (arr as unknown as { count: number }).count = txState.updateCount;
+      return arr;
+    }
+    return [];
   });
   const fn = vi.fn(async () => []);
   return {
@@ -321,6 +339,8 @@ describe('cdek/order — createShipment (mock-создание, repository за�
 describe('cdek/order — cancelShipment (БАГ #12: нет рассинхрона отправление↔delivery_status)', () => {
   beforeEach(() => {
     repoState.shipment = null;
+    txState.deliveryStatus = null;
+    txState.updateCount = 1;
     vi.clearAllMocks();
   });
 
@@ -356,6 +376,7 @@ describe('cdek/order — cancelShipment (БАГ #12: нет рассинхрон
       order: makeOrder({ deliveryStatus: 'pending' }),
       items: [makeItem()],
     });
+    txState.deliveryStatus = 'pending'; // под локом статус тот же → переход применится
     const svc = new OrderService(new CdekManager({ config: mockCfg }));
     await expect(svc.cancelShipment('ord-1')).resolves.toBeUndefined();
     expect(updateShipmentMock).toHaveBeenCalledTimes(1);
@@ -370,9 +391,25 @@ describe('cdek/order — cancelShipment (БАГ #12: нет рассинхрон
       order: makeOrder({ deliveryStatus: 'registered' }),
       items: [makeItem()],
     });
+    txState.deliveryStatus = 'registered';
     const svc = new OrderService(new CdekManager({ config: mockCfg }));
     await expect(svc.cancelShipment('ord-1')).resolves.toBeUndefined();
     expect(updateShipmentMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('C6-1: гонка — precondition прошла (registered), но под FOR UPDATE статус уже in_transit → CdekError, отправление НЕ помечается CANCELLED', async () => {
+    // Параллельный webhook продвинул статус между ранней precondition и переходом.
+    repoState.shipment = { id: 'sh-1', orderId: 'ord-1', cdekUuid: 'mock-uuid-1' };
+    getShipmentMock.mockResolvedValue(repoState.shipment);
+    getOrderByIdMock.mockResolvedValue({
+      order: makeOrder({ deliveryStatus: 'registered' }), // ранняя precondition: отмена допустима
+      items: [makeItem()],
+    });
+    txState.deliveryStatus = 'in_transit'; // но под локом уже in_transit → переход не применится
+    const svc = new OrderService(new CdekManager({ config: mockCfg }));
+    await expect(svc.cancelShipment('ord-1')).rejects.toThrow();
+    // Ключевое (анти-рассинхрон C6-1): отправление НЕ помечено CANCELLED.
+    expect(updateShipmentMock).not.toHaveBeenCalled();
   });
 
   it('нет отправления (cdek_uuid пуст) → CdekError, отправление не трогаем', async () => {

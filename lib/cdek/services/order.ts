@@ -551,14 +551,27 @@ export class OrderService {
       await this.cancel(shipment.cdekUuid, opts.afterAcceptance);
     }
 
+    // C6-1 (TOCTOU, анти-рассинхрон): ранняя precondition выше читает delivery_status
+    // ДО эффектов, но между ней и переходом параллельный webhook мог продвинуть статус
+    // (registered→in_transit). applyDeliveryStatus применяет переход под SELECT … FOR
+    // UPDATE — это АВТОРИТЕТНАЯ проверка под локом. Помечаем отправление CANCELLED ТОЛЬКО
+    // если переход реально применился; иначе был бы рассинхрон «shipment=CANCELLED ↔
+    // delivery_status=in_transit». Не применился (статус успел уйти) → бросаем, отправление
+    // НЕ трогаем (оператор сверяет вручную; cancelled — терминал, после успеха гонок нет).
+    const applied = await applyDeliveryStatus(orderId, 'cancelled');
+    if (!applied) {
+      throw new CdekError(
+        'cdek_cancel_raced',
+        'Статус доставки изменился во время отмены (стал не-отменяемым) — отправление НЕ ' +
+          'помечено отменённым. Требуется ручная сверка.',
+      );
+    }
+
     await updateShipmentByOrderId(orderId, {
       statusCode: 'CANCELLED',
       statusName: 'Отменён',
       statusAt: new Date(),
     });
-
-    // delivery_status заказа → cancelled (переход уже проверен precondition выше).
-    await applyDeliveryStatus(orderId, 'cancelled');
   }
 }
 
