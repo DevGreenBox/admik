@@ -70,6 +70,21 @@ async function slugByName(name) {
   const items = Array.isArray(list.body?.data) ? list.body.data : [];
   return items.find((i) => i.name === name)?.slug ?? null;
 }
+// Удаляет категорию по точному имени через UI CategoryManager (deleteCategoryAction,
+// инвалидация+аудит). Имя в <span> — соседний sibling-кнопка «Удалить» в той же строке.
+// Возвращает true, если после удаления категория исчезла из дерева.
+async function deleteCategoryByName(page, name) {
+  await page.goto(`${ADMIN}/admin/catalog/categories`, { waitUntil: 'networkidle' });
+  await page.waitForTimeout(500);
+  const span = page.getByText(name, { exact: true }).first();
+  if (!(await span.count())) return true; // уже нет
+  const delBtn = span.locator('xpath=following-sibling::button[normalize-space(.)="Удалить"]').first();
+  if (!(await delBtn.count())) return false;
+  page.once('dialog', (d) => d.accept().catch(() => {}));
+  await delBtn.click();
+  await page.waitForTimeout(1800);
+  return (await page.getByText(name, { exact: true }).count()) === 0;
+}
 
 const browser = await chromium.launch();
 const admin = await browser.newPage();
@@ -190,6 +205,7 @@ try {
 
   // --- 3. ПОДКАТЕГОРИИ в навигации витрины --------------------------------
   let parentCatCreated = false;
+  let childCatCreated = false;
   try {
     await admin.goto(`${ADMIN}/admin/catalog/categories`, { waitUntil: 'networkidle' });
     await admin.waitForTimeout(600);
@@ -197,6 +213,10 @@ try {
     await admin.fill('#c-name', `${PREFIX}Родитель`);
     await admin.getByRole('button', { name: 'Создать категорию' }).click();
     await admin.waitForTimeout(1500);
+    // флаг ставим СРАЗУ после создания родителя — даже если ниже флаки-таймаут
+    // на создании дитя, cleanup обязан удалить уже созданного родителя (иначе
+    // тест-категория осиротеет на боевой витрине).
+    parentCatCreated = true;
     // ПЕРЕЗАГРУЖАЕМ страницу — иначе #c-parent ещё не содержит свежесозданного
     // родителя (опции рендерятся из серверного дерева; soft-update формы их не добавил).
     await admin.goto(`${ADMIN}/admin/catalog/categories`, { waitUntil: 'networkidle' });
@@ -210,7 +230,7 @@ try {
     await admin.selectOption('#c-parent', parentVal);
     await admin.getByRole('button', { name: 'Создать категорию' }).click();
     await admin.waitForTimeout(1500);
-    parentCatCreated = true;
+    childCatCreated = true;
     PASS('подкатегории setup', 'родитель+дитя созданы в админке');
 
     // витрина: проверим, что дочерняя категория в дереве API (её потребляет Header)
@@ -253,7 +273,17 @@ try {
     const ok = await deleteProductUI(admin, id);
     rec(ok ? 'PASS' : 'INFO', 'cleanup товар', id);
   }
-  if (parentCatCreated) INFO('cleanup категории', 'ZZ-W13-категории удалить вручную (родитель с детьми — RESTRICT)');
+  // Удаляем тест-категории через UI: СНАЧАЛА дитя, потом родитель (FK RESTRICT
+  // запрещает удалить родителя с детьми). Без этого ZZ-W13-категории остаются
+  // на боевой витрине в навигации (реальный дефект чистоты, найден в волне 15).
+  if (childCatCreated) {
+    const ok = await deleteCategoryByName(admin, `${PREFIX}Дитя`);
+    rec(ok ? 'PASS' : 'INFO', 'cleanup категория-дитя', ok ? `${PREFIX}Дитя удалена` : 'не удалось удалить дитя — проверить вручную');
+  }
+  if (parentCatCreated) {
+    const ok = await deleteCategoryByName(admin, `${PREFIX}Родитель`);
+    rec(ok ? 'PASS' : 'INFO', 'cleanup категория-родитель', ok ? `${PREFIX}Родитель удалена` : 'не удалось удалить родителя — проверить вручную');
+  }
 } catch (e) {
   FAIL('FATAL', (e.stack || e.message || '').slice(0, 300)); code = 3;
 } finally {
