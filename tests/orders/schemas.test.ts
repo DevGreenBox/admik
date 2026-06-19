@@ -223,6 +223,18 @@ describe('orders/schemas — промокоды CRUD', () => {
     ).toBe(false);
   });
 
+  it('endsAt из <input type=date> = ВКЛЮЧИТЕЛЬНЫЙ конец дня (промокод жив весь последний день)', () => {
+    const p = PromoCreateSchema.parse({ code: 'X', kind: 'fixed', value: '100', endsAt: '2026-06-30' });
+    // 2026-06-30 → конец дня UTC, а не полночь (иначе истекал бы в начале 30 июня).
+    expect((p.endsAt as Date).toISOString()).toBe('2026-06-30T23:59:59.999Z');
+    // startsAt остаётся началом дня (старт даты — корректно).
+    const p2 = PromoCreateSchema.parse({ code: 'Y', kind: 'fixed', value: '100', startsAt: '2026-06-01' });
+    expect((p2.startsAt as Date).toISOString()).toBe('2026-06-01T00:00:00.000Z');
+    // PromoUpdate — то же поведение.
+    const u = PromoUpdateSchema.parse({ id: UUID, endsAt: '2026-06-30' });
+    expect((u.endsAt as Date).toISOString()).toBe('2026-06-30T23:59:59.999Z');
+  });
+
   it('bogo pay_qty ≥ buy_qty отклоняется', () => {
     expect(
       PromoCreateSchema.safeParse({

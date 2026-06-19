@@ -223,6 +223,19 @@ export const promoTargetSchema = z
   });
 export type PromoTargetInput = z.infer<typeof promoTargetSchema>;
 
+/**
+ * Дата окончания промокода. Поле формы — <input type="date">, которое отдаёт
+ * чистую дату «YYYY-MM-DD». z.coerce.date() трактует её как ПОЛНОЧЬ UTC, из-за
+ * чего «действует по 30 июня» истекал в самом начале 30 июня (а в МСК — вечером
+ * 29-го). Приводим date-only к ВКЛЮЧИТЕЛЬНОМУ концу дня (как фильтр заказов в
+ * app/admin/(panel)/orders/page.tsx), чтобы код работал весь последний день.
+ * Полноценный ISO со временем (если придёт) — оставляем как есть.
+ */
+const inclusiveEndDate = z.preprocess(
+  (v) => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? `${v}T23:59:59.999Z` : v),
+  z.coerce.date(),
+);
+
 const promoBaseShape = {
   code: promoCodeSchema,
   kind: z.enum(PROMO_KINDS),
@@ -232,7 +245,7 @@ const promoBaseShape = {
   usageLimit: z.number().int().min(0).nullish(),
   perCustomerLimit: z.number().int().min(0).nullish(),
   startsAt: z.coerce.date().nullish(),
-  endsAt: z.coerce.date().nullish(),
+  endsAt: inclusiveEndDate.nullish(),
   isActive: z.boolean().optional().default(true),
   bogoBuyQty: z.number().int().min(1).nullish(),
   bogoPayQty: z.number().int().min(1).nullish(),
@@ -273,7 +286,7 @@ const promoUpdateShape = {
   usageLimit: z.number().int().min(0).nullish(),
   perCustomerLimit: z.number().int().min(0).nullish(),
   startsAt: z.coerce.date().nullish(),
-  endsAt: z.coerce.date().nullish(),
+  endsAt: inclusiveEndDate.nullish(),
   isActive: z.boolean().optional(),
   bogoBuyQty: z.number().int().min(1).nullish(),
   bogoPayQty: z.number().int().min(1).nullish(),

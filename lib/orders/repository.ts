@@ -286,6 +286,7 @@ export async function listActivePromotions(now: Date = new Date()): Promise<Acti
     WHERE is_active = true
       AND (starts_at IS NULL OR starts_at <= ${now})
       AND (ends_at IS NULL OR ends_at >= ${now})
+      AND (usage_limit IS NULL OR used_count < usage_limit)
     ORDER BY priority ASC, created_at DESC
   `;
   const promos = rows.map(mapPromoCode);
