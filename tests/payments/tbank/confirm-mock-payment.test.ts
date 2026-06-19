@@ -32,7 +32,19 @@ function svc(cfg: typeof MOCK_CFG): PaymentService {
   return new PaymentService(new TbankManager({ config: cfg }));
 }
 
-const ORDER = { order: { id: 'ord-uuid-1', number: '2026-000777', grandTotal: '1990.00' }, items: [] };
+// Привязка платежа (волна 14): confirmMockPayment пометит заказ оплаченным ТОЛЬКО
+// если paymentId совпадает с order.paymentRef (записанным при initPayment). Иначе
+// demo-страница могла бы пометить ЛЮБОЙ заказ оплаченным, лишь угадав его номер.
+const PAYMENT_ID = '900000001';
+const ORDER = {
+  order: {
+    id: 'ord-uuid-1',
+    number: '2026-000777',
+    grandTotal: '1990.00',
+    paymentRef: PAYMENT_ID,
+  },
+  items: [],
+};
 
 beforeEach(() => {
   recordWebhookEventMock.mockClear();
@@ -61,9 +73,9 @@ describe('confirmMockPayment — mock-gate', () => {
     expect(recordWebhookEventMock).not.toHaveBeenCalled();
   });
 
-  it('mock + заказ найден → ok, recordWebhookEvent(nextStatus=paid, CONFIRMED)', async () => {
+  it('mock + заказ найден + paymentId совпал с order.paymentRef → ok, recordWebhookEvent(nextStatus=paid, CONFIRMED)', async () => {
     getOrderByNumberMock.mockResolvedValue(ORDER);
-    const r = await svc(MOCK_CFG).confirmMockPayment('2026-000777', '900000001');
+    const r = await svc(MOCK_CFG).confirmMockPayment('2026-000777', PAYMENT_ID);
     expect(r).toEqual({ ok: true });
     expect(recordWebhookEventMock).toHaveBeenCalledTimes(1);
     const arg = recordWebhookEventMock.mock.calls[0]![0] as {
@@ -71,9 +83,27 @@ describe('confirmMockPayment — mock-gate', () => {
       nextStatus: string | null;
     };
     expect(arg.log.orderId).toBe('ord-uuid-1');
-    expect(arg.log.paymentId).toBe('900000001');
+    expect(arg.log.paymentId).toBe(PAYMENT_ID);
     expect(arg.log.status).toBe('CONFIRMED');
     expect(arg.log.isMock).toBe(true);
     expect(arg.nextStatus).toBe('paid');
+  });
+
+  // Привязка платежа (волна 14): paymentId обязан совпадать с order.paymentRef.
+  it('mock + paymentId ≠ order.paymentRef → payment_ref_mismatch, статус НЕ применяется', async () => {
+    getOrderByNumberMock.mockResolvedValue(ORDER); // paymentRef = '900000001'
+    const r = await svc(MOCK_CFG).confirmMockPayment('2026-000777', '900000999');
+    expect(r).toEqual({ ok: false, reason: 'payment_ref_mismatch' });
+    expect(recordWebhookEventMock).not.toHaveBeenCalled();
+  });
+
+  it('mock + order.paymentRef = null (оплата не инициирована) → payment_ref_mismatch', async () => {
+    getOrderByNumberMock.mockResolvedValue({
+      order: { id: 'ord-uuid-2', number: '2026-000778', grandTotal: '500.00', paymentRef: null },
+      items: [],
+    });
+    const r = await svc(MOCK_CFG).confirmMockPayment('2026-000778', PAYMENT_ID);
+    expect(r).toEqual({ ok: false, reason: 'payment_ref_mismatch' });
+    expect(recordWebhookEventMock).not.toHaveBeenCalled();
   });
 });

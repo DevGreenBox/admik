@@ -105,6 +105,13 @@ describe('orders/status — статус ОПЛАТЫ (§2.8 B)', () => {
     expect(canTransitionPayment('paid', 'refunded')).toBe(true);
   });
 
+  it('failed НЕ терминален: повторная оплата может стать authorized/paid', () => {
+    // Иначе успешный ретрай после отказа Т-Банк не пометил бы заказ оплаченным.
+    expect(canTransitionPayment('failed', 'pending')).toBe(true);
+    expect(canTransitionPayment('failed', 'authorized')).toBe(true);
+    expect(canTransitionPayment('failed', 'paid')).toBe(true);
+  });
+
   it('запрещает недопустимые переходы оплаты', () => {
     expect(canTransitionPayment('paid', 'pending')).toBe(false);
     expect(canTransitionPayment('refunded', 'paid')).toBe(false);

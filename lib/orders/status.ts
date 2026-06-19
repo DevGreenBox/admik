@@ -46,7 +46,11 @@ export const PAYMENT_STATUS_TRANSITIONS: Readonly<
   pending: ['authorized', 'paid', 'failed'],
   authorized: ['paid', 'failed'],
   paid: ['refunded'],
-  failed: ['pending'],
+  // failed НЕ терминален: покупатель может ПОВТОРИТЬ оплату из ЛК. Успешный
+  // ретрай (webhook Т-Банк) должен пометить заказ оплаченным — иначе деньги
+  // получены, а заказ навсегда висит 'failed' (canTransition в applyPaymentStatusTx
+  // отбросил бы failed→paid). Пара к isPayable(failed) на витрине.
+  failed: ['pending', 'authorized', 'paid'],
   refunded: [],
 };
 

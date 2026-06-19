@@ -246,6 +246,13 @@ export class PaymentService {
     if (!orderNumber || !paymentId) return { ok: false, reason: 'bad_request' };
     const found = await getOrderByNumber(orderNumber);
     if (!found) return { ok: false, reason: 'order_not_found' };
+    // Привязка к инициированному платежу: paymentId обязан совпадать с payment_ref,
+    // записанным при initPayment. Иначе demo-страница помечала бы оплаченным ЛЮБОЙ
+    // заказ по номеру (без аутентификации) — достаточно угадать номер. payment_ref
+    // = mock-PaymentId (непредсказуемый), его знает только инициировавший оплату.
+    if (!found.order.paymentRef || paymentId !== found.order.paymentRef) {
+      return { ok: false, reason: 'payment_ref_mismatch' };
+    }
     await recordWebhookEvent({
       log: {
         orderId: found.order.id,
