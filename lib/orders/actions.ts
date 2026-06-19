@@ -438,6 +438,23 @@ export const setPaymentStatus = defineAction({
       );
     }
 
+    // C5-1 (регресс C4-1, аудит цикла 5 — ДЕНЬГИ/anti-tamper): гард мёртвого заказа на
+    // АДМИН-пути, зеркало webhook-сетла (applyPaymentStatusTx). Пометить оплату
+    // paid/authorized для ОТМЕНЁННОГО/ВОЗВРАЩЁННОГО заказа нельзя — заказ мёртв, резерв
+    // отпущен. C4-1 закрыл только webhook-путь, этот ручной путь оставался открыт.
+    // Возврат (refunded) НЕ блокируем — он легитимно делегируется сетлу заказа ниже.
+    if (
+      (data.to === 'paid' || data.to === 'authorized') &&
+      (current.order.status === 'cancelled' || current.order.status === 'refunded')
+    ) {
+      throw new OrderError(
+        'invalid_order_state',
+        `Нельзя пометить оплату «${data.to}» для ${
+          current.order.status === 'cancelled' ? 'отменённого' : 'возвращённого'
+        } заказа.`,
+      );
+    }
+
     // ВОЗВРАТ ОПЛАТЫ = ВОЗВРАТ ЗАКАЗА (БАГ #3, аудит волны 15). Раньше paid→refunded
     // через статус-машину ОПЛАТЫ менял только payment_status — резерв остатков НЕ
     // освобождался (склад навсегда заблокирован) и промокод НЕ откатывался. Делегируем

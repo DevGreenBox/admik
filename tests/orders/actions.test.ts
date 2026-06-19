@@ -294,6 +294,26 @@ describe('валидация перехода статуса', () => {
     const res = await setDeliveryStatus({ id: UUID, to: 'registered' });
     expect(res.ok).toBe(true);
   });
+
+  it('C5-1: оплата paid на ОТМЕНЁННОМ заказе → validation + message (гард мёртвого заказа, anti-tamper)', async () => {
+    // Переход payment pending→paid сам по себе валиден, но заказ отменён (резерв
+    // отпущен) → пометить оплаченным нельзя. Зеркало webhook-гарда C4-1 на админ-пути.
+    H.state.getOrderByIdQueue = [orderDetail({ status: 'cancelled', paymentStatus: 'pending' })];
+    const res = await setPaymentStatus({ id: UUID, to: 'paid' });
+    expect(res.ok).toBe(false);
+    if (res.ok) throw new Error('ожидался отказ');
+    expect(res.error).toBe('validation');
+    expect(res.message).toContain('отменённого');
+  });
+
+  it('C5-1: оплата authorized на ВОЗВРАЩЁННОМ заказе → validation + message', async () => {
+    H.state.getOrderByIdQueue = [orderDetail({ status: 'refunded', paymentStatus: 'pending' })];
+    const res = await setPaymentStatus({ id: UUID, to: 'authorized' });
+    expect(res.ok).toBe(false);
+    if (res.ok) throw new Error('ожидался отказ');
+    expect(res.error).toBe('validation');
+    expect(res.message).toContain('возвращённого');
+  });
 });
 
 // =============================================================================
