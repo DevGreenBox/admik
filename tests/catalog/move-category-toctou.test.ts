@@ -199,10 +199,12 @@ describe('БАГ #6 — moveCategory сериализует перемещени
     ]);
 
     const res = await moveCategory({ id: CAT_A, parentId: CAT_B });
-    // CatalogError НЕ extends PublicActionError → пайплайн маппит в 'internal'.
+    // CatalogError наследует PublicActionError → пайплайн маппит в 'validation'
+    // + понятный message (доходит до UI).
     expect(res.ok).toBe(false);
     if (!res.ok) {
-      expect(res.error).toBe('internal');
+      expect(res.error).toBe('validation');
+      expect(res.message).toContain('поддерева');
     }
     // КЛЮЧЕВОЕ: при цикле запись не должна произойти.
     expect(findCalls('UPDATE categories')).toHaveLength(0);
@@ -245,7 +247,8 @@ describe('БАГ #6 — moveCategory сериализует перемещени
     const res = await moveCategory({ id: CAT_B, parentId: CAT_A });
     expect(res.ok).toBe(false);
     if (!res.ok) {
-      expect(res.error).toBe('internal');
+      expect(res.error).toBe('validation');
+      expect(res.message).toContain('не найдена');
     }
     // not_found — аудит не пишется (исключение до возврата).
     expect(H.writeAuditSpy).not.toHaveBeenCalled();

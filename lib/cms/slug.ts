@@ -6,4 +6,9 @@
  * а не копия, чтобы поведение CMS и каталога не разъезжалось.
  */
 
-export { slugify, isValidSlug, uniquifySlug } from '@/lib/catalog/slug';
+export {
+  slugify,
+  slugifyOrFallback,
+  isValidSlug,
+  uniquifySlug,
+} from '@/lib/catalog/slug';

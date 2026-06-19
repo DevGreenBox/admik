@@ -16,7 +16,7 @@ import {
   CmsSectionIdSchema,
 } from './schemas';
 import { CmsError } from './errors';
-import { slugify, uniquifySlug } from './slug';
+import { slugifyOrFallback, uniquifySlug } from './slug';
 import { sanitizeSectionContent } from './sanitize-section';
 
 /**
@@ -99,7 +99,10 @@ export const createCmsPage = defineAction({
   input: CmsPageCreateSchema,
   handler: async (data, ctx: ActionCtx) => {
     await assertCmsEnabled();
-    const base = data.slug || slugify(data.title);
+    // slugifyOrFallback (НЕ slugify): заголовок без латиницы/кириллицы/цифр
+    // (эмодзи/иероглифы) даёт slugify('')==='' → пустой slug ломает ЧПУ/вставку.
+    // Фолбэк 'page-<token>' гарантирует непустой валидный slug (как каталог).
+    const base = data.slug || slugifyOrFallback(data.title, '', undefined, 'page');
 
     const row = await insertWithUniqueSlug(base, async (slug) => {
       const rows = await sql<{ id: string }[]>`

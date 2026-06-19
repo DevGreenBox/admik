@@ -23,8 +23,8 @@ import type { PermissionCode } from '@/lib/auth/permissions';
  *
  * Для #10/#11 утверждаем формируемые SQL (склейку статических кусков и
  * интерполированные аргументы). Для #13/#14 — порядок запросов и бросание
- * CatalogError (через пайплайн defineAction маппится в error:'internal', т.к.
- * CatalogError НЕ extends PublicActionError).
+ * CatalogError (наследует PublicActionError → пайплайн defineAction маппит в
+ * error:'validation' + человекочитаемый message, который доходит до UI).
  */
 
 // --- управляемое состояние моков ---------------------------------------------
@@ -484,8 +484,10 @@ describe('БАГ #14 — inventory учитывает reserved', () => {
     const res = await adjustInventory({ productId: UUID, delta: -10 });
     expect(res.ok).toBe(false);
     if (res.ok) throw new Error('ожидался отказ');
-    // CatalogError не PublicActionError → пайплайн отдаёт internal (а не сырой throw).
-    expect(res.error).toBe('internal');
+    // CatalogError наследует PublicActionError → пайплайн отдаёт validation +
+    // понятный message (доходит до UI), а не безликий internal.
+    expect(res.error).toBe('validation');
+    expect(res.message).toContain('списания');
   });
 
   it('#14: setInventory несёт защиту reserved (EXCLUDED.quantity >= inventory.reserved)', async () => {
@@ -504,6 +506,7 @@ describe('БАГ #14 — inventory учитывает reserved', () => {
     const res = await setInventory({ productId: UUID, quantity: 0 });
     expect(res.ok).toBe(false);
     if (res.ok) throw new Error('ожидался отказ');
-    expect(res.error).toBe('internal');
+    expect(res.error).toBe('validation');
+    expect(res.message).toContain('зарезервированного');
   });
 });

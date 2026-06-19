@@ -68,24 +68,34 @@ export function isValidSlug(value: string): boolean {
  *
  * slugify('🎉')/slugify('日本語')/slugify('') → '' (нет латиницы/кириллицы/цифр),
  * а пустой slug сломал бы вставку (NOT NULL/UNIQUE/isValidSlug) и сделал бы
- * товар недоступным по ЧПУ. Фолбэк по приоритету:
+ * сущность недоступной по ЧПУ. Фолбэк по приоритету:
  *   1) slugify(hint) — обычно артикул (sku): читаемый и стабильный;
- *   2) `product-<token>` — token из `suffix` (передаётся вызывающим →
+ *   2) `<prefix>-<token>` — token из `suffix` (передаётся вызывающим →
  *      детерминированно, годится для ретрая при коллизии) либо случайный hex,
  *      если suffix не задан.
  * Результат всегда проходит isValidSlug.
+ *
+ * `prefix` (по умолчанию 'product') задаёт осмысленный префикс фолбэка под домен
+ * вызывающего: каталог → 'product-…', CMS → 'page-…' и т.п. (переиспользуемо для
+ * любого будущего модуля — мультитенантный принцип, без дублирования фолбэк-логики).
  *
  * NB: ветка без `suffix` использует случайность (`randomUUID`), поэтому в ней
  * функция НЕ детерминирована — это осознанно (фолбэк-slug должен быть уникальным).
  * Основные slugify/isValidSlug/uniquifySlug остаются чистыми.
  */
-export function slugifyOrFallback(name: string, hint = '', suffix?: string): string {
+export function slugifyOrFallback(
+  name: string,
+  hint = '',
+  suffix?: string,
+  prefix = 'product',
+): string {
   const primary = slugify(name);
   if (primary) return primary;
   const fromHint = slugify(hint);
   if (fromHint) return fromHint;
   const token = (suffix && slugify(suffix)) || randomUUID().replace(/-/g, '').slice(0, 8);
-  return `product-${token}`;
+  const safePrefix = slugify(prefix) || 'item';
+  return `${safePrefix}-${token}`;
 }
 
 /**
