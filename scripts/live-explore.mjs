@@ -27,6 +27,14 @@ async function brokenImages(page) {
   });
 }
 
+// Дать странице осесть после goto(domcontentloaded): дождаться load и короткий
+// settle, чтобы client-рендеренный контент (кнопки/карточки витрины) успел
+// появиться до проверок. Иначе при domcontentloaded были ложные «нет кнопки».
+async function settle(p) { await p.waitForLoadState('load', { timeout: 12000 }).catch(() => {}); await p.waitForTimeout(1200); }
+// Скриншоты — диагностические; на анимированных страницах screenshot ждёт шрифты
+// и может таймаутить — это НЕ повод ронять шаг. Поэтому всегда best-effort.
+async function shot(p, path) { await p.screenshot({ path, fullPage: false }).catch(() => {}); }
+
 const main = async () => {
   const browser = await chromium.launch();
   const ctx = await browser.newContext({ locale: 'ru-RU' });
@@ -36,7 +44,10 @@ const main = async () => {
 
   // --- 1. Главная ---------------------------------------------------------
   try {
-    const r = await page.goto(STORE + '/', { waitUntil: 'networkidle', timeout: 30000 });
+    const r = await page.goto(STORE + '/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    // НЕ networkidle: на главной hero/анимации (framer-motion) не дают сети
+    // «затихнуть» → раньше был ложный timeout навигации. Ждём load + settle.
+    await page.waitForLoadState('load', { timeout: 12000 }).catch(() => {});
     PASS('главная: HTTP', String(r.status()));
     const bodyText = await page.locator('body').innerText();
     // мусор в навигации/контенте
@@ -45,7 +56,7 @@ const main = async () => {
     if (/\bTest\b/.test(bodyText) || /\bаа\b/.test(bodyText) || /\bttt\b/.test(bodyText)) WARN('главная: подозрительные имена', 'видны Test/аа/ttt — проверить, не мусор ли');
     const bi = await brokenImages(page);
     if (bi.length) WARN('главная: битые картинки', bi.join(' | ')); else PASS('главная: картинки целы');
-    await page.screenshot({ path: '/tmp/expl-home.png', fullPage: false });
+    await shot(page, '/tmp/expl-home.png');
   } catch (e) { FAIL('главная', String(e).slice(0, 150)); }
 
   // --- 2. Навигация по категориям (Header) --------------------------------
@@ -60,7 +71,8 @@ const main = async () => {
 
   // --- 3. Каталог ---------------------------------------------------------
   try {
-    const r = await page.goto(STORE + '/catalog', { waitUntil: 'networkidle', timeout: 30000 });
+    const r = await page.goto(STORE + '/catalog', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await settle(page);
     PASS('каталог: HTTP', String(r.status()));
     const cards = await page.locator('a[href*="/product/"]').count();
     INFO('каталог: карточек товара', String(cards));
@@ -69,13 +81,13 @@ const main = async () => {
     else PASS('каталог: нет ZZ-мусора');
     const bi = await brokenImages(page);
     if (bi.length) WARN('каталог: битые картинки', bi.join(' | ')); else PASS('каталог: картинки целы');
-    await page.screenshot({ path: '/tmp/expl-catalog.png', fullPage: false });
+    await shot(page, '/tmp/expl-catalog.png');
   } catch (e) { FAIL('каталог', String(e).slice(0, 150)); }
 
   // --- 4. Поиск (крайние состояния) ---------------------------------------
   for (const [label, q] of [['кириллица', 'халат'], ['нет-результата', 'zzzнетничего'], ['спецсимвол', "%_'"], ['пусто', '']]) {
     try {
-      await page.goto(STORE + '/search?q=' + encodeURIComponent(q), { waitUntil: 'networkidle', timeout: 30000 });
+      await page.goto(STORE + '/search?q=' + encodeURIComponent(q), { waitUntil: 'domcontentloaded', timeout: 30000 });
       const txt = (await page.locator('body').innerText()).slice(0, 400);
       const hasError = /error|ошибка|exception|500|undefined/i.test(txt);
       if (hasError) FAIL(`поиск[${label}]`, 'страница показывает ошибку: ' + txt.replace(/\n/g, ' ').slice(0, 120));
@@ -86,7 +98,8 @@ const main = async () => {
   // --- 5. Карточка товара (в наличии и распроданный) ----------------------
   try {
     // в наличии
-    await page.goto(STORE + '/product/halat-meditsinskiy-belyy', { waitUntil: 'networkidle', timeout: 30000 });
+    await page.goto(STORE + '/product/halat-meditsinskiy-belyy', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await settle(page);
     const t1 = await page.locator('body').innerText();
     PASS('карточка(в наличии): открыта', /Халат/i.test(t1) ? 'имя видно' : 'имя НЕ видно');
     const hasBuy = await page.getByRole('button', { name: /корзин|купить|добавить/i }).count();
@@ -94,7 +107,8 @@ const main = async () => {
     const bi1 = await brokenImages(page);
     if (bi1.length) WARN('карточка: битые картинки', bi1.join(' | ')); else PASS('карточка: картинки целы');
     // распроданный
-    await page.goto(STORE + '/product/bryuki-meditsinskie-sinie', { waitUntil: 'networkidle', timeout: 30000 });
+    await page.goto(STORE + '/product/bryuki-meditsinskie-sinie', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await settle(page);
     const t2 = await page.locator('body').innerText();
     if (/нет в наличии|распродан|out of stock/i.test(t2)) PASS('карточка(распродан): метка «нет в наличии» есть');
     else WARN('карточка(распродан): нет явной метки об отсутствии');
@@ -102,11 +116,18 @@ const main = async () => {
 
   // --- 6. Несуществующий товар / 404 --------------------------------------
   try {
-    const r = await page.goto(STORE + '/product/zzz-nesushestvuet-404', { waitUntil: 'networkidle', timeout: 30000 });
+    const r = await page.goto(STORE + '/product/zzz-nesushestvuet-404', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await settle(page);
     const code = r.status();
     const txt = (await page.locator('body').innerText()).slice(0, 200);
-    if (code === 404 || /не найден|404|not found/i.test(txt)) PASS('404 товара', `HTTP ${code}, осмысленная страница`);
-    else WARN('404 товара', `HTTP ${code} — нет явной 404 для несуществующего товара`);
+    // UX-инвариант: несуществующий товар показывает осмысленную not-found страницу.
+    if (/не найден|404|not found/i.test(txt)) PASS('404 товара (UX)', 'показана not-found страница');
+    else WARN('404 товара (UX)', `нет not-found страницы (HTTP ${code})`);
+    // SEO-нюанс (известный, принятый trade-off): из-за loading.tsx + force-dynamic
+    // Next стримит skeleton (200) до резолва notFound() → soft-404. Не маскируем,
+    // но и не роняем — это осознанное решение (skeleton-UX важнее статуса для
+    // несуществующих товаров, на которые в каталоге нет ссылок). См. docs/00 волна 15.
+    if (code !== 404) INFO('404 товара (SEO)', `HTTP ${code} — soft-404 (принятый trade-off из-за стриминга loading)`);
   } catch (e) { WARN('404 товара', String(e).slice(0, 120)); }
 
   // --- 7. Прочие страницы (care/returns/terms/privacy/reviews/wishlist) ---
@@ -127,15 +148,20 @@ const main = async () => {
     const mp = await mctx.newPage();
     const merr = [];
     attachConsole(mp, merr);
-    await mp.goto(STORE + '/', { waitUntil: 'networkidle', timeout: 30000 });
-    // горизонтальный скролл = поломка верстки
-    const overflow = await mp.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    // Замер overflow требует осевшего layout: ждём load + settle (иначе при
+    // незавершённой анимации/раскладке давало ложный overflow — флака харнеса).
+    const settle = async () => { await mp.waitForLoadState('load', { timeout: 12000 }).catch(() => {}); await mp.waitForTimeout(2000); };
+    const measureOverflow = () => mp.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    await mp.goto(STORE + '/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await settle();
+    const overflow = await measureOverflow();
     if (overflow > 5) WARN('мобайл: горизонтальный скролл', `overflow=${overflow}px (возможна поломка верстки)`);
     else PASS('мобайл: нет горизонтального переполнения');
-    await mp.goto(STORE + '/catalog', { waitUntil: 'networkidle', timeout: 30000 });
-    const ov2 = await mp.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    await mp.goto(STORE + '/catalog', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await settle();
+    const ov2 = await measureOverflow();
     if (ov2 > 5) WARN('мобайл каталог: горизонтальный скролл', `overflow=${ov2}px`); else PASS('мобайл каталог: ок');
-    await mp.screenshot({ path: '/tmp/expl-mobile-home.png' });
+    await shot(mp, '/tmp/expl-mobile-home.png');
     if (merr.length) WARN('мобайл: console-ошибки', merr.slice(0, 3).join(' | '));
     await mctx.close();
   } catch (e) { WARN('мобайл', String(e).slice(0, 120)); }
