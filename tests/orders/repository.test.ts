@@ -128,7 +128,7 @@ describe.skipIf(!INTEGRATION_DB_URL)('orders/repository (интеграция, �
     for (const id of created.orderIds) {
       await sql`DELETE FROM orders WHERE id = ${id}`;
     }
-    await sql`DELETE FROM orders WHERE customer_email IN ('buyer@example.com','race@example.com','limit@example.com','percust@example.com','percustrace@example.com','gift@example.com','scopemin@example.com')`;
+    await sql`DELETE FROM orders WHERE customer_email IN ('buyer@example.com','race@example.com','limit@example.com','percust@example.com','percustrace@example.com','gift@example.com','giftnostock@example.com','scopemin@example.com')`;
     for (const id of created.promoIds) {
       await sql`DELETE FROM promo_codes WHERE id = ${id}`;
     }
@@ -703,6 +703,47 @@ describe.skipIf(!INTEGRATION_DB_URL)('orders/repository (интеграция, �
     expect(r.order.itemsTotal).toBe('1000.00');
     expect(r.order.discountTotal).toBe('100.00');
     expect(r.order.grandTotal).toBe('900.00');
+  });
+
+  it('C6-3: gift-only промокод (0 скидки) + подарок БЕЗ остатка → лимит НЕ съедается (used_count=0, нет redemption)', async () => {
+    // Промокод только с подарком (нулевая денежная скидка → quote.promo.applied=false).
+    // Подарок без остатка → best-effort резерв не проходит → эффекта нет → лимит НЕ
+    // должен расходоваться. Прежде promoHadEffect считался по giftLine!=null (до резерва)
+    // → клиент жёг per_customer_limit, не получив ни скидки, ни подарка (C6-3).
+    const buyProduct = await makeProduct({ basePrice: '1000.00', quantity: 10 });
+    const giftProduct = await makeProduct({ basePrice: '300.00', quantity: 0 }); // НЕТ остатка
+    const promoId = await makePromo({
+      code: 'GIFTONLY0',
+      kind: 'fixed',
+      value: '0', // нулевая скидка: единственный заявленный эффект — подарок
+      giftProductId: giftProduct,
+      giftQty: 1,
+      perCustomerLimit: 1,
+    });
+    const r = await repo.createOrder({
+      items: [{ productId: buyProduct, qty: 1 }],
+      customer: customer('giftnostock@example.com'),
+      delivery: { type: 'courier' },
+      paymentMethod: 'cod',
+      promoCode: 'GIFTONLY0',
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    created.orderIds.push(r.order.id);
+
+    // Подарок НЕ выдан (нет остатка) → нет gift-строки.
+    const detail = await repo.getOrderById(r.order.id);
+    expect(detail?.items.some((i) => i.isGift)).toBe(false);
+
+    // Нулевой эффект (нет скидки, подарок не выдан) → лимит НЕ потреблён.
+    const [pc] = await sql<{ used_count: number }[]>`
+      SELECT used_count FROM promo_codes WHERE id = ${promoId}
+    `;
+    expect(Number(pc!.used_count)).toBe(0);
+    const [red] = await sql<{ n: string }[]>`
+      SELECT count(*)::text AS n FROM promo_redemptions WHERE promo_code_id = ${promoId}
+    `;
+    expect(Number(red!.n)).toBe(0);
   });
 
   it('createOrder: подарок без остатка → заказ создаётся БЕЗ подарка (best-effort)', async () => {

@@ -927,13 +927,9 @@ export async function createOrder(
 
   // Подарок (gift_*): резолвим каталожную строку подарка ДО транзакции (чтение).
   // Резерв и вставка — в транзакции ниже (best-effort: нет остатка → без подарка).
+  // promoHadEffect вычисляется ВНУТРИ транзакции (после фактического резерва подарка,
+  // C6-3) — иначе лимит съедался бы по giftLine!=null, даже если подарок не выдан.
   const giftLine: ResolvedLine | null = promoRow ? await resolveGiftLine(promoRow) : null;
-
-  // Слот лимита промокода (used_count + promo_redemptions) потребляется ТОЛЬКО при
-  // реальном применении (баг A волны 7, доп. защита целостности): есть денежная
-  // скидка / применена бесплатная доставка (quote.promo.applied) ЛИБО прикрепляется
-  // подарок. Промокод с нулевым эффектом (например 0-скидка) не «съедает» лимит.
-  const promoHadEffect = Boolean(promoRow) && (quote.promo.applied || giftLine != null);
 
   try {
     const order = await sql.begin(async (tx) => {
@@ -958,6 +954,23 @@ export async function createOrder(
           throw new OutOfStockError(l.sku);
         }
       }
+
+      // 1b) Подарок (gift_*) — best-effort резерв ДО блока лимита (C6-3). Нужен
+      //     ФАКТ резерва: лимит промокода (used_count + promo_redemptions) расходуется
+      //     ТОЛЬКО при реальном эффекте (баг A волны 7). Эффект = денежная скидка /
+      //     бесплатная доставка (quote.promo.applied) ЛИБО РЕАЛЬНО зарезервированный
+      //     подарок. Прежде эффект считался по giftLine != null (до резерва) → gift-only
+      //     промокод при отсутствии остатка подарка съедал per_customer_limit, не выдав
+      //     ничего (нулевой эффект жёг лимит). Резерв подарка не валит заказ при нехватке.
+      let giftReserved = false;
+      if (giftLine) {
+        giftReserved = await reserveUnit(tx, {
+          productId: giftLine.productId,
+          variantId: giftLine.variantId,
+          qty: giftLine.qty,
+        });
+      }
+      const promoHadEffect = Boolean(promoRow) && (quote.promo.applied || giftReserved);
 
       // 2) Промокод: атомарный инкремент used_count с проверкой ГЛОБАЛЬНОГО лимита
       //    (гонка). Важный побочный эффект: этот UPDATE берёт блокировку строки
@@ -1051,30 +1064,22 @@ export async function createOrder(
         `;
       }
 
-      // 6b) Подарок (gift_*) — best-effort. Резервируем подарок как обычную
-      //     позицию (анти-оверселл); если остатка нет — подарок просто НЕ
-      //     добавляется, заказ НЕ падает из-за бесплатного подарка. Подарочная
-      //     строка: unit_price/line_total = 0, compare_at = «ценность», is_gift=true.
-      if (giftLine) {
-        const giftReserved = await reserveUnit(tx, {
-          productId: giftLine.productId,
-          variantId: giftLine.variantId,
-          qty: giftLine.qty,
-        });
-        if (giftReserved) {
-          await tx`
-            INSERT INTO order_items (
-              order_id, product_id, variant_id, name_snapshot, sku_snapshot,
-              attributes_snapshot, unit_price, compare_at_snapshot, quantity, line_total, is_gift,
-              weight_g, length_cm, width_cm, height_cm
-            ) VALUES (
-              ${orderId}, ${giftLine.productId}, ${giftLine.variantId}, ${giftLine.name}, ${giftLine.sku},
-              ${tx.json(giftLine.attributesSnapshot as Record<string, never>)}, ${fromMinor(0)},
-              ${giftLine.unitPrice}, ${giftLine.qty}, ${fromMinor(0)}, true,
-              ${giftLine.weightG}, ${giftLine.lengthCm}, ${giftLine.widthCm}, ${giftLine.heightCm}
-            )
-          `;
-        }
+      // 6b) Подарок (gift_*) — резерв уже выполнен в (1b). Вставляем подарочную строку
+      //     ТОЛЬКО если подарок реально зарезервирован (giftReserved). Строка:
+      //     unit_price/line_total = 0, compare_at = «ценность», is_gift=true.
+      if (giftLine && giftReserved) {
+        await tx`
+          INSERT INTO order_items (
+            order_id, product_id, variant_id, name_snapshot, sku_snapshot,
+            attributes_snapshot, unit_price, compare_at_snapshot, quantity, line_total, is_gift,
+            weight_g, length_cm, width_cm, height_cm
+          ) VALUES (
+            ${orderId}, ${giftLine.productId}, ${giftLine.variantId}, ${giftLine.name}, ${giftLine.sku},
+            ${tx.json(giftLine.attributesSnapshot as Record<string, never>)}, ${fromMinor(0)},
+            ${giftLine.unitPrice}, ${giftLine.qty}, ${fromMinor(0)}, true,
+            ${giftLine.weightG}, ${giftLine.lengthCm}, ${giftLine.widthCm}, ${giftLine.heightCm}
+          )
+        `;
       }
 
       // 7) Начальная запись истории статуса.
