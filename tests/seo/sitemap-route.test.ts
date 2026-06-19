@@ -37,6 +37,7 @@ const ROWS = {
 beforeEach(() => {
   mocks.effective.mockResolvedValue({
     seo: { site_url: 'https://shop.example', noindex_site: false },
+    modules: { overrides: {} },
   });
   mocks.getSetting.mockResolvedValue({ value: {} });
   mocks.getSitemapRows.mockResolvedValue(ROWS);
@@ -85,6 +86,7 @@ describe('app/sitemap — noindex_site (баг #6)', () => {
   it('noindex_site=true → карта отдаёт только корень', async () => {
     mocks.effective.mockResolvedValue({
       seo: { site_url: 'https://shop.example', noindex_site: true },
+      modules: { overrides: {} },
     });
     mocks.effectiveModules.mockReturnValue(['catalog', 'cms']);
     const { default: sitemap } = await import('@/app/sitemap');
@@ -97,12 +99,30 @@ describe('app/sitemap — noindex_site (баг #6)', () => {
   it('noindex_site=false → полный список (товары/страницы присутствуют)', async () => {
     mocks.effective.mockResolvedValue({
       seo: { site_url: 'https://shop.example', noindex_site: false },
+      modules: { overrides: {} },
     });
     mocks.effectiveModules.mockReturnValue(['catalog', 'cms']);
     const { default: sitemap } = await import('@/app/sitemap');
     const urls = (await sitemap()).map((e) => e.url);
     expect(urls).toContain('https://shop.example/product/p1');
     expect(urls).toContain('https://shop.example/about');
+  });
+
+  it('C9-1: module_overrides берётся из мемо-снимка (settings.modules.overrides), без отдельного getSetting', async () => {
+    mocks.effective.mockResolvedValue({
+      seo: { site_url: 'https://shop.example', noindex_site: false },
+      modules: { overrides: { catalog: false } },
+    });
+    mocks.effectiveModules.mockReturnValue(['cms']);
+    const { default: sitemap } = await import('@/app/sitemap');
+    await sitemap();
+    // getEffectiveModules получил ИМЕННО мемо-overrides (один снимок на запрос).
+    expect(mocks.effectiveModules).toHaveBeenCalledWith(
+      expect.anything(),
+      { catalog: false },
+    );
+    // Отдельного свежего чтения module_overrides больше нет (рассинхрон закрыт).
+    expect(mocks.getSetting).not.toHaveBeenCalled();
   });
 });
 

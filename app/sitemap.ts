@@ -13,8 +13,6 @@
 import type { MetadataRoute } from 'next';
 
 import { getEffectiveSettings, getEffectiveModules } from '@/lib/config/settings';
-import { getSetting } from '@/lib/settings/repository';
-import { parseSettingValue } from '@/lib/settings/schemas';
 import { buildSitemapEntries } from '@/lib/seo/sitemap';
 import { getSitemapRows } from '@/lib/seo/repository';
 
@@ -33,10 +31,11 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       return siteUrl ? [{ url: siteUrl.replace(/\/+$/, '') }] : [];
     }
 
-    // Эффективные модули: env-набор ⊕ module_overrides из БД.
-    const overridesRow = await getSetting('module_overrides');
-    const overrides = parseSettingValue('module_overrides', overridesRow?.value) ?? {};
-    const modules = getEffectiveModules(process.env, overrides);
+    // Эффективные модули: env-набор ⊕ module_overrides из ТОГО ЖЕ мемо-снимка, что и
+    // seo (строка 26) — C9-1: прежде здесь шёл ОТДЕЛЬНЫЙ свежий getSetting('module_overrides'),
+    // что давало два независимых чтения module_overrides в одном запросе (рассинхрон при
+    // инвалидации кэша между ними). Используем settings.modules.overrides (паттерн d1bc04b).
+    const modules = getEffectiveModules(process.env, settings.modules.overrides);
 
     const rows = await getSitemapRows();
     const entries = buildSitemapEntries(modules, rows, { siteUrl });
