@@ -11,6 +11,7 @@ import {
   applyCatalogView,
   categoryTabs,
   priceRange,
+  topLevelAncestorSlug,
   type CatalogSort,
 } from "@/lib/catalog-view";
 
@@ -37,6 +38,12 @@ export function CatalogPage({
   const router = useRouter();
 
   const tabs = useMemo(() => categoryTabs(categories), [categories]);
+  // Если активна подкатегория — подсвечиваем её top-level предка (таб верхнего
+  // уровня), т.к. вкладки строятся только из верхнего уровня дерева.
+  const activeTabSlug = useMemo(
+    () => topLevelAncestorSlug(categories, activeCategory),
+    [categories, activeCategory]
+  );
   const range = useMemo(() => priceRange(products), [products]);
 
   const [sort, setSort] = useState<CatalogSort>("default");
@@ -80,7 +87,9 @@ export function CatalogPage({
                 key={cat.slug || "all"}
                 onClick={() => goToCategory(cat.slug)}
                 className={`label-caps whitespace-nowrap transition-colors duration-500 ${
-                  activeCategory === cat.slug ? "text-graphite" : "text-muted hover:text-graphite"
+                  activeCategory === cat.slug || activeTabSlug === cat.slug
+                    ? "text-graphite"
+                    : "text-muted hover:text-graphite"
                 }`}
               >
                 {cat.name}

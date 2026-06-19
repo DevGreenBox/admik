@@ -9,6 +9,7 @@ import { useStore } from "@/lib/store";
 import type { StorefrontProduct, StorefrontVariant } from "@/lib/admik";
 import { Button } from "@/components/ui/Button";
 import { FadeIn } from "@/components/ui/Animations";
+import { PriceDisplay } from "@/components/ui/PriceDisplay";
 import { ProductCard } from "@/components/catalog/ProductCard";
 import { ProductGallery } from "@/components/product/ProductGallery";
 import { SizeGuide } from "@/components/product/SizeGuide";
@@ -58,6 +59,12 @@ export function ProductDetailClient({ product, related }: ProductDetailClientPro
   // Цена к покупке: выбранного варианта, иначе базовая товара. Используется и в
   // отображении, и в позиции корзины — чтобы показанная цена совпала с добавленной.
   const activePrice = selectedVariant?.price ?? product.price;
+
+  // Скидку (старая цена + бейдж) показываем только когда отображается базовая цена
+  // товара: compareAtPrice смаппен на уровне товара (oldPrice/onSale/discountPct),
+  // а у выбранного варианта может быть своя цена — тогда не сравниваем со старой
+  // базовой, чтобы не вводить в заблуждение (показываем чистую цену варианта).
+  const showBasePriceSale = activePrice === product.price;
 
   // Доступный к заказу остаток текущей покупки: выбранного варианта, иначе товара
   // (для товара без вариантов). null = неизвестно (нечего покупать) → без лимита.
@@ -130,7 +137,13 @@ export function ProductDetailClient({ product, related }: ProductDetailClientPro
                 <h1 className="heading-lg heading-rule">{product.name}</h1>
               </div>
 
-              <p className="text-base md:text-lg tracking-[0.06em] tabular-nums">{formatPrice(activePrice)}</p>
+              <div className="text-base md:text-lg tracking-[0.06em]">
+                {showBasePriceSale ? (
+                  <PriceDisplay product={product} className="text-base md:text-lg tracking-[0.06em]" />
+                ) : (
+                  <span className="tabular-nums">{formatPrice(activePrice)}</span>
+                )}
+              </div>
               <p className="body-editorial">{product.description || DEFAULT_DESCRIPTION}</p>
 
               {/* Размер — только для товаров с вариантами. */}

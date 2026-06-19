@@ -47,6 +47,38 @@ export function categoryTabs(categories: AdmikCategoryDto[]): CategoryTab[] {
   ];
 }
 
+/**
+ * По slug активной категории возвращает slug её ТОП-УРОВНЕВОГО предка в дереве.
+ *
+ * Зачем: вкладки каталога (`categoryTabs`) строятся только из верхнего уровня
+ * дерева. Когда пользователь заходит в подкатегорию, её slug не совпадает ни с
+ * одним табом → ни один таб не подсвечивается и пользователь «теряется». Эта
+ * функция резолвит ближайший родительский таб верхнего уровня, чтобы подсветка
+ * сохранялась на всю ветку.
+ *
+ * Возвращает:
+ *  - "" (нет активного предка) если activeSlug пустой («Все») или не найден;
+ *  - сам activeSlug, если он уже категория верхнего уровня;
+ *  - slug top-level предка, если activeSlug — подкатегория любой глубины.
+ */
+export function topLevelAncestorSlug(
+  categories: AdmikCategoryDto[],
+  activeSlug: string,
+): string {
+  if (!activeSlug) return "";
+
+  // Глубинный поиск: содержит ли поддерево узел с искомым slug.
+  const subtreeHasSlug = (node: AdmikCategoryDto): boolean => {
+    if (node.slug === activeSlug) return true;
+    return node.children?.some(subtreeHasSlug) ?? false;
+  };
+
+  for (const top of categories) {
+    if (subtreeHasSlug(top)) return top.slug;
+  }
+  return "";
+}
+
 /** Ссылка подменю навигации (одна категория любого уровня). */
 export interface CategoryNavItem {
   href: string;

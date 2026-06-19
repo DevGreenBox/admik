@@ -173,6 +173,8 @@ export default function CheckoutPage() {
 
   const handleSubmit = async () => {
     if (!selectedCity || !selectedPickup || !quote || !quote.fulfillable) return;
+    // Нельзя оформлять, пока доставка не посчитана (явный available === false).
+    if (quote.delivery?.available === false) return;
     setError("");
     setLoading(true);
     try {
@@ -238,6 +240,10 @@ export default function CheckoutPage() {
 
   const fulfillable = quote?.fulfillable ?? false;
   const hasIssues = (quote?.issues?.length ?? 0) > 0;
+  // Доставку не удалось рассчитать только при ЯВНОМ available === false. Если поле
+  // отсутствует/undefined (старый контракт) — считаем расчёт доступным (мягкая
+  // деградация). Нельзя платить за непосчитанную доставку → блокируем подтверждение.
+  const deliveryUnavailable = quote?.delivery?.available === false;
 
   return (
     <div className="page-transition pt-16 md:pt-20 relative min-h-screen">
@@ -282,7 +288,17 @@ export default function CheckoutPage() {
             <div className="space-y-6 mt-8">
               <div className="relative">
                 <label className="label-caps text-muted block mb-3">Город</label>
-                <input type="text" value={cityQuery} onChange={(e) => { setCityQuery(e.target.value); setSelectedCity(null); }} placeholder="Начните вводить..."
+                <input type="text" value={cityQuery} onChange={(e) => {
+                  setCityQuery(e.target.value);
+                  // Правка города после выбора инвалидирует выбранный город И всё,
+                  // что от него зависит: список ПВЗ, выбранный пункт, стоимость/срок.
+                  // Иначе на экране остаются ПВЗ/цена от прежнего города.
+                  setSelectedCity(null);
+                  setSelectedPickup(null);
+                  setPickupPoints([]);
+                  setDeliveryCost(null);
+                  setDeliveryEta("");
+                }} placeholder="Начните вводить..."
                   className="w-full border border-border px-4 py-3 text-sm focus:border-graphite outline-none" />
                 {cities.length > 0 && (
                   <div className="absolute z-10 w-full bg-white border border-border mt-1 max-h-48 overflow-y-auto shadow-lg">
@@ -326,9 +342,17 @@ export default function CheckoutPage() {
                 {Number(quote?.discountTotal ?? 0) > 0 && (
                   <Row label="Скидка" value={`−${formatPrice(Number(quote?.discountTotal ?? 0))}`} />
                 )}
-                <Row label="Доставка" value={formatPrice(Number(quote?.deliveryTotal ?? 0))} />
+                <Row
+                  label="Доставка"
+                  value={deliveryUnavailable ? "Уточняется" : formatPrice(Number(quote?.deliveryTotal ?? 0))}
+                />
                 <Row label="Итого" value={formatPrice(Number(quote?.grandTotal ?? 0))} bold />
               </div>
+              {deliveryUnavailable && (
+                <p className="text-sm text-accent">
+                  Стоимость доставки уточняется. Оформление будет доступно после расчёта.
+                </p>
+              )}
               {(!fulfillable || hasIssues) && (
                 <p className="text-sm text-accent">
                   Некоторые позиции недоступны к заказу. Обновите корзину и попробуйте снова.
@@ -337,7 +361,7 @@ export default function CheckoutPage() {
               {error && <p className="text-sm text-accent">{error}</p>}
               <div className="flex gap-4">
                 <Button variant="outline" size="md" onClick={() => setStep(2)}>Назад</Button>
-                <Button variant="primary" size="lg" magnetic disabled={loading || !fulfillable} onClick={handleSubmit} className="flex-1">
+                <Button variant="primary" size="lg" magnetic disabled={loading || !fulfillable || deliveryUnavailable} onClick={handleSubmit} className="flex-1">
                   {loading ? "Оформление..." : "Подтвердить заказ"}
                 </Button>
               </div>

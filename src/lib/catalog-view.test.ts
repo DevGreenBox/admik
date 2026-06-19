@@ -5,6 +5,7 @@ import {
   sortProducts,
   applyCatalogView,
   flattenCategoryNav,
+  topLevelAncestorSlug,
 } from "@/lib/catalog-view";
 import type { StorefrontProduct, AdmikCategoryDto } from "@/lib/admik";
 
@@ -65,6 +66,54 @@ describe("categoryTabs", () => {
 
   it("пустое дерево → только «Все»", () => {
     expect(categoryTabs([])).toEqual([{ slug: "", name: "Все" }]);
+  });
+});
+
+describe("topLevelAncestorSlug", () => {
+  const tree: AdmikCategoryDto[] = [
+    {
+      slug: "women",
+      name: "Женское",
+      description: "",
+      children: [
+        { slug: "women-halaty", name: "Халаты", description: "", children: [] },
+        {
+          slug: "women-kostyumy",
+          name: "Костюмы",
+          description: "",
+          children: [
+            { slug: "women-scrubs", name: "Скрабы", description: "", children: [] },
+          ],
+        },
+      ],
+    },
+    { slug: "men", name: "Мужское", description: "", children: [] },
+  ];
+
+  it("пустой активный slug («Все») → \"\"", () => {
+    expect(topLevelAncestorSlug(tree, "")).toBe("");
+  });
+
+  it("активна категория верхнего уровня → она сама", () => {
+    expect(topLevelAncestorSlug(tree, "women")).toBe("women");
+    expect(topLevelAncestorSlug(tree, "men")).toBe("men");
+  });
+
+  it("активна прямая подкатегория → top-level предок", () => {
+    expect(topLevelAncestorSlug(tree, "women-halaty")).toBe("women");
+    expect(topLevelAncestorSlug(tree, "women-kostyumy")).toBe("women");
+  });
+
+  it("активна вложенная подкатегория (глубина 2) → top-level предок", () => {
+    expect(topLevelAncestorSlug(tree, "women-scrubs")).toBe("women");
+  });
+
+  it("неизвестный slug → \"\" (ни один таб не подсвечен)", () => {
+    expect(topLevelAncestorSlug(tree, "no-such")).toBe("");
+  });
+
+  it("пустое дерево → \"\"", () => {
+    expect(topLevelAncestorSlug([], "women")).toBe("");
   });
 });
 

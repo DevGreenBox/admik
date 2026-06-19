@@ -5,7 +5,6 @@ import Link from "next/link";
 import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
 import { X } from "lucide-react";
-import { formatPrice } from "@/lib/format";
 import { BESTSELLER_HOVER } from "@/lib/images";
 import { useStore } from "@/lib/store";
 import {
@@ -17,6 +16,7 @@ import {
 import { Button } from "@/components/ui/Button";
 import { FadeIn } from "@/components/ui/Animations";
 import { LuxuryImageSwap } from "@/components/ui/LuxuryImageSwap";
+import { PriceDisplay } from "@/components/ui/PriceDisplay";
 
 interface ProductCardProps {
   product: StorefrontProduct;
@@ -58,7 +58,9 @@ export function ProductCard({ product, priority = false, size = "default" }: Pro
                 <p className="label-caps text-muted mt-2.5 text-[9px] tracking-[0.26em]">New</p>
               )}
             </div>
-            <p className="text-[11px] tracking-[0.1em] shrink-0 tabular-nums">{formatPrice(product.price)}</p>
+            <div className="shrink-0 text-right">
+              <PriceDisplay product={product} className="text-[11px] tracking-[0.1em]" />
+            </div>
           </div>
 
           <div className="mt-4 flex gap-5 opacity-0 group-hover:opacity-100 transition-opacity duration-700">
@@ -95,21 +97,33 @@ function QuickViewModal({
 }) {
   const [detail, setDetail] = useState<StorefrontProduct | null>(null);
   const [loading, setLoading] = useState(false);
+  // Ошибка загрузки detail отделена от «нет в наличии»: при провале/возврате null
+  // НЕ откатываемся на списочный снимок (у него variants=[] и нет id → in-stock
+  // товар без вариантов ложно показал бы «Нет в наличии» и блокировал покупку).
+  const [loadError, setLoadError] = useState(false);
   const [selectedVariant, setSelectedVariant] = useState<StorefrontVariant | null>(null);
   const addToCart = useStore((s) => s.addToCart);
 
   useEffect(() => {
     if (!open) return;
     setSelectedVariant(null);
+    setLoadError(false);
     let cancelled = false;
     setLoading(true);
     getProduct(product.slug)
       .then((dto) => {
         if (cancelled) return;
-        setDetail(dto ? fromDetail(dto) : null);
+        if (dto) {
+          setDetail(fromDetail(dto));
+        } else {
+          setDetail(null);
+          setLoadError(true);
+        }
       })
       .catch(() => {
-        if (!cancelled) setDetail(null);
+        if (cancelled) return;
+        setDetail(null);
+        setLoadError(true);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -119,7 +133,10 @@ function QuickViewModal({
     };
   }, [open, product.slug]);
 
-  // Полная карточка (из API) при наличии, иначе списочный снимок.
+  // Полная карточка (из API) при наличии. При ошибке загрузки detail остаётся null:
+  // показываем сообщение об ошибке (см. ниже), а покупку не предлагаем по списочному
+  // снимку, чтобы не врать про наличие/вариантность. Для базовой шапки (имя/фото/цена)
+  // безопасно используем списочный снимок как фолбэк.
   const view = detail ?? product;
   const hasVariants = view.variants.length > 0;
   // Товар без вариантов покупается по productId (есть только у detail-карточки).
@@ -186,7 +203,9 @@ function QuickViewModal({
               <div className="flex flex-col justify-center py-2">
                 <p className="eyebrow mb-5">Quick view</p>
                 <h3 className="heading-md mb-5">{view.name}</h3>
-                <p className="text-sm tracking-[0.08em] mb-10">{formatPrice(view.price)}</p>
+                <div className="mb-10">
+                  <PriceDisplay product={view} className="text-sm tracking-[0.08em]" />
+                </div>
                 {view.description && (
                   <p className="body-editorial mb-12">{view.description}</p>
                 )}
@@ -195,6 +214,10 @@ function QuickViewModal({
                   <div className="mb-12 min-h-[44px]">
                     <div className="skeleton h-11 w-full" />
                   </div>
+                ) : loadError ? (
+                  <p className="text-[10px] uppercase tracking-[0.18em] text-accent mb-12">
+                    Не удалось загрузить товар
+                  </p>
                 ) : hasVariants ? (
                   <>
                     <p className="label-caps mb-5">Размер</p>
@@ -221,19 +244,23 @@ function QuickViewModal({
                   <div className="mb-12" />
                 )}
 
-                <Button
-                  variant="primary"
-                  size="lg"
-                  disabled={!canBuy}
-                  onClick={handleAdd}
-                  className="w-full"
-                >
-                  {hasVariants && !selectedVariant ? "Выберите размер" : "В корзину"}
-                </Button>
+                {/* При ошибке загрузки не предлагаем покупку «вслепую» по списочному
+                    снимку — ведём на полную карточку ссылкой «Подробнее» ниже. */}
+                {!loadError && (
+                  <Button
+                    variant="primary"
+                    size="lg"
+                    disabled={!canBuy}
+                    onClick={handleAdd}
+                    className="w-full"
+                  >
+                    {hasVariants && !selectedVariant ? "Выберите размер" : "В корзину"}
+                  </Button>
+                )}
                 <Link
                   href={`/product/${view.slug}`}
                   onClick={onClose}
-                  className="mt-8 text-center label-caps text-muted link-underline"
+                  className={`text-center label-caps text-muted link-underline ${loadError ? "" : "mt-8"}`}
                 >
                   Подробнее
                 </Link>

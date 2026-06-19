@@ -46,7 +46,12 @@ export default async function Catalog({
   }
 
   return (
+    // key=категория → при смене категории CatalogPage перемонтируется и клиентские
+    // фильтры (в т.ч. priceMax) реинициализируются под новый набор товаров. Иначе
+    // устаревший priceMax от прошлой (дешёвой) категории прятал бы более дорогие
+    // товары новой категории без видимой причины (soft-navigation не размонтирует).
     <CatalogPage
+      key={category ?? ""}
       products={products}
       categories={categories}
       activeCategory={category ?? ""}

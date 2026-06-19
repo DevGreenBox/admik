@@ -169,7 +169,15 @@ export interface AdmikQuoteDto {
   currency: string;
   lines: AdmikQuoteLineDto[];
   promo: { applied: boolean; code: string | null; discount: string; reason: string | null };
-  delivery: { free: boolean; freeThresholdMet: boolean; cost: string };
+  delivery: {
+    free: boolean;
+    freeThresholdMet: boolean;
+    cost: string;
+    /** Удалось ли серверу рассчитать доставку. false → стоимость неизвестна
+     *  (нельзя платить за непосчитанную доставку). Отсутствует/undefined →
+     *  поведение прежнее (расчёт доступен) — мягкая деградация старого контракта. */
+    available?: boolean;
+  };
   fulfillable: boolean;
   issues: Array<{ index: number; code: string }>;
 }

@@ -11,25 +11,43 @@ import { FadeIn } from "@/components/ui/Animations";
 import { IMAGES } from "@/lib/images";
 
 const STATUS_LABELS: Record<string, string> = {
+  // статусы заказа
   new: "Новый",
-  pending: "Ожидает оплаты",
+  awaiting_payment: "Ожидает оплаты",
   paid: "Оплачен",
+  packed: "Собран",
   processing: "В обработке",
   confirmed: "Подтверждён",
   shipped: "Отправлен",
   delivered: "Доставлен",
+  completed: "Завершён",
   cancelled: "Отменён",
+  refunded: "Возврат оформлен",
+  // статусы оплаты (statusLabel общий для заказа/оплаты/доставки)
+  pending: "Ожидает оплаты",
+  authorized: "Оплата захолдирована",
+  failed: "Оплата не прошла",
+  // статусы доставки
+  registered: "Накладная создана",
+  in_transit: "В пути",
+  returned: "Возвращена",
 };
 
 function statusLabel(status: string): string {
   return STATUS_LABELS[status.toLowerCase()] ?? status;
 }
 
-/** Можно ли доплатить заказ онлайн: не оплачен и метод — карта/СБП (Т-Банк-эквайринг). */
+/**
+ * Можно ли доплатить заказ онлайн: не оплачен (pending/failed/unset) и метод —
+ * карта/СБП (Т-Банк-эквайринг). `failed` ВКЛЮЧЁН: после отказа/таймаута оплаты
+ * (Т-Банк REJECTED/CANCELED/DEADLINE_EXPIRED → payment_status='failed') покупатель
+ * должен мочь повторить оплату из ЛК — иначе тупик и потерянная продажа. Бэкенд
+ * init это допускает (любой статус кроме paid/refunded), машина: failed→pending.
+ */
 function isPayable(order: AdmikOrderPublicDto): boolean {
   const st = order.paymentStatus?.toLowerCase();
   const m = order.paymentMethod?.toLowerCase();
-  return (st === "pending" || st === "unset" || !st) && (m === "card" || m === "sbp");
+  return (st === "pending" || st === "failed" || st === "unset" || !st) && (m === "card" || m === "sbp");
 }
 
 /** Карточка заказа: статусы, позиции, суммы, трек + «Оплатить» для неоплаченного online-заказа. */
