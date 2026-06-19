@@ -24,16 +24,24 @@ class FakePgUuidCastError extends Error {
   code = '22P02'; // invalid_text_representation
 }
 
-const listProducts = vi.fn(async (filter: { brandId?: string; categoryId?: string }) => {
-  // Воспроизводим прод-поведение: ::uuid-каст падает на не-UUID значении.
-  const isUuid = (v: string | undefined): boolean =>
-    v === undefined ||
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
-  if (!isUuid(filter.brandId) || !isUuid(filter.categoryId)) {
-    throw new FakePgUuidCastError('invalid input syntax for type uuid');
-  }
-  return { rows: [], total: 0 };
-});
+const listProducts = vi.fn(
+  async (filter: {
+    brandId?: string;
+    categoryId?: string;
+    page?: number;
+    pageSize?: number;
+    offset?: number;
+  }) => {
+    // Воспроизводим прод-поведение: ::uuid-каст падает на не-UUID значении.
+    const isUuid = (v: string | undefined): boolean =>
+      v === undefined ||
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
+    if (!isUuid(filter.brandId) || !isUuid(filter.categoryId)) {
+      throw new FakePgUuidCastError('invalid input syntax for type uuid');
+    }
+    return { rows: [], total: 0 };
+  },
+);
 
 vi.mock('@/lib/catalog/repository', () => ({
   listProducts,
@@ -119,5 +127,65 @@ describe('storefront/products — uuid-валидация фильтров (BUG 
     const r = await get('?brandId=');
     expect(r.status).toBe(200);
     expect(listProducts).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * Пагинация: СВОБОДНЫЙ offset (не кратный limit) пробрасывается в listProducts
+ * БЕЗ молчаливого округления до границы страницы (BUG: minor пагинации).
+ *
+ * До фикса route считал page = floor(offset/limit)+1 и НЕ передавал offset, а
+ * listProducts вычислял offset = (page-1)*pageSize. Для offset=10, limit=24:
+ * page=1 → offset=0 → 10 запрошенных товаров молча терялись (пропуск/дубли при
+ * листании). После фикса offset уходит в listProducts как есть и отражается в
+ * метаданных pagination.offset ответа.
+ */
+describe('storefront/products — пагинация: свободный offset без округления', () => {
+  beforeEach(() => {
+    setEnv();
+    listProducts.mockClear();
+  });
+  afterEach(() => {
+    process.env = { ...ORIGINAL };
+    vi.resetModules();
+  });
+
+  it('offset=10&limit=24 → listProducts получает offset=10 (НЕ 0), pageSize=24', async () => {
+    const r = await get('?offset=10&limit=24');
+    expect(r.status).toBe(200);
+    expect(listProducts).toHaveBeenCalledTimes(1);
+    const filter = listProducts.mock.calls[0]![0];
+    expect(filter.offset).toBe(10);
+    expect(filter.pageSize).toBe(24);
+    // page оставлен совместимым (для логов/фолбэка), но offset имеет приоритет.
+    // Формат успеха витрины — { data, ...meta }: pagination на верхнем уровне.
+    expect(r.body?.pagination?.offset).toBe(10);
+    expect(r.body?.pagination?.limit).toBe(24);
+  });
+
+  it('offset=25&limit=10 (не кратен) → offset=25 как есть (без округления до 20/30)', async () => {
+    const r = await get('?offset=25&limit=10');
+    expect(r.status).toBe(200);
+    const filter = listProducts.mock.calls[0]![0];
+    expect(filter.offset).toBe(25);
+    expect(filter.pageSize).toBe(10);
+    expect(r.body?.pagination?.offset).toBe(25);
+  });
+
+  it('offset не задан → offset=0, page=1 (дефолт, контракт не сломан)', async () => {
+    const r = await get('?limit=12');
+    expect(r.status).toBe(200);
+    const filter = listProducts.mock.calls[0]![0];
+    expect(filter.offset).toBe(0);
+    expect(filter.page).toBe(1);
+    expect(r.body?.pagination?.offset).toBe(0);
+  });
+
+  it('отрицательный offset → клампится в 0 (защита, без 500)', async () => {
+    const r = await get('?offset=-5&limit=10');
+    expect(r.status).toBe(200);
+    const filter = listProducts.mock.calls[0]![0];
+    expect(filter.offset).toBe(0);
+    expect(r.body?.pagination?.offset).toBe(0);
   });
 });

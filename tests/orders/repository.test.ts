@@ -793,4 +793,57 @@ describe.skipIf(!INTEGRATION_DB_URL)('orders/repository (интеграция, �
     `;
     expect(row!.status).toBe('paid');
   });
+
+  // ---------------------------------------------------------------------------
+  // listActivePromotions (волна 14): промокод с исчерпанным usage_limit
+  // (used_count >= usage_limit) НЕ попадает в публичный список акций. Иначе
+  // витрина показывала бы бейдж «акция» по коду, который уже нельзя применить
+  // (createOrder отклонит как invalid_promo) — рассинхрон UI и фактического
+  // расчёта. Условие фильтра: usage_limit IS NULL OR used_count < usage_limit.
+  // ---------------------------------------------------------------------------
+  describe('listActivePromotions: исключает исчерпанный usage_limit', () => {
+    /** Создаёт промокод и доводит used_count до нужного значения. */
+    async function makePromoWithUsed(over: {
+      code: string;
+      usageLimit: number | null;
+      usedCount: number;
+    }): Promise<string> {
+      const id = await makePromo({
+        code: over.code,
+        kind: 'fixed',
+        value: '100.00',
+        usageLimit: over.usageLimit,
+      });
+      if (over.usedCount > 0) {
+        await sql`UPDATE promo_codes SET used_count = ${over.usedCount} WHERE id = ${id}`;
+      }
+      return id;
+    }
+
+    it('used_count >= usage_limit → НЕ в списке; null-лимит и used_count<limit → в списке', async () => {
+      const suffix = Math.random().toString(36).slice(2, 8).toUpperCase();
+      const exhausted = await makePromoWithUsed({
+        code: `EXH-${suffix}`,
+        usageLimit: 2,
+        usedCount: 2, // исчерпан (>= лимита)
+      });
+      const unlimited = await makePromoWithUsed({
+        code: `UNL-${suffix}`,
+        usageLimit: null, // безлимит → всегда активен
+        usedCount: 999,
+      });
+      const available = await makePromoWithUsed({
+        code: `AVL-${suffix}`,
+        usageLimit: 5,
+        usedCount: 4, // ещё есть запас (4 < 5)
+      });
+
+      const list = await repo.listActivePromotions();
+      const ids = list.map((p) => p.promo.id);
+
+      expect(ids).not.toContain(exhausted); // исчерпанный скрыт
+      expect(ids).toContain(unlimited); // безлимитный показан
+      expect(ids).toContain(available); // с запасом показан
+    });
+  });
 });

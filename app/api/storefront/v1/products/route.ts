@@ -40,7 +40,11 @@ export async function GET(req: Request): Promise<Response> {
     const q = url.searchParams;
 
     const limit = Math.min(100, Math.max(1, parseIntOr(q.get('limit'), 24)));
+    // offset пробрасывается в listProducts КАК ЕСТЬ (clamp >= 0), без округления
+    // до границы страницы. Свободный offset (не кратный limit) не должен молча
+    // терять/дублировать товары между «страницами» (BUG: minor пагинации).
     const offset = Math.max(0, parseIntOr(q.get('offset'), 0));
+    // page оставляем совместимым (фолбэк/логи), но offset имеет приоритет в SQL.
     const page = Math.floor(offset / limit) + 1;
 
     // brandId — точный id-фильтр: если задан, обязан быть валидным uuid, иначе
@@ -81,6 +85,8 @@ export async function GET(req: Request): Promise<Response> {
       isNew: parseBool(q.get('new')),
       onSale: parseBool(q.get('sale')),
       page,
+      // Явный offset (приоритет над page в listProducts) — точная пагинация.
+      offset,
       pageSize: limit,
     };
 

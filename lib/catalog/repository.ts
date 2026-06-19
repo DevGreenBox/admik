@@ -336,6 +336,14 @@ export interface ProductListFilter {
   onSale?: boolean;
   page: number;
   pageSize: number;
+  /**
+   * Явный OFFSET (число пропускаемых строк). Если задан — имеет приоритет над
+   * `page` и используется КАК ЕСТЬ (clamp >= 0, floor), без округления до границы
+   * страницы. Нужен публичному API: свободный offset (не кратный pageSize) не
+   * должен молча терять/дублировать товары между «страницами». Не задан → offset
+   * вычисляется из page как (page-1)*pageSize (обратная совместимость).
+   */
+  offset?: number;
   sort?: ProductSort;
 }
 
@@ -369,7 +377,13 @@ export async function listProducts(
 ): Promise<{ rows: ProductListRow[]; total: number }> {
   const page = Math.max(1, Math.floor(f.page));
   const pageSize = Math.min(200, Math.max(1, Math.floor(f.pageSize)));
-  const offset = (page - 1) * pageSize;
+  // Явный offset имеет приоритет и используется как есть (clamp >= 0). Иначе —
+  // вычисляем из page (обратная совместимость). Так свободный offset (не кратный
+  // pageSize) не округляется молча до границы страницы (пропуск/дубли товаров).
+  const offset =
+    f.offset !== undefined && Number.isFinite(f.offset)
+      ? Math.max(0, Math.floor(f.offset))
+      : (page - 1) * pageSize;
 
   const searchTerm = f.search?.trim() ? `%${escapeLike(f.search.trim())}%` : null;
   // Поддерево категории (сама + потомки) для рекурсивного фильтра. null = без фильтра.
@@ -408,8 +422,18 @@ export async function listProducts(
       p.id, p.sku, p.slug, p.name, p.status, p.base_price, p.created_at,
       p.compare_at_price, p.is_featured, p.is_new, p.brand_id,
       b.id AS b_id, b.slug AS b_slug, b.name AS b_name, b.logo_key AS b_logo_key,
-      COALESCE((SELECT sum(i.quantity) FROM inventory i WHERE i.product_id = p.id), 0) AS total_stock,
-      COALESCE((SELECT sum(GREATEST(i.quantity - i.reserved, 0)) FROM inventory i WHERE i.product_id = p.id), 0) AS available_stock,
+      -- Остаток товара: строки вариантов всегда; строку уровня товара
+      -- (variant_id IS NULL) учитываем ТОЛЬКО если у товара нет вариантов — иначе
+      -- осиротевшая product-level строка (заданная до добавления вариантов)
+      -- завышала бы наличие в каталоге (товар «в наличии», хотя все варианты пусты).
+      COALESCE((SELECT sum(i.quantity) FROM inventory i
+        WHERE i.product_id = p.id
+          AND (i.variant_id IS NOT NULL
+               OR NOT EXISTS (SELECT 1 FROM product_variants v WHERE v.product_id = p.id))), 0) AS total_stock,
+      COALESCE((SELECT sum(GREATEST(i.quantity - i.reserved, 0)) FROM inventory i
+        WHERE i.product_id = p.id
+          AND (i.variant_id IS NOT NULL
+               OR NOT EXISTS (SELECT 1 FROM product_variants v WHERE v.product_id = p.id))), 0) AS available_stock,
       (SELECT m.url FROM product_media m
         WHERE m.product_id = p.id AND m.is_primary
         LIMIT 1) AS primary_media_url

@@ -326,6 +326,166 @@ describe.skipIf(!hasDb)('каталог — рекурсивный фильтр 
   });
 });
 
+// ИНТЕГРАЦИЯ (волна 14): listProducts.total_stock/available_stock ИГНОРИРУЮТ
+// осиротевшую строку inventory с variant_id IS NULL, когда у товара ЕСТЬ варианты
+// (строка уровня товара, заданная ДО добавления вариантов, иначе завышала бы
+// наличие — «в наличии», хотя все варианты пусты). Для товара БЕЗ вариантов —
+// строка variant_id IS NULL учитывается как обычно.
+describe.skipIf(!hasDb)('каталог — осиротевший inventory (variant_id NULL при наличии вариантов)', () => {
+  afterAll(async () => {
+    await closeSql();
+  });
+
+  it('товар С вариантами: строка inventory variant_id IS NULL НЕ учитывается; считаются только варианты', async () => {
+    const suffix = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const sku = 'it-orphan-' + suffix;
+    const [{ id: productId }] = await sql<{ id: string }[]>`
+      INSERT INTO products (sku, slug, name, status, base_price)
+      VALUES (${sku}, ${sku}, 'С вариантами', 'active', '100.00')
+      RETURNING id
+    `;
+    // Вариант с собственным остатком (3, из них 1 зарезервирован → доступно 2).
+    const [{ id: variantId }] = await sql<{ id: string }[]>`
+      INSERT INTO product_variants (product_id, sku, name)
+      VALUES (${productId}, ${'itv-' + suffix}, 'M')
+      RETURNING id
+    `;
+    await sql`
+      INSERT INTO inventory (product_id, variant_id, warehouse_code, quantity, reserved)
+      VALUES (${productId}, ${variantId}, 'main', 3, 1)
+    `;
+    // ОСИРОТЕВШАЯ строка уровня товара (variant_id IS NULL, заданная до вариантов):
+    // её НЕ должны учитывать, иначе total завысится на 50.
+    await sql`
+      INSERT INTO inventory (product_id, variant_id, warehouse_code, quantity, reserved)
+      VALUES (${productId}, NULL, 'main', 50, 0)
+    `;
+
+    const { rows } = await listProducts({ search: sku, page: 1, pageSize: 5 });
+    const found = rows.find((r) => r.id === productId);
+    expect(found).toBeTruthy();
+    // Учтён только вариант: total=3 (не 53), available=2 (3−1, без +50 сироты).
+    expect(found!.totalStock).toBe(3);
+    expect(found!.availableStock).toBe(2);
+
+    await sql`DELETE FROM products WHERE id = ${productId}`;
+  });
+
+  it('товар БЕЗ вариантов: строка inventory variant_id IS NULL учитывается', async () => {
+    const suffix = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const sku = 'it-novar-' + suffix;
+    const [{ id: productId }] = await sql<{ id: string }[]>`
+      INSERT INTO products (sku, slug, name, status, base_price)
+      VALUES (${sku}, ${sku}, 'Без вариантов', 'active', '100.00')
+      RETURNING id
+    `;
+    await sql`
+      INSERT INTO inventory (product_id, variant_id, warehouse_code, quantity, reserved)
+      VALUES (${productId}, NULL, 'main', 7, 2)
+    `;
+
+    const { rows } = await listProducts({ search: sku, page: 1, pageSize: 5 });
+    const found = rows.find((r) => r.id === productId);
+    expect(found).toBeTruthy();
+    expect(found!.totalStock).toBe(7); // строка уровня товара учтена (нет вариантов)
+    expect(found!.availableStock).toBe(5); // 7 − 2
+
+    await sql`DELETE FROM products WHERE id = ${productId}`;
+  });
+});
+
+// ИНТЕГРАЦИЯ: пагинация со СВОБОДНЫМ offset (не кратным pageSize). listProducts
+// должен использовать переданный offset как есть — без округления до границы
+// страницы. Иначе при листании со свободным offset товары пропускаются/дублятся
+// между «страницами» (BUG: minor пагинации публичного API).
+describe.skipIf(!hasDb)('каталог — пагинация: свободный offset без пропусков/дублей', () => {
+  afterAll(async () => {
+    await closeSql();
+  });
+
+  it('offset пробрасывается как есть: окна [0..n) и [k..n) согласованы поэлементно', async () => {
+    const suffix = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const total = 7;
+    const ids: string[] = [];
+    // Стабильный порядок: фиксируем created_at по возрастанию i, сортируем по нему ASC.
+    for (let i = 0; i < total; i++) {
+      const sku = `pag-${suffix}-${i}`;
+      const [{ id }] = await sql<{ id: string }[]>`
+        INSERT INTO products (sku, slug, name, status, base_price, created_at)
+        VALUES (${sku}, ${sku}, ${'Пагинация ' + i}, 'active', '100.00',
+                ${new Date(Date.now() + i * 1000)})
+        RETURNING id
+      `;
+      ids.push(id);
+    }
+
+    // Полное окно (порядок по created_at ASC = порядок вставки).
+    const full = await listProducts({
+      search: `pag-${suffix}-`,
+      page: 1,
+      pageSize: total + 5,
+      sort: 'created_desc', // дефолтная сортировка списка (created_at DESC)
+    });
+    const fullIds = full.rows.map((r) => r.id);
+    expect(fullIds.length).toBe(total);
+
+    // СВОБОДНЫЙ offset=3, pageSize=10 → суффикс полного окна с 4-го элемента.
+    const tail = await listProducts({
+      search: `pag-${suffix}-`,
+      offset: 3,
+      page: 1, // page игнорируется в пользу offset
+      pageSize: 10,
+      sort: 'created_desc',
+    });
+    expect(tail.rows.map((r) => r.id)).toEqual(fullIds.slice(3));
+
+    // Несовпадающий с pageSize offset=2, pageSize=3 → строго [2,3,4] полного окна
+    // (а не округление вниз до 0). Проверяем отсутствие пропуска/сдвига.
+    const window = await listProducts({
+      search: `pag-${suffix}-`,
+      offset: 2,
+      page: 1,
+      pageSize: 3,
+      sort: 'created_desc',
+    });
+    expect(window.rows.map((r) => r.id)).toEqual(fullIds.slice(2, 5));
+
+    // Смежные окна со свободным offset не пересекаются и не теряют элементы:
+    // [0..2) ∪ [2..5) ∪ [5..7) = всё окно, без дублей.
+    const a = await listProducts({ search: `pag-${suffix}-`, offset: 0, page: 1, pageSize: 2, sort: 'created_desc' });
+    const b = await listProducts({ search: `pag-${suffix}-`, offset: 2, page: 1, pageSize: 3, sort: 'created_desc' });
+    const c = await listProducts({ search: `pag-${suffix}-`, offset: 5, page: 1, pageSize: 3, sort: 'created_desc' });
+    const concatenated = [...a.rows, ...b.rows, ...c.rows].map((r) => r.id);
+    expect(concatenated).toEqual(fullIds); // без пропусков и без дублей
+
+    await sql`DELETE FROM products WHERE id = ANY(${ids}::uuid[])`;
+  });
+
+  it('offset не задан → фолбэк на page (page=2, pageSize=2 = offset 2)', async () => {
+    const suffix = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const ids: string[] = [];
+    for (let i = 0; i < 5; i++) {
+      const sku = `pgf-${suffix}-${i}`;
+      const [{ id }] = await sql<{ id: string }[]>`
+        INSERT INTO products (sku, slug, name, status, base_price, created_at)
+        VALUES (${sku}, ${sku}, ${'Фолбэк ' + i}, 'active', '100.00',
+                ${new Date(Date.now() + i * 1000)})
+        RETURNING id
+      `;
+      ids.push(id);
+    }
+
+    const full = await listProducts({ search: `pgf-${suffix}-`, page: 1, pageSize: 50, sort: 'created_desc' });
+    const fullIds = full.rows.map((r) => r.id);
+
+    // Без offset: page=2, pageSize=2 → элементы [2,3] (как раньше; контракт цел).
+    const page2 = await listProducts({ search: `pgf-${suffix}-`, page: 2, pageSize: 2, sort: 'created_desc' });
+    expect(page2.rows.map((r) => r.id)).toEqual(fullIds.slice(2, 4));
+
+    await sql`DELETE FROM products WHERE id = ANY(${ids}::uuid[])`;
+  });
+});
+
 function findNode(nodes: any[], id: string): any | null {
   for (const n of nodes) {
     if (n.id === id) return n;
