@@ -97,8 +97,14 @@ export interface VariantDto {
   onSale: boolean;
   /** Публичные атрибуты варианта (denormalized cache — без внутренних id). */
   attributes: Record<string, unknown>;
-  /** В наличии (inventory > 0). Точный остаток НЕ раскрывается. */
+  /** В наличии (inventory > 0). */
   inStock: boolean;
+  /**
+   * Доступное к заказу количество (quantity − reserved, ≥0). Нужно витрине, чтобы
+   * ОГРАНИЧИТЬ счётчик количества в корзине остатком (раньше можно было добавить
+   * сколько угодно при остатке 1). Это та же величина, что драйвит `inStock`.
+   */
+  availableQty: number;
 }
 
 export interface ProductListItemDto {
@@ -113,6 +119,8 @@ export interface ProductListItemDto {
   brand: BrandDto | null;
   imageUrl: string | null;
   inStock: boolean;
+  /** Доступное к заказу количество (≥0) — для ограничения корзины (см. VariantDto.availableQty). */
+  availableQty: number;
 }
 
 export interface ProductDetailDto {
@@ -138,6 +146,12 @@ export interface ProductDetailDto {
   variants: VariantDto[];
   media: MediaDto[];
   inStock: boolean;
+  /**
+   * Доступное к заказу количество на уровне ТОВАРА (для товара без вариантов —
+   * витрина заказывает по productId). Для товара с вариантами лимит берётся из
+   * VariantDto.availableQty выбранного варианта.
+   */
+  availableQty: number;
   meta: SeoMetaDto;
 }
 
@@ -272,6 +286,7 @@ export function toProductListItemDto(
     // остаток: зарезервированное под незавершённые заказы не показываем (оверселл).
     // Семантика совпадает с computeInStock карточки/детали.
     inStock: row.availableStock > 0,
+    availableQty: Math.max(0, row.availableStock),
   };
 }
 
@@ -300,6 +315,27 @@ export function computeInStock(
     (i) =>
       i.quantity - i.reserved > 0 &&
       (variantId === undefined || (i.variantId ?? null) === (variantId ?? null)),
+  );
+}
+
+/**
+ * Доступное к заказу количество по строкам inventory (опц. фильтр по варианту).
+ *
+ * Сумма max(quantity − reserved, 0): зарезервированное под незавершённые заказы
+ * не доступно (иначе оверселл); отрицательный рассинхрон reserved>quantity
+ * отсекается в 0. Та же база, что и computeInStock (булева версия), но число —
+ * витрина ограничивает им счётчик количества в корзине.
+ */
+export function computeAvailableQty(
+  inventory: InventoryItem[],
+  variantId?: string | null,
+): number {
+  return inventory.reduce(
+    (sum, i) =>
+      variantId === undefined || (i.variantId ?? null) === (variantId ?? null)
+        ? sum + Math.max(0, i.quantity - i.reserved)
+        : sum,
+    0,
   );
 }
 
@@ -343,6 +379,7 @@ export function toVariantDto(
     onSale: isOnSale(price, compareAtStr),
     attributes: variant.attributesCache ?? {},
     inStock: computeInStock(product.inventory, variant.id),
+    availableQty: computeAvailableQty(product.inventory, variant.id),
   };
 }
 
@@ -378,6 +415,8 @@ export function toProductDetailDto(
       .map((v) => toVariantDto(v, product)),
     media: product.media.map(toMediaDto),
     inStock: computeInStock(product.inventory),
+    // Уровень товара (для товара без вариантов — заказ по productId).
+    availableQty: computeAvailableQty(product.inventory),
     meta: entityMeta(product, opts.seoCtx),
   };
 }

@@ -7,6 +7,7 @@ import {
   toVariantDto,
   toCategoryTreeDto,
   computeInStock,
+  computeAvailableQty,
   effectiveVariantPrice,
 } from '@/lib/storefront/dto';
 import type {
@@ -374,5 +375,30 @@ describe('storefront/dto — дерево категорий', () => {
     expect(dto[0]!.children[0]!.slug).toBe('coats');
     expect(dto[0]!).not.toHaveProperty('id');
     expect(dto[0]!).not.toHaveProperty('isActive');
+  });
+});
+
+describe('computeAvailableQty — доступное к заказу количество (для лимита корзины)', () => {
+  const inv = (over: Partial<{ variantId: string | null; quantity: number; reserved: number }>) => ({
+    id: 'i', productId: 'p', variantId: null, warehouseCode: 'main',
+    quantity: 0, reserved: 0, updatedAt: new Date('2025-01-01'), ...over,
+  });
+
+  it('суммирует quantity − reserved по всем строкам (товар без фильтра по варианту)', () => {
+    expect(computeAvailableQty([inv({ quantity: 5, reserved: 2 }), inv({ quantity: 3, reserved: 0 })])).toBe(6);
+  });
+
+  it('фильтрует по варианту', () => {
+    const rows = [inv({ variantId: 'v1', quantity: 4, reserved: 1 }), inv({ variantId: 'v2', quantity: 9, reserved: 0 })];
+    expect(computeAvailableQty(rows, 'v1')).toBe(3);
+    expect(computeAvailableQty(rows, 'v2')).toBe(9);
+  });
+
+  it('reserved ≥ quantity → 0 (не уходит в минус, не даёт оверселл)', () => {
+    expect(computeAvailableQty([inv({ quantity: 2, reserved: 5 })])).toBe(0);
+  });
+
+  it('пустой inventory → 0', () => {
+    expect(computeAvailableQty([])).toBe(0);
   });
 });
