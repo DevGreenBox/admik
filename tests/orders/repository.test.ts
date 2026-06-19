@@ -494,9 +494,9 @@ describe.skipIf(!INTEGRATION_DB_URL)('orders/repository (интеграция, �
       const delivery = { type: 'courier' as const, city: 'Москва' };
 
       // 1) Эталон: прямой расчёт СДЭК по реальному весу. Зеркалит ровно то, что
-      // делает computeDeliveryCost: дефолтный тариф магазина (CDEK_DEFAULT_TARIFF),
-      // назначение строкой города (address). Дефолтный тариф 136 — ПВЗ-формула §5.3
-      // без курьерской надбавки.
+      // делает computeDeliveryCost для КУРЬЕРА: тариф склад-дверь (doorTariffCode 137,
+      // M4-полнота), назначение строкой города (address). Раньше курьер считался по
+      // ПВЗ-тарифу 136 (undercharge) — теперь по 137 с курьерской надбавкой.
       const { Calculator } = await import('@/lib/cdek/services/calculator');
       const { getCdekManager } = await import('@/lib/cdek/manager');
       const mgr = getCdekManager();
@@ -504,11 +504,11 @@ describe.skipIf(!INTEGRATION_DB_URL)('orders/repository (интеграция, �
       const expected = await calc.calculate({
         to: { address: 'Москва' },
         lines: [{ qty: 1, weightG }],
-        tariffCode: mgr.config.defaultTariffCode,
+        tariffCode: mgr.config.doorTariffCode,
       });
-      // 5000 г → 5 кг по дефолтному тарифу 136 (ПВЗ): 300 + 100*5 = 800
-      // (≠ 400 при дефолтном весе 500 г — это и есть устранённый undercharge).
-      expect(expected.deliverySum).toBe('800.00');
+      // 5000 г → 5 кг по тарифу склад-дверь 137: 300 + 100*5 + 150 (курьерская
+      // надбавка) = 950 (≠ 800 по ПВЗ-136 — устранён недотариф курьера, M4-полнота).
+      expect(expected.deliverySum).toBe('950.00');
 
       // 2) quote: доставка совпадает с эталоном по реальному весу.
       const q = await repo.quoteCart({ items: [{ productId, qty: 1 }], delivery });

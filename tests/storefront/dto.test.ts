@@ -445,4 +445,14 @@ describe('computeAvailableQty — доступное к заказу колич�
     // Без фильтра показал бы наличие (это и был риск оверселла на мультискладе).
     expect(computeInStock(soldMain)).toBe(true);
   });
+
+  it('m5: сравнение склада РЕГИСТРОНЕЗАВИСИМО (citext) — «Main» считается как «main»', () => {
+    const D2 = new Date('2025-01-01');
+    const mixed = [
+      { id: 'a', productId: 'p', variantId: null, warehouseCode: 'Main', quantity: 4, reserved: 0, updatedAt: D2 },
+    ];
+    // Строгий === спрятал бы остаток; citext-семантика — «Main» === «main».
+    expect(computeAvailableQty(mixed, undefined, 'main')).toBe(4);
+    expect(computeInStock(mixed, undefined, 'main')).toBe(true);
+  });
 });

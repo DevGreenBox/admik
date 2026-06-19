@@ -405,7 +405,10 @@ export type MediaReorderInput = z.infer<typeof MediaReorderSchema>;
 export const StockSetSchema = z.object({
   productId: uuidSchema,
   variantId: uuidSchema.nullish(),
-  warehouseCode: z.string().trim().min(1).max(64).optional().default('main'),
+  // m5: нормализуем к нижнему регистру — колонка warehouse_code citext (регистро-
+  // независима в БД), а витринный показ сравнивает строкой; канонизация на входе
+  // держит хранимые коды в одном регистре, чтобы показ совпадал с резервом/заказом.
+  warehouseCode: z.string().trim().toLowerCase().min(1).max(64).optional().default('main'),
   /** Абсолютное значение остатка (≥0). */
   quantity: z.number().int().min(0),
 });
@@ -415,7 +418,10 @@ export const StockAdjustSchema = z
   .object({
     productId: uuidSchema,
     variantId: uuidSchema.nullish(),
-    warehouseCode: z.string().trim().min(1).max(64).optional().default('main'),
+    // m5: нормализуем к нижнему регистру — колонка warehouse_code citext (регистро-
+  // независима в БД), а витринный показ сравнивает строкой; канонизация на входе
+  // держит хранимые коды в одном регистре, чтобы показ совпадал с резервом/заказом.
+  warehouseCode: z.string().trim().toLowerCase().min(1).max(64).optional().default('main'),
     /** Дельта изменения (может быть отрицательной); итог не уходит ниже 0. */
     delta: z.number().int(),
   })

@@ -321,7 +321,10 @@ export function computeInStock(
     (i) =>
       i.quantity - i.reserved > 0 &&
       (variantId === undefined || (i.variantId ?? null) === (variantId ?? null)) &&
-      (warehouseCode === undefined || i.warehouseCode === warehouseCode),
+      // m5: регистронезависимо — колонка warehouse_code citext (резерв/заказ
+      // сравнивают регистронезависимо в БД); строгий === расходился бы с ними.
+      (warehouseCode === undefined ||
+        i.warehouseCode.toLowerCase() === warehouseCode.toLowerCase()),
   );
 }
 
@@ -344,7 +347,9 @@ export function computeAvailableQty(
   return inventory.reduce(
     (sum, i) =>
       (variantId === undefined || (i.variantId ?? null) === (variantId ?? null)) &&
-      (warehouseCode === undefined || i.warehouseCode === warehouseCode)
+      // m5: регистронезависимо (citext) — см. computeInStock.
+      (warehouseCode === undefined ||
+        i.warehouseCode.toLowerCase() === warehouseCode.toLowerCase())
         ? sum + Math.max(0, i.quantity - i.reserved)
         : sum,
     0,

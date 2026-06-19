@@ -125,6 +125,15 @@ describe('ProductUpdateSchema', () => {
     expect(ProductUpdateSchema.safeParse({ id: UUID, name: 'X' }).success).toBe(true);
   });
 
+  it('m5: warehouseCode нормализуется к нижнему регистру (citext-канонизация)', () => {
+    const r = StockSetSchema.safeParse({ productId: UUID, quantity: 5, warehouseCode: 'Main' });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.warehouseCode).toBe('main');
+    // дефолт уже в нижнем регистре
+    const d = StockSetSchema.safeParse({ productId: UUID, quantity: 5 });
+    expect(d.success && d.data.warehouseCode).toBe('main');
+  });
+
   it('primaryCategoryId должна входить в categoryIds (на update тоже, m2)', () => {
     // Невалидная пара: основная категория не в списке → отказ (как на create).
     expect(
