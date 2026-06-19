@@ -6,7 +6,7 @@ import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
 import { X } from "lucide-react";
 import { BESTSELLER_HOVER } from "@/lib/images";
-import { useStore } from "@/lib/store";
+import { useStore, useHydrated } from "@/lib/store";
 import {
   getProduct,
   fromDetail,
@@ -26,7 +26,13 @@ interface ProductCardProps {
 
 export function ProductCard({ product, priority = false, size = "default" }: ProductCardProps) {
   const toggleWishlist = useStore((s) => s.toggleWishlist);
-  const isInWishlist = useStore((s) => s.isInWishlist(product.slug));
+  const isInWishlistRaw = useStore((s) => s.isInWishlist(product.slug));
+  // Вишлист хранится в persist-сторе (localStorage) и регидрируется ПОСЛЕ маунта.
+  // Пока не регидрирован, первый клиентский рендер обязан совпасть с серверным
+  // («Избранное»), иначе текст «В избранном» даёт React #418 (hydration text
+  // mismatch). После регидрации показываем реальное состояние. См. useHydrated.
+  const hydrated = useHydrated();
+  const isInWishlist = hydrated && isInWishlistRaw;
   const [quickView, setQuickView] = useState(false);
 
   const imageSizes = size === "large" ? "50vw" : "(max-width: 768px) 50vw, 25vw";

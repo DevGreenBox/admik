@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Heart, Minus, Plus } from "lucide-react";
 import { formatPrice } from "@/lib/format";
 import { productCtaLabel } from "@/lib/product-cta";
-import { useStore } from "@/lib/store";
+import { useStore, useHydrated } from "@/lib/store";
 import type { StorefrontProduct, StorefrontVariant } from "@/lib/admik";
 import { Button } from "@/components/ui/Button";
 import { FadeIn } from "@/components/ui/Animations";
@@ -37,7 +37,13 @@ export function ProductDetailClient({ product, related }: ProductDetailClientPro
 
   const addToCart = useStore((s) => s.addToCart);
   const toggleWishlist = useStore((s) => s.toggleWishlist);
-  const isInWishlist = useStore((s) => s.isInWishlist(product.slug));
+  // Заливка «сердечка» зависит от persist-вишлиста (localStorage). До регидрации
+  // держим серверное состояние (не залито), затем показываем реальное — тот же
+  // защитный паттерн, что в ProductCard (см. useHydrated): консистентность + без
+  // мерцания заливки. Реального #418 здесь нет (skipHydration + rehydrate в useEffect).
+  const isInWishlistRaw = useStore((s) => s.isInWishlist(product.slug));
+  const hydrated = useHydrated();
+  const isInWishlist = hydrated && isInWishlistRaw;
 
   const hasVariants = product.variants.length > 0;
   const selectedSize = selectedVariant?.size ?? null;

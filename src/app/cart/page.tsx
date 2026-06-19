@@ -87,6 +87,7 @@ export default function CartPage() {
                             updateQuantity(item.variantId, item.quantity - 1)
                           }
                           className="p-2 hover:bg-surface transition-colors"
+                          aria-label="Уменьшить количество"
                         >
                           <Minus className="h-3 w-3" strokeWidth={1.5} />
                         </button>
@@ -96,6 +97,7 @@ export default function CartPage() {
                             updateQuantity(item.variantId, item.quantity + 1)
                           }
                           className="p-2 hover:bg-surface transition-colors"
+                          aria-label="Увеличить количество"
                         >
                           <Plus className="h-3 w-3" strokeWidth={1.5} />
                         </button>
