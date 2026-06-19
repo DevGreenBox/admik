@@ -186,3 +186,23 @@ export function paymentStatusOnSettle(
   if (toOrderStatus !== 'cancelled' && toOrderStatus !== 'refunded') return null;
   return payment === 'paid' ? 'refunded' : null;
 }
+
+/**
+ * Можно ли инициировать оплату заказа (backend-инвариант для initPayment/webhook).
+ *
+ * БЛОКИРУЕТ:
+ *  - отменённый/возвращённый ЗАКАЗ (order.status ∈ cancelled/refunded) — иначе
+ *    отменённый заказ можно было бы оплатить (init не проверял order.status);
+ *  - уже оплаченный/возвращённый ПЛАТЁЖ (payment_status ∈ paid/refunded) — повторная
+ *    оплата не нужна/некорректна.
+ * ДОПУСКАЕТ ретрай неуспешной оплаты (payment='failed' на активном заказе): пара к
+ * isPayable(failed) на витрине и машине failed→pending/paid.
+ */
+export function isOrderPayable(
+  orderStatus: OrderStatus,
+  paymentStatus: PaymentStatus,
+): boolean {
+  if (orderStatus === 'cancelled' || orderStatus === 'refunded') return false;
+  if (paymentStatus === 'paid' || paymentStatus === 'refunded') return false;
+  return true;
+}

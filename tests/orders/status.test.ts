@@ -10,6 +10,7 @@ import {
   canTransitionOrder,
   canTransitionPayment,
   isTerminal,
+  isOrderPayable,
   paymentStatusOnSettle,
   nextDeliveryStatuses,
   nextOrderStatuses,
@@ -208,5 +209,25 @@ describe('orders/status — целостность таблиц переходо
     expect(Object.keys(DELIVERY_STATUS_TRANSITIONS).sort()).toEqual(
       [...DELIVERY_STATUSES].sort(),
     );
+  });
+});
+
+describe('isOrderPayable — backend-инвариант оплачиваемости (БАГ #11)', () => {
+  it('БЛОКИРУЕТ оплату отменённого/возвращённого ЗАКАЗА (даже при payment=pending)', () => {
+    expect(isOrderPayable('cancelled', 'pending')).toBe(false);
+    expect(isOrderPayable('refunded', 'pending')).toBe(false);
+    expect(isOrderPayable('cancelled', 'failed')).toBe(false);
+  });
+
+  it('БЛОКИРУЕТ повторную оплату уже оплаченного/возвращённого ПЛАТЕЖА', () => {
+    expect(isOrderPayable('paid', 'paid')).toBe(false);
+    expect(isOrderPayable('paid', 'refunded')).toBe(false);
+  });
+
+  it('ДОПУСКАЕТ активный заказ с pending/failed/authorized (вкл. ретрай failed)', () => {
+    expect(isOrderPayable('new', 'pending')).toBe(true);
+    expect(isOrderPayable('awaiting_payment', 'pending')).toBe(true);
+    expect(isOrderPayable('paid', 'failed')).toBe(true); // ретрай неуспешной оплаты
+    expect(isOrderPayable('new', 'authorized')).toBe(true);
   });
 });

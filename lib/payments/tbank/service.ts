@@ -26,6 +26,7 @@ import { getOrderByNumber } from '@/lib/orders/repository';
 import { TbankManager, getTbankManager } from './manager';
 import { TbankError } from './errors';
 import { mapTbankStatus } from './status-map';
+import { isOrderPayable } from '@/lib/orders/status';
 import { verifyNotificationToken } from './token';
 import { buildReceipt } from './receipt';
 import { toKopecks } from './receipt';
@@ -107,6 +108,16 @@ export class PaymentService {
     const amountKop = toKopecks(order.grandTotal);
     if (amountKop <= 0) {
       throw new TbankError('tbank_invalid_amount', `Некорректная сумма заказа: ${order.grandTotal}.`);
+    }
+    // Гард оплачиваемости (backend-инвариант): отменённый/возвращённый заказ и уже
+    // оплаченный/возвращённый платёж оплачивать нельзя. Раньше init проверял только
+    // сумму → отменённый заказ (order.status='cancelled', payment_status='pending')
+    // можно было оплатить. Допускает ретрай failed-оплаты.
+    if (!isOrderPayable(order.status, order.paymentStatus)) {
+      throw new TbankError(
+        'tbank_order_not_payable',
+        `Заказ ${order.number} нельзя оплатить (статус заказа «${order.status}», оплаты «${order.paymentStatus}»).`,
+      );
     }
 
     // ---- MOCK-режим: без сети, фейковый PaymentId + внутренний PaymentURL. ----
