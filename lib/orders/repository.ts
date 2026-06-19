@@ -415,6 +415,13 @@ export async function resolveCartLine(input: {
     product = await getProductById(input.productId);
     if (!product) return { ok: false, reason: 'product_not_found' };
     if (product.status !== 'active') return { ok: false, reason: 'inactive' };
+    // БАГ #11 (аудит цикла 2): товар С активными вариантами нельзя заказать по productId —
+    // иначе резервируется ОСИРОТЕВШИЙ product-level остаток (variant_id IS NULL), который
+    // витрина намеренно прячет (toProductDetailDto при наличии вариантов считает наличие
+    // только по вариантам, #13). Заказ идёт по variantId; требуем выбор варианта.
+    if (product.variants.some((v) => v.isActive)) {
+      return { ok: false, reason: 'variant_not_found' };
+    }
   } else {
     return { ok: false, reason: 'product_not_found' };
   }
