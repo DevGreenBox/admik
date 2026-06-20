@@ -96,7 +96,6 @@ describe('C10-1 SMOKE — round-trip на поведенческой БД', () =
       [VAR_B]: db.variantCache.get(VAR_B),
       [VAR_C]: db.variantCache.get(VAR_C),
     };
-    // eslint-disable-next-line no-console
     console.log('C10-1 SMOKE — кеш вариантов после пересбора:', JSON.stringify(readBack));
 
     expect(readBack[VAR_A]).toEqual({ color: 'Красный' });
