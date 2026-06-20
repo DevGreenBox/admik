@@ -39,7 +39,10 @@ import {
 import { countCategoryChildren } from './repository';
 import { CatalogError } from './errors';
 import { canMoveCategory } from './tree';
-import { rebuildProductAttributesCache } from './cache';
+import {
+  rebuildProductAttributesCache,
+  rebuildVariantAttributesCache,
+} from './cache';
 import { slugify, slugifyOrFallback, uniquifySlug } from './slug';
 
 /**
@@ -941,8 +944,13 @@ export const setProductAttributes = defineAction({
         ON CONFLICT DO NOTHING
       `;
     }
-    // Пересбор презентационного кеша (ADR-007, cache.ts).
+    // Пересбор презентационного кеша (ADR-007, cache.ts): уровень товара —
+    // всегда; уровень вариантов — для переданных вариантов (C10-1: иначе
+    // product_variants.attributes_cache остаётся стейл/пустым на витрине).
     const cache = await rebuildProductAttributesCache(data.productId);
+    if (variantIds.length > 0) {
+      await rebuildVariantAttributesCache(data.productId, variantIds);
+    }
     return {
       result: { productId: data.productId, cache },
       revalidate: [productPath(data.productId)],

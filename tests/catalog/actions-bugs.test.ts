@@ -105,6 +105,9 @@ const H = vi.hoisted(() => {
     writeAuditSpy: vi.fn(async (..._args: unknown[]) => {}),
     getCurrentUserMock: vi.fn(async () => state.currentUser),
     rebuildCacheMock: vi.fn(async (..._args: unknown[]) => ({}) as Record<string, unknown>),
+    rebuildVariantCacheMock: vi.fn(
+      async (..._args: unknown[]) => ({}) as Record<string, unknown>,
+    ),
     storagePutMock: vi.fn(async (key: string) => ({
       key,
       url: `https://cdn.test/${key}`,
@@ -132,6 +135,7 @@ vi.mock('@/lib/config/settings', () => ({ isModuleEffectivelyEnabled: async () =
 vi.mock('@/lib/db/client', () => ({ sql: H.sqlMock }));
 vi.mock('@/lib/catalog/cache', () => ({
   rebuildProductAttributesCache: H.rebuildCacheMock,
+  rebuildVariantAttributesCache: H.rebuildVariantCacheMock,
 }));
 vi.mock('@/lib/storage', () => ({
   getStorage: () => ({ put: H.storagePutMock, delete: H.storageDeleteMock }),
@@ -358,6 +362,36 @@ describe('БАГ #11 — setProductAttributes заменяет и привязк
       items: [{ attributeId: ATTR_ID, valueText: 'Хлопок' }],
     });
     expect(sqlText()).toContain('variant_id IS NULL');
+  });
+
+  // --- C10-1 (цикл 10) — пересбор product_variants.attributes_cache ----------
+  it('C10-1: с variant-item зовётся rebuildVariantAttributesCache(productId, [distinct variantIds])', async () => {
+    H.rebuildVariantCacheMock.mockClear();
+    await setProductAttributes({
+      productId: UUID,
+      items: [
+        { attributeId: ATTR_ID, variantId: VAR_A, valueId: VAL_BLUE },
+        { attributeId: ATTR_ID, variantId: VAR_B, valueId: VAL_BLUE },
+        // дубль варианта A — список должен быть distinct.
+        { attributeId: ATTR_ID, variantId: VAR_A, valueText: 'X' },
+      ],
+    });
+    expect(H.rebuildVariantCacheMock).toHaveBeenCalledTimes(1);
+    const [pid, vids] = H.rebuildVariantCacheMock.mock.calls[0] as [
+      string,
+      string[],
+    ];
+    expect(pid).toBe(UUID);
+    expect([...vids].sort()).toEqual([VAR_A, VAR_B].sort());
+  });
+
+  it('C10-1: без variant-item кеш вариантов НЕ пересобирается (лишних запросов нет)', async () => {
+    H.rebuildVariantCacheMock.mockClear();
+    await setProductAttributes({
+      productId: UUID,
+      items: [{ attributeId: ATTR_ID, valueText: 'Хлопок' }],
+    });
+    expect(H.rebuildVariantCacheMock).not.toHaveBeenCalled();
   });
 });
 
