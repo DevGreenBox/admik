@@ -2,8 +2,7 @@ import {
   HomeBanner,
   CoverSlides,
   ValuesStrip,
-  CollectionWomen,
-  CollectionMen,
+  Collection,
   ShopCategories,
   EditorialStatement,
   About,
@@ -13,10 +12,11 @@ import { getCategories, type AdmikCategoryDto } from "@/lib/admik";
 
 export const dynamic = "force-dynamic";
 
-// Композиция главной (правки клиента): обложка → women → лента
-// «форма/функция/дисциплина» (с описанием) → men → категории → философия →
-// о бренде → доставка. Убраны: «Medical Fashion», «Editorial», «Bestsellers»
-// (пока нет товаров), «Материалы» (нечем заполнить).
+// Композиция главной (правки клиента): обложка → «Создано вместе с врачами»
+// (+ качество ткани) → коллекция (вкладки женщины/мужчины) → лента
+// «форма/функция/дисциплина» → категории → философия → о бренде → доставка.
+// Убраны: «Medical Fashion», «Editorial», «Bestsellers» (пока нет товаров),
+// «Материалы» (нечем заполнить). Women/Men объединены в Collection (вкладки).
 export default async function HomePage() {
   // РЕАЛЬНЫЕ категории каталога (не зашитые slug): ссылки блоков women/men/
   // категории резолвятся в существующие категории магазина, иначе вели бы в
@@ -36,9 +36,8 @@ export default async function HomePage() {
     <>
       <HomeBanner />
       <CoverSlides />
-      <CollectionWomen categories={categories} />
+      <Collection categories={categories} />
       <ValuesStrip />
-      <CollectionMen categories={categories} />
       <ShopCategories categories={categories} />
       <EditorialStatement />
       <About />

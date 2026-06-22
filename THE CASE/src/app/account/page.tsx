@@ -266,7 +266,29 @@ function AccountContent() {
           )}
 
         <FadeIn>
-          <h1 className="heading-lg heading-rule mb-10">Мои заказы</h1>
+          <p className="eyebrow mb-6">Кабинет покупателя</p>
+          <h1 className="heading-lg heading-rule mb-10">Личный кабинет</h1>
+        </FadeIn>
+
+        {/* Блок «Мои данные». Витрина headless и без авторизации пользователя
+            (гостевой трекинг по номеру+email/токену), поэтому профиль —
+            информационный блок. Поля заполняются при оформлении заказа.
+            TODO: при появлении авторизации покупателя — подтянуть профиль из API. */}
+        <FadeIn>
+          <section className="mb-12">
+            <h2 className="heading-md mb-6">Мои данные</h2>
+            <div className="border border-border p-6 text-sm text-muted leading-relaxed">
+              <p>
+                Контактные данные (имя, email, телефон, адрес доставки) указываются
+                при оформлении заказа. Историю покупок и статусы заказов смотрите ниже.
+              </p>
+            </div>
+          </section>
+        </FadeIn>
+
+        {/* Блок «Мои заказы». */}
+        <FadeIn>
+          <h2 className="heading-md mb-6">Мои заказы</h2>
         </FadeIn>
 
         {/* Карточка заказа по ссылке трекинга (?order=&token=). */}

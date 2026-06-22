@@ -1,9 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { AnimatePresence, motion } from "framer-motion";
 import { FadeIn, TextReveal } from "@/components/ui/Animations";
 import { HEADER_OFFSET } from "@/components/layout/Header";
 import { CategoryInfographics } from "@/components/home/CategoryInfographic";
@@ -16,7 +15,14 @@ import type { AdmikCategoryDto } from "@/lib/admik";
 export function HomeBanner() {
   return (
     <section className={HEADER_OFFSET}>
-      <div className="relative block w-full">
+      {/* Правка клиента: весь первый блок кликабелен → /catalog; картинка-контент
+          не меняется. CTA центрирован по горизонтали, чтобы аккуратно вписаться
+          в обложку. */}
+      <Link
+        href="/catalog"
+        aria-label="Смотреть коллекцию"
+        className="group relative block w-full"
+      >
         <Image
           src={IMAGES.home.banner}
           alt="THE CASE — Medical Uniform"
@@ -26,16 +32,13 @@ export function HomeBanner() {
           className="block w-full h-auto object-contain"
           sizes="100vw"
         />
-        {/* CTA на обложке (правка клиента) */}
-        <div className="absolute inset-x-0 bottom-[6%] flex justify-center md:bottom-[8%]">
-          <Link
-            href="/catalog"
-            className="bg-white/90 px-8 py-3 text-[10px] uppercase tracking-[0.22em] text-graphite backdrop-blur-sm transition-colors duration-500 hover:bg-white md:px-10 md:py-4 md:text-[11px]"
-          >
+        {/* CTA на обложке — центрирован (правка клиента) */}
+        <div className="pointer-events-none absolute inset-x-0 bottom-[6%] flex justify-center md:bottom-[8%]">
+          <span className="inline-block bg-white/90 px-8 py-3 text-center text-[10px] uppercase tracking-[0.22em] text-graphite backdrop-blur-sm transition-colors duration-500 group-hover:bg-white md:px-10 md:py-4 md:text-[11px]">
             Смотреть коллекцию
-          </Link>
+          </span>
         </div>
-      </div>
+      </Link>
     </section>
   );
 }
@@ -48,95 +51,62 @@ const FABRIC_FEATURES = [
 ];
 
 /**
- * Слайды на обложке (правки клиента): «О бренде» (форма создаётся на основе
- * предпочтений реальных докторов; место под эскизы) + «Качество ткани» (фактура +
- * характеристики). Точки + автопрокрутка. Серая фактура и эскизы — плейсхолдеры
- * до получения фото от клиента (см. TODO).
+ * Блок «Создано вместе с врачами» (правки клиента). Слайдер убран (правка 2):
+ * «О бренде» (форма на основе предпочтений реальных докторов; место под эскизы)
+ * и «Качество ткани» (характеристики) теперь СТАТИЧНЫ — фабрика идёт ниже, без
+ * карусели и точек-переключателей. Серая фактура и эскизы — плейсхолдеры до
+ * получения фото от клиента (см. TODO).
  */
 export function CoverSlides() {
-  const slides = ["about", "fabric"] as const;
-  const [i, setI] = useState(0);
-  const go = useCallback(
-    (n: number) => setI(((n % slides.length) + slides.length) % slides.length),
-    [slides.length],
-  );
-
-  useEffect(() => {
-    const t = setInterval(() => setI((p) => (p + 1) % slides.length), 7000);
-    return () => clearInterval(t);
-  }, [slides.length]);
-
   return (
-    <section className="section-space-sm">
+    // Правка 3: уменьшен нижний отступ — промежуток до блока «Коллекция» был
+    // слишком большим (стек section-space-sm + section-space).
+    <section className="pt-24 pb-12 md:pt-36 md:pb-16 lg:pt-44 lg:pb-20">
       <div className="container-brand">
-        <div className="relative overflow-hidden">
-          <AnimatePresence mode="wait">
-            {slides[i] === "about" ? (
-              <motion.div
-                key="about"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.6 }}
-                className="grid grid-cols-1 items-center gap-10 bg-surface p-8 md:p-14 lg:grid-cols-2 lg:gap-16"
-              >
-                <div>
-                  <p className="eyebrow mb-6">О бренде</p>
-                  <h2 className="heading-lg heading-rule mb-6">Создано вместе с врачами</h2>
-                  <p className="body-editorial">
-                    Каждая модель THE CASE создаётся на основе предпочтений реальных докторов —
-                    от посадки и карманов до тканей, выдерживающих долгие смены.
-                  </p>
+        <FadeIn>
+          <div className="grid grid-cols-1 items-center gap-10 bg-surface p-8 md:p-14 lg:grid-cols-2 lg:gap-16">
+            <div>
+              <p className="eyebrow mb-6">О бренде</p>
+              <h2 className="heading-lg heading-rule mb-6">Создано вместе с врачами</h2>
+              <p className="body-editorial">
+                Каждая модель THE CASE создаётся на основе предпочтений реальных докторов —
+                от посадки и карманов до тканей, выдерживающих долгие смены.
+              </p>
+            </div>
+            {/* TODO(контент клиента): заменить плейсхолдеры на фото эскизов */}
+            <div className="grid grid-cols-3 gap-3">
+              {[0, 1, 2].map((n) => (
+                <div key={n} className="flex aspect-[3/4] items-center justify-center bg-white">
+                  <span className="text-[10px] uppercase tracking-[0.2em] text-muted">Эскиз</span>
                 </div>
-                {/* TODO(контент клиента): заменить плейсхолдеры на фото эскизов */}
-                <div className="grid grid-cols-3 gap-3">
-                  {[0, 1, 2].map((n) => (
-                    <div key={n} className="flex aspect-[3/4] items-center justify-center bg-white">
-                      <span className="text-[10px] uppercase tracking-[0.2em] text-muted">Эскиз</span>
-                    </div>
-                  ))}
-                </div>
-              </motion.div>
-            ) : (
-              <motion.div
-                key="fabric"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.6 }}
-                className="relative flex min-h-[420px] items-center md:min-h-[520px]"
-                style={{ background: "linear-gradient(135deg,#9a9da1,#7e8186 40%,#6f7277)" }}
-              >
-                {/* TODO(контент клиента): заменить серый градиент на фото фактуры ткани */}
-                <div
-                  className="absolute inset-0 opacity-[0.12]"
-                  style={{ backgroundImage: "repeating-linear-gradient(45deg,#000 0 1px,transparent 1px 4px)" }}
-                />
-                <div className="relative container-brand py-14 text-white md:py-20">
-                  <p className="eyebrow mb-6 text-white/60">Качество ткани</p>
-                  <ul className="max-w-xl space-y-4">
-                    {FABRIC_FEATURES.map((f) => (
-                      <li key={f} className="body-editorial border-l border-white/40 pl-5 text-white/90">
-                        {f}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
+              ))}
+            </div>
+          </div>
+        </FadeIn>
 
-        <div className="mt-6 flex justify-center gap-2">
-          {slides.map((s, n) => (
-            <button
-              key={s}
-              onClick={() => go(n)}
-              aria-label={`Слайд ${n + 1}`}
-              className={`h-1.5 rounded-full transition-all duration-500 ${i === n ? "w-8 bg-graphite" : "w-2 bg-border"}`}
+        {/* «Качество ткани» — статичный блок ниже (правка 2: вместо отдельного слайда) */}
+        <FadeIn delay={0.1}>
+          <div
+            className="relative mt-6 flex min-h-[360px] items-center overflow-hidden md:min-h-[420px]"
+            style={{ background: "linear-gradient(135deg,#9a9da1,#7e8186 40%,#6f7277)" }}
+          >
+            {/* TODO(контент клиента): заменить серый градиент на фото фактуры ткани */}
+            <div
+              className="absolute inset-0 opacity-[0.12]"
+              style={{ backgroundImage: "repeating-linear-gradient(45deg,#000 0 1px,transparent 1px 4px)" }}
             />
-          ))}
-        </div>
+            <div className="relative w-full px-8 py-14 text-white md:px-14 md:py-20">
+              <p className="eyebrow mb-6 text-white/60">Качество ткани</p>
+              <ul className="max-w-xl space-y-4">
+                {FABRIC_FEATURES.map((f) => (
+                  <li key={f} className="body-editorial border-l border-white/40 pl-5 text-white/90">
+                    {f}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </FadeIn>
       </div>
     </section>
   );
@@ -293,83 +263,111 @@ export function EditorialPair({
 
 function CategoryViews({
   label,
-  hint,
   views,
-  categories,
+  href,
 }: {
   label: string;
-  hint: string;
   views: readonly string[];
-  categories: AdmikCategoryDto[];
+  href: string;
 }) {
   const viewLabels = ["Front", "Side", "Back"];
-  // Ссылка резолвится в РЕАЛЬНУЮ категорию (по теме hint), иначе /catalog.
-  const href = resolveCategoryHref(categories, hint);
 
   return (
-    <>
-      <FadeIn>
-        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-6 mb-12 md:mb-16">
-          <h3 className="heading-lg heading-rule">{label}</h3>
-          <Link href={href} className="link-editorial self-start md:self-auto">
-            Смотреть все
+    <div className="mx-auto grid max-w-3xl grid-cols-1 gap-4 md:grid-cols-3 md:gap-6 lg:gap-8">
+      {views.map((src, i) => (
+        <FadeIn key={src} delay={i * 0.1}>
+          <Link href={href} className="group block">
+            <LuxuryImageSwap
+              primary={src}
+              secondary={categoryViewHover(views, i)}
+              alt={`${label} — ${viewLabels[i]}`}
+              sizes="33vw"
+              className="aspect-[3/4] bg-surface"
+            />
+            <p className="mt-6 md:mt-7 label-caps text-muted group-hover:text-graphite transition-colors duration-700">
+              {viewLabels[i]}
+            </p>
           </Link>
-        </div>
-      </FadeIn>
-
-      <div className="mx-auto grid max-w-3xl grid-cols-1 gap-4 md:grid-cols-3 md:gap-6 lg:gap-8">
-        {views.map((src, i) => (
-          <FadeIn key={src} delay={i * 0.1}>
-            <Link href={href} className="group block">
-              <LuxuryImageSwap
-                primary={src}
-                secondary={categoryViewHover(views, i)}
-                alt={`${label} — ${viewLabels[i]}`}
-                sizes="33vw"
-                className="aspect-[3/4] bg-surface"
-              />
-              <p className="mt-6 md:mt-7 label-caps text-muted group-hover:text-graphite transition-colors duration-700">
-                {viewLabels[i]}
-              </p>
-            </Link>
-          </FadeIn>
-        ))}
-      </div>
-    </>
+        </FadeIn>
+      ))}
+    </div>
   );
 }
 
-/** Shop — Women */
-export function CollectionWomen({
+/**
+ * «Коллекция» (правка 4): единая секция с вкладками «Для женщин»/«Для мужчин».
+ * Раньше были две отдельные секции (CollectionWomen + CollectionMen) с
+ * надзаголовком «Shop» и заголовками «Women»/«Men». Теперь надзаголовок «Shop»
+ * убран, а клик по вкладке переключает соответствующий блок товаров (без двух
+ * секций). Ссылка «Смотреть все» и блок фото резолвятся в РЕАЛЬНУЮ категорию
+ * каталога (по теме women/men), иначе /catalog.
+ */
+const COLLECTION_TABS = [
+  { key: "women", label: "Для женщин", hint: "women", views: IMAGES.categories.womenViews },
+  { key: "men", label: "Для мужчин", hint: "men", views: IMAGES.categories.menViews },
+] as const;
+
+export function Collection({
   categories = [],
 }: {
   categories?: AdmikCategoryDto[];
 }) {
+  const [active, setActive] = useState<(typeof COLLECTION_TABS)[number]["key"]>("women");
+  const current = COLLECTION_TABS.find((t) => t.key === active) ?? COLLECTION_TABS[0];
+  const href = resolveCategoryHref(categories, current.hint);
+
   return (
-    <section id="shop" className="section-space">
+    // Правка 3: верхний отступ сокращён (до этого section-space сверху давал
+    // избыточный разрыв с блоком «Создано вместе с врачами»).
+    <section id="shop" className="pt-16 pb-32 md:pt-20 md:pb-44 lg:pt-24 lg:pb-52">
       <div className="container-brand">
         <FadeIn>
-          <p className="eyebrow mb-6">Shop</p>
-          <h2 className="heading-lg heading-rule mb-16 md:mb-20 lg:mb-28 max-w-2xl">
+          <h2 className="heading-lg heading-rule mb-10 md:mb-12 max-w-2xl">
             <TextReveal text="Коллекция" />
           </h2>
         </FadeIn>
-        <CategoryViews label="Women" hint="women" views={IMAGES.categories.womenViews} categories={categories} />
-      </div>
-    </section>
-  );
-}
 
-/** Shop — Men */
-export function CollectionMen({
-  categories = [],
-}: {
-  categories?: AdmikCategoryDto[];
-}) {
-  return (
-    <section className="section-space-sm border-t border-border">
-      <div className="container-brand">
-        <CategoryViews label="Men" hint="men" views={IMAGES.categories.menViews} categories={categories} />
+        <FadeIn delay={0.05}>
+          <div className="mb-12 flex flex-col gap-6 md:mb-16 md:flex-row md:items-end md:justify-between">
+            <div className="flex gap-8" role="tablist" aria-label="Коллекция">
+              {COLLECTION_TABS.map((tab) => {
+                const isActive = tab.key === active;
+                return (
+                  <button
+                    key={tab.key}
+                    type="button"
+                    role="tab"
+                    id={`collection-tab-${tab.key}`}
+                    aria-selected={isActive}
+                    aria-controls={`collection-panel-${tab.key}`}
+                    onClick={() => setActive(tab.key)}
+                    className={`relative pb-2 text-sm tracking-wide transition-colors duration-500 ${
+                      isActive ? "text-graphite" : "text-muted hover:text-graphite"
+                    }`}
+                  >
+                    {tab.label}
+                    <span
+                      className={`absolute inset-x-0 bottom-0 h-px bg-accent transition-transform duration-500 ${
+                        isActive ? "scale-x-100" : "scale-x-0"
+                      }`}
+                    />
+                  </button>
+                );
+              })}
+            </div>
+            <Link href={href} className="link-editorial self-start md:self-auto">
+              Смотреть все
+            </Link>
+          </div>
+        </FadeIn>
+
+        <div
+          role="tabpanel"
+          id={`collection-panel-${current.key}`}
+          aria-labelledby={`collection-tab-${current.key}`}
+        >
+          <CategoryViews label={current.label} views={current.views} href={href} />
+        </div>
       </div>
     </section>
   );
@@ -385,7 +383,7 @@ export function ShopCategories({
     <section className="section-space-sm pb-28 md:pb-36 lg:pb-44">
       <div className="container-brand">
         <FadeIn>
-          <p className="eyebrow mb-6 text-center md:text-left">Categories</p>
+          <p className="eyebrow mb-6 text-center md:text-left">Категории</p>
         </FadeIn>
         <CategoryInfographics categories={categories} />
       </div>
@@ -467,6 +465,12 @@ const ABOUT_SLIDES = [
   IMAGES.editorial.menPortrait,
 ];
 
+/**
+ * Галерея «О бренде». Правка 7: фото уменьшены — раньше одно крупное вертикальное
+ * (aspect-3/4) выходило за вьюпорт; теперь горизонтальный ряд из трёх компактных
+ * кадров (aspect-3/4 в три колонки), целиком помещается на экран. Автосмена
+ * акцентного кадра сохранена, точки-переключатели оставлены под рядом.
+ */
 function AboutGallery({ images }: { images: string[] }) {
   const [i, setI] = useState(0);
   useEffect(() => {
@@ -477,19 +481,27 @@ function AboutGallery({ images }: { images: string[] }) {
 
   return (
     <div className="relative">
-      <div className="image-luxury relative aspect-[3/4] overflow-hidden bg-surface">
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={i}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.6 }}
-            className="absolute inset-0"
+      <div className="grid grid-cols-3 gap-3 md:gap-4">
+        {images.map((src, n) => (
+          <button
+            key={src}
+            type="button"
+            onClick={() => setI(n)}
+            aria-label={`Фото ${n + 1}`}
+            aria-current={i === n}
+            className="image-luxury relative aspect-[3/4] overflow-hidden bg-surface"
           >
-            <Image src={images[i]} alt="THE CASE — о бренде" fill className="object-cover object-center" sizes="40vw" />
-          </motion.div>
-        </AnimatePresence>
+            <Image
+              src={src}
+              alt="THE CASE — о бренде"
+              fill
+              className={`object-cover object-center transition-all duration-700 ${
+                i === n ? "opacity-100" : "opacity-60"
+              }`}
+              sizes="(max-width: 1024px) 33vw, 20vw"
+            />
+          </button>
+        ))}
       </div>
       {images.length > 1 && (
         <div className="mt-4 flex gap-2">
@@ -497,7 +509,7 @@ function AboutGallery({ images }: { images: string[] }) {
             <button
               key={n}
               onClick={() => setI(n)}
-              aria-label={`Фото ${n + 1}`}
+              aria-label={`Показать фото ${n + 1}`}
               className={`h-1.5 rounded-full transition-all duration-500 ${i === n ? "w-8 bg-graphite" : "w-2 bg-border"}`}
             />
           ))}
@@ -507,37 +519,46 @@ function AboutGallery({ images }: { images: string[] }) {
   );
 }
 
+/**
+ * «О бренде» (правки 6, 7). Текст растянут на всю ширину сверху — раньше он жил
+ * в узкой правой колонке, из-за чего слева оставалась пустота. Фото уменьшены
+ * (AboutGallery). Нижний отступ секции убран (pt-only), чтобы блок визуально
+ * сливался со следующим («Доставка и оплата») без разрыва.
+ */
 export function About() {
   return (
-    <section id="about" className="section-space">
+    <section id="about" className="pt-32 md:pt-44 lg:pt-52">
       <div className="container-brand">
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-16 lg:gap-20 items-start">
-          <FadeIn direction="left" className="lg:col-span-3">
-            <AboutGallery images={ABOUT_SLIDES} />
-          </FadeIn>
+        <FadeIn>
+          <p className="eyebrow mb-6">About</p>
+          <h2 className="heading-lg heading-rule mb-10 md:mb-12">О бренде</h2>
+          <div className="grid grid-cols-1 gap-8 body-editorial lg:grid-cols-2 [&>p]:max-w-none">
+            <p>
+              THE CASE — медицинская униформа нового поколения: функциональная, эстетичная и премиальная.
+              Fashion + Medicine — уверенность, профессионализм, современная эстетика.
+            </p>
+            <p>
+              Каждая модель разрабатывается вручную — от эскиза до выбора ткани. Комфорт
+              в длинных сменах и ощущение собранности каждый день.
+            </p>
+          </div>
+        </FadeIn>
 
-          <FadeIn direction="right" delay={0.15} className="lg:col-span-2 lg:pt-12 xl:pt-16">
-            <p className="eyebrow mb-6">About</p>
-            <h2 className="heading-lg heading-rule mb-10 md:mb-12">О бренде</h2>
-            <div className="space-y-8 body-editorial">
-              <p>
-                THE CASE — медицинская униформа нового поколения: функциональная, эстетичная и премиальная.
-                Fashion + Medicine — уверенность, профессионализм, современная эстетика.
-              </p>
-              <p>
-                Каждая модель разрабатывается вручную — от эскиза до выбора ткани. Комфорт
-                в длинных сменах и ощущение собранности каждый день.
-              </p>
-            </div>
-            <ul className="mt-14 md:mt-16 space-y-5">
-              {["Fashion + Medicine", "Уверенность", "Профессионализм", "Минимализм"].map((item) => (
-                <li key={item} className="text-[10px] uppercase tracking-[0.2em] text-graphite/80">
-                  {item}
-                </li>
-              ))}
-            </ul>
-          </FadeIn>
-        </div>
+        <FadeIn delay={0.12}>
+          <div className="mt-12 md:mt-16">
+            <AboutGallery images={ABOUT_SLIDES} />
+          </div>
+        </FadeIn>
+
+        <FadeIn delay={0.18}>
+          <ul className="mt-12 flex flex-wrap gap-x-10 gap-y-4 md:mt-16">
+            {["Fashion + Medicine", "Уверенность", "Профессионализм", "Минимализм"].map((item) => (
+              <li key={item} className="text-[10px] uppercase tracking-[0.2em] text-graphite/80">
+                {item}
+              </li>
+            ))}
+          </ul>
+        </FadeIn>
       </div>
     </section>
   );
@@ -551,11 +572,12 @@ export function Delivery() {
   ];
 
   return (
-    <section id="delivery" className="section-space-sm border-t border-border bg-white">
-      <div className="container-brand pt-4 md:pt-8">
+    // Правка 6: без верхней границы и с компактным верхним отступом — блок «О бренде»
+    // и «Доставка и оплата» читаются как единое целое, без разрыва.
+    <section id="delivery" className="bg-white pt-20 pb-24 md:pt-28 md:pb-36 lg:pt-32 lg:pb-44">
+      <div className="container-brand">
         <FadeIn>
           <div className="max-w-xl mb-16 md:mb-24 lg:mb-28">
-            <p className="eyebrow mb-6">Service</p>
             <h2 className="heading-lg heading-rule">Доставка и оплата</h2>
           </div>
         </FadeIn>

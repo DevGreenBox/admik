@@ -13,7 +13,7 @@ type NavItem = { href: string; label: string; children?: { href: string; label: 
 
 const NAV_RIGHT: NavItem[] = [
   { href: "/#delivery", label: "Доставка" },
-  { href: "/#contacts", label: "Контакты" },
+  { href: "/contacts", label: "Контакты" },
 ];
 
 export function Header({ categories = [] }: { categories?: AdmikCategoryDto[] }) {
