@@ -38,6 +38,14 @@ export function LegalContactsForm({
   const [email, setEmail] = useState(contacts.email ?? '');
   const [address, setAddress] = useState(contacts.address ?? '');
   const [workingHours, setWorkingHours] = useState(contacts.workingHours ?? '');
+  const [socials, setSocials] = useState<{ type: string; url: string }[]>(
+    (contacts.socials ?? []).map((s) => ({ type: s.type, url: s.url })),
+  );
+
+  const addSocial = () => setSocials((prev) => [...prev, { type: '', url: '' }]);
+  const removeSocial = (i: number) => setSocials((prev) => prev.filter((_, n) => n !== i));
+  const setSocial = (i: number, field: 'type' | 'url', val: string) =>
+    setSocials((prev) => prev.map((s, n) => (n === i ? { ...s, [field]: val } : s)));
 
   async function save() {
     setPending(true);
@@ -57,6 +65,9 @@ export function LegalContactsForm({
         email: email.trim() || undefined,
         address: address.trim() || undefined,
         workingHours: workingHours.trim() || undefined,
+        socials: socials
+          .map((s) => ({ type: s.type.trim(), url: s.url.trim() }))
+          .filter((s) => s.type && s.url),
       },
     });
     setPending(false);
@@ -145,6 +156,46 @@ export function LegalContactsForm({
           <input id="ct-hours" value={workingHours} onChange={(e) => setWorkingHours(e.target.value)}
             className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" />
         </div>
+      </div>
+
+      <h3 className="mt-6 text-sm font-semibold text-gray-800">Соцсети</h3>
+      <p className="mt-1 text-xs text-gray-500">
+        Ссылки в футере витрины. Тип — подпись (Instagram, Telegram…), адрес — ссылка.
+      </p>
+      <div className="mt-2 space-y-3">
+        {socials.map((s, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <input
+              aria-label={`Соцсеть ${i + 1} — тип`}
+              value={s.type}
+              onChange={(e) => setSocial(i, 'type', e.target.value)}
+              placeholder="Instagram"
+              className="w-40 rounded border border-gray-300 px-3 py-2 text-sm"
+            />
+            <input
+              aria-label={`Соцсеть ${i + 1} — адрес`}
+              value={s.url}
+              onChange={(e) => setSocial(i, 'url', e.target.value)}
+              placeholder="https://instagram.com/shop"
+              className="flex-1 rounded border border-gray-300 px-3 py-2 text-sm"
+            />
+            <button
+              type="button"
+              onClick={() => removeSocial(i)}
+              className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50"
+            >
+              Удалить
+            </button>
+          </div>
+        ))}
+        <button
+          type="button"
+          onClick={addSocial}
+          className="rounded border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+        >
+          + Добавить соцсеть
+        </button>
+        {fe('contacts.socials') ? <p className="text-xs text-red-600">{fe('contacts.socials')}</p> : null}
       </div>
 
       <div className="mt-6 flex items-center gap-3 border-t border-gray-200 pt-4">
