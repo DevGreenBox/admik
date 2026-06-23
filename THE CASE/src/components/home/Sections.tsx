@@ -10,17 +10,17 @@ import { IMAGES, EDITORIAL_HOVER, categoryViewHover } from "@/lib/images";
 import { LuxuryImageSwap } from "@/components/ui/LuxuryImageSwap";
 import { resolveCategoryHref } from "@/lib/catalog-view";
 import type { AdmikCategoryDto } from "@/lib/admik";
+import { HOME_FALLBACK, type ResolvedHome } from "@/lib/home-content";
 
 /** Full-width banner — первый блок под меню (+ CTA «смотреть коллекцию») */
-export function HomeBanner() {
+export function HomeBanner({ hero = HOME_FALLBACK.hero }: { hero?: ResolvedHome["hero"] }) {
   return (
     <section className={HEADER_OFFSET}>
-      {/* Правка клиента: весь первый блок кликабелен → /catalog; картинка-контент
-          не меняется. CTA центрирован по горизонтали, чтобы аккуратно вписаться
-          в обложку. */}
+      {/* Весь первый блок кликабелен → каталог; текст и ссылка CTA — из настроек
+          Admik (G-03, settings.home.hero) с фолбэком на дефолт витрины. */}
       <Link
-        href="/catalog"
-        aria-label="Смотреть коллекцию"
+        href={hero.ctaHref}
+        aria-label={hero.ctaLabel}
         className="group relative block w-full"
       >
         <Image
@@ -35,7 +35,7 @@ export function HomeBanner() {
         {/* CTA на обложке — центрирован (правка клиента) */}
         <div className="pointer-events-none absolute inset-x-0 bottom-[6%] flex justify-center md:bottom-[8%]">
           <span className="inline-block bg-white/90 px-8 py-3 text-center text-[10px] uppercase tracking-[0.22em] text-graphite backdrop-blur-sm transition-colors duration-500 group-hover:bg-white md:px-10 md:py-4 md:text-[11px]">
-            Смотреть коллекцию
+            {hero.ctaLabel}
           </span>
         </div>
       </Link>
@@ -43,21 +43,14 @@ export function HomeBanner() {
   );
 }
 
-const FABRIC_FEATURES = [
-  "Сохраняет глубину и яркость цвета",
-  "Устойчива к образованию катышков и зацепок",
-  "Эргономичная, повторяет каждое движение",
-  "Невесомая и приятная на ощупь",
-];
-
 /**
  * Блок «Создано вместе с врачами» (правки клиента). Слайдер убран (правка 2):
  * «О бренде» (форма на основе предпочтений реальных докторов; место под эскизы)
  * и «Качество ткани» (характеристики) теперь СТАТИЧНЫ — фабрика идёт ниже, без
- * карусели и точек-переключателей. Серая фактура и эскизы — плейсхолдеры до
- * получения фото от клиента (см. TODO).
+ * карусели и точек-переключателей. Заголовок и пункты «Качество ткани» — из
+ * настроек Admik (G-02, settings.home.quality) с фолбэком на дефолт витрины.
  */
-export function CoverSlides() {
+export function CoverSlides({ quality = HOME_FALLBACK.quality }: { quality?: ResolvedHome["quality"] }) {
   return (
     // Правка 3: уменьшен нижний отступ — промежуток до блока «Коллекция» был
     // слишком большим (стек section-space-sm + section-space).
@@ -96,9 +89,9 @@ export function CoverSlides() {
               style={{ backgroundImage: "repeating-linear-gradient(45deg,#000 0 1px,transparent 1px 4px)" }}
             />
             <div className="relative w-full px-8 py-14 text-white md:px-14 md:py-20">
-              <p className="eyebrow mb-6 text-white/60">Качество ткани</p>
+              <p className="eyebrow mb-6 text-white/60">{quality.title}</p>
               <ul className="max-w-xl space-y-4">
-                {FABRIC_FEATURES.map((f) => (
+                {quality.items.map((f) => (
                   <li key={f} className="body-editorial border-l border-white/40 pl-5 text-white/90">
                     {f}
                   </li>
@@ -525,22 +518,18 @@ function AboutGallery({ images }: { images: string[] }) {
  * (AboutGallery). Нижний отступ секции убран (pt-only), чтобы блок визуально
  * сливался со следующим («Доставка и оплата») без разрыва.
  */
-export function About() {
+export function About({ about = HOME_FALLBACK.about }: { about?: ResolvedHome["about"] }) {
   return (
     <section id="about" className="pt-32 md:pt-44 lg:pt-52">
       <div className="container-brand">
         <FadeIn>
           <p className="eyebrow mb-6">About</p>
-          <h2 className="heading-lg heading-rule mb-10 md:mb-12">О бренде</h2>
+          {/* Заголовок/абзацы/ценности — из настроек Admik (G-02, settings.home.about). */}
+          <h2 className="heading-lg heading-rule mb-10 md:mb-12">{about.title}</h2>
           <div className="grid grid-cols-1 gap-8 body-editorial lg:grid-cols-2 [&>p]:max-w-none">
-            <p>
-              THE CASE — медицинская униформа нового поколения: функциональная, эстетичная и премиальная.
-              Fashion + Medicine — уверенность, профессионализм, современная эстетика.
-            </p>
-            <p>
-              Каждая модель разрабатывается вручную — от эскиза до выбора ткани. Комфорт
-              в длинных сменах и ощущение собранности каждый день.
-            </p>
+            {about.paragraphs.map((p, i) => (
+              <p key={i}>{p}</p>
+            ))}
           </div>
         </FadeIn>
 
@@ -552,7 +541,7 @@ export function About() {
 
         <FadeIn delay={0.18}>
           <ul className="mt-12 flex flex-wrap gap-x-10 gap-y-4 md:mt-16">
-            {["Fashion + Medicine", "Уверенность", "Профессионализм", "Минимализм"].map((item) => (
+            {about.values.map((item) => (
               <li key={item} className="text-[10px] uppercase tracking-[0.2em] text-graphite/80">
                 {item}
               </li>
@@ -564,12 +553,9 @@ export function About() {
   );
 }
 
-export function Delivery() {
-  const items = [
-    { title: "СДЭК", desc: "Доставка по всей России. Пункты выдачи и курьер. Автоматический расчёт стоимости." },
-    { title: "Сроки", desc: "Москва — 1–2 дня. Регионы — 3–5 дня. Отслеживание в личном кабинете." },
-    { title: "Оплата", desc: "СДЭК PAY, банковские карты, СБП. Безопасная оплата и создание накладной." },
-  ];
+export function Delivery({ delivery = HOME_FALLBACK.delivery }: { delivery?: ResolvedHome["delivery"] }) {
+  // Блоки доставки/оплаты — из настроек Admik (G-02, settings.home.delivery).
+  const items = delivery.items;
 
   return (
     // Правка 6: без верхней границы и с компактным верхним отступом — блок «О бренде»
@@ -588,7 +574,7 @@ export function Delivery() {
               <article className="border-t border-graphite/15 pt-8 md:pt-10">
                 <span className="eyebrow text-silver">{String(i + 1).padStart(2, "0")}</span>
                 <h3 className="heading-md mt-6 mb-5">{item.title}</h3>
-                <p className="body-editorial">{item.desc}</p>
+                <p className="body-editorial">{item.text}</p>
               </article>
             </FadeIn>
           ))}

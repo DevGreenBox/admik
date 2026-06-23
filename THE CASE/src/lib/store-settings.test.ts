@@ -2,10 +2,12 @@ import { describe, it, expect } from 'vitest';
 import type { AdmikSettingsDto } from '@/lib/admik';
 import {
   STORE_DEFAULTS,
+  HOME_FALLBACK,
   resolveShopName,
   resolveLogoUrl,
   resolveSeo,
   resolveContacts,
+  resolveHome,
 } from './store-settings';
 
 /**
@@ -120,5 +122,36 @@ describe('resolveContacts', () => {
       contacts: { ...dto().contacts, socials: [{ type: 'соцсеть', url: 'https://t.me/x' }] },
     });
     expect(resolveContacts(s).telegramUrl).toBe('https://t.me/x');
+  });
+});
+
+describe('resolveHome', () => {
+  it('null → дефолтный контент витрины (HOME_FALLBACK)', () => {
+    expect(resolveHome(null)).toEqual(HOME_FALLBACK);
+  });
+  it('пустые блоки в настройках → фолбэк по полям', () => {
+    // dto() имеет home с пустыми paragraphs/items/values
+    const h = resolveHome(dto());
+    expect(h.about.title).toBe('О бренде'); // из настроек
+    expect(h.about.paragraphs).toEqual(HOME_FALLBACK.about.paragraphs); // пусто → фолбэк
+    expect(h.quality.items).toEqual(HOME_FALLBACK.quality.items);
+    expect(h.delivery.items).toEqual(HOME_FALLBACK.delivery.items);
+    expect(h.hero.ctaLabel).toBe(HOME_FALLBACK.hero.ctaLabel);
+  });
+  it('заполненные блоки переопределяют дефолт', () => {
+    const s = dto({
+      home: {
+        hero: { title: 'Привет', subtitle: 'Саб', imageKey: 'home/hero.webp', ctaLabel: 'В каталог', ctaHref: '/c' },
+        about: { title: 'Наш бренд', paragraphs: ['p1', 'p2'], imageKeys: ['a.webp'], values: ['v1'] },
+        quality: { title: 'Ткань', items: ['и1', 'и2'] },
+        delivery: { items: [{ title: 'Почта', text: 'быстро' }] },
+      },
+    });
+    const h = resolveHome(s);
+    expect(h.hero).toEqual({ title: 'Привет', subtitle: 'Саб', imageKey: 'home/hero.webp', ctaLabel: 'В каталог', ctaHref: '/c' });
+    expect(h.about.paragraphs).toEqual(['p1', 'p2']);
+    expect(h.about.values).toEqual(['v1']);
+    expect(h.quality).toEqual({ title: 'Ткань', items: ['и1', 'и2'] });
+    expect(h.delivery.items).toEqual([{ title: 'Почта', text: 'быстро' }]);
   });
 });

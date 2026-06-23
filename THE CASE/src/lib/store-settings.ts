@@ -16,6 +16,9 @@
 import { cache } from 'react';
 import { getSettings, type AdmikSettingsDto, type AdmikSocialDto } from '@/lib/admik';
 
+// Контент главной — в client-safe модуле (без react/cache), реэкспорт для удобства.
+export { HOME_FALLBACK, resolveHome, type ResolvedHome } from './home-content';
+
 /** Нейтральные дефолты витрины (фолбэк до первой правки в админке). */
 export const STORE_DEFAULTS = {
   shopName: 'THE CASE',

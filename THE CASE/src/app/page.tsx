@@ -9,6 +9,7 @@ import {
   Delivery,
 } from "@/components/home/Sections";
 import { getCategories, type AdmikCategoryDto } from "@/lib/admik";
+import { getStoreSettings, resolveHome } from "@/lib/store-settings";
 
 export const dynamic = "force-dynamic";
 
@@ -32,16 +33,20 @@ export default async function HomePage() {
     categories = [];
   }
 
+  // Контент главной из настроек Admik (G-02/G-03) с грациозным фолбэком на
+  // дефолты витрины (getStoreSettings: таймаут+null → HOME_FALLBACK).
+  const home = resolveHome(await getStoreSettings());
+
   return (
     <>
-      <HomeBanner />
-      <CoverSlides />
+      <HomeBanner hero={home.hero} />
+      <CoverSlides quality={home.quality} />
       <Collection categories={categories} />
       <ValuesStrip />
       <ShopCategories categories={categories} />
       <EditorialStatement />
-      <About />
-      <Delivery />
+      <About about={home.about} />
+      <Delivery delivery={home.delivery} />
     </>
   );
 }
