@@ -47,6 +47,8 @@ export const NAV: NavItem[] = [
   { href: '/admin/promo', label: 'Промокоды', permission: 'orders.write', module: 'orders' },
   // «Заявки» — core (без module): сообщения с формы витрины; право orders.read (G-09).
   { href: '/admin/leads', label: 'Заявки', permission: 'orders.read' },
+  // «Подписчики» — core: email-подписки из футера витрины; orders.read (G-12).
+  { href: '/admin/subscribers', label: 'Подписчики', permission: 'orders.read' },
   { href: '/admin/cdek', label: 'Доставка', permission: 'cdek.manage', module: 'cdek' },
   { href: '/admin/cms', label: 'Контент', permission: 'cms.read', module: 'cms' },
   { href: '/admin/users', label: 'Пользователи', permission: 'users.read' },

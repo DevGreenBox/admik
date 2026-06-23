@@ -12,6 +12,7 @@ import {
   getSettings,
   getPage,
   submitLead,
+  subscribeNewsletter,
 } from './client';
 
 const CFG = { baseUrl: 'https://admik.test/', apiKey: 'secret-key' };
@@ -226,5 +227,17 @@ describe('submitLead (G-09)', () => {
     expect(init.method).toBe('POST');
     expect(JSON.parse(init.body)).toEqual({ name: 'Иван', contact: 'i@e.ru', message: 'm' });
     expect(r).toEqual({ id: 'lead-1' });
+  });
+});
+
+describe('subscribeNewsletter (G-12)', () => {
+  it('POST /newsletter с email', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ data: { ok: true } }, 200));
+    const r = await subscribeNewsletter('i@e.ru', CFG);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://admik.test/api/storefront/v1/newsletter');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body)).toEqual({ email: 'i@e.ru' });
+    expect(r).toEqual({ ok: true });
   });
 });

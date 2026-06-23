@@ -259,6 +259,14 @@ export async function submitLead(
   return request<{ id: string }>('/leads', { method: 'POST', body: input, config });
 }
 
+/** Подписка на рассылку (POST /newsletter, G-12). Идемпотентна на стороне Admik. */
+export async function subscribeNewsletter(
+  email: string,
+  config?: Partial<AdmikClientConfig>,
+): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>('/newsletter', { method: 'POST', body: { email }, config });
+}
+
 // ---------------------------------------------------------------------------
 // Корзина / заказ.
 // ---------------------------------------------------------------------------

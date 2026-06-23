@@ -6,6 +6,7 @@ import { FadeIn } from "@/components/ui/Animations";
 import { Logo } from "@/components/ui/Logo";
 import { IMAGES } from "@/lib/images";
 import { categoryLinks } from "@/lib/catalog-view";
+import { subscribeNewsletter } from "@/lib/admik";
 import type { AdmikCategoryDto } from "@/lib/admik";
 import type { ResolvedContacts } from "@/lib/store-settings";
 
@@ -56,7 +57,25 @@ export function Footer({
   columns?: FooterColumn[];
 }) {
   const [email, setEmail] = useState("");
+  const [subscribed, setSubscribed] = useState(false);
+  const [subPending, setSubPending] = useState(false);
   const c = contacts ?? CONTACTS_FALLBACK;
+
+  // Подписка на рассылку (G-12): шлёт email на Storefront API; идемпотентна.
+  const handleSubscribe = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email.trim() || subPending) return;
+    setSubPending(true);
+    try {
+      await subscribeNewsletter(email.trim());
+      setSubscribed(true);
+      setEmail("");
+    } catch {
+      // мягкая деградация: не ломаем футер, просто не подтверждаем
+    } finally {
+      setSubPending(false);
+    }
+  };
   const cols = columns && columns.length > 0 ? columns : DEFAULT_COLUMNS;
   const lastCol = cols.length - 1;
 
@@ -147,21 +166,23 @@ export function Footer({
               <p className="text-[11px] text-white/55 leading-relaxed mb-6">
                 Новости коллекций и эксклюзивные материалы бренда.
               </p>
-              <form
-                onSubmit={(e) => { e.preventDefault(); setEmail(""); }}
-                className="flex border-b border-white/25 pb-2"
-              >
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="Email"
-                  className="flex-1 bg-transparent text-[11px] text-white placeholder:text-white/35 outline-none tracking-wide"
-                />
-                <button type="submit" className="text-[10px] uppercase tracking-[0.2em] text-white/70 hover:text-white transition-colors ml-4">
-                  Подписаться
-                </button>
-              </form>
+              {subscribed ? (
+                <p className="text-[11px] text-white/70">Спасибо! Вы подписаны на рассылку.</p>
+              ) : (
+                <form onSubmit={handleSubscribe} className="flex border-b border-white/25 pb-2">
+                  <input
+                    type="email"
+                    required
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="Email"
+                    className="flex-1 bg-transparent text-[11px] text-white placeholder:text-white/35 outline-none tracking-wide"
+                  />
+                  <button type="submit" disabled={subPending} className="text-[10px] uppercase tracking-[0.2em] text-white/70 hover:text-white transition-colors ml-4 disabled:opacity-50">
+                    {subPending ? "…" : "Подписаться"}
+                  </button>
+                </form>
+              )}
             </div>
           </div>
         </FadeIn>
