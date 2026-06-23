@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { FadeIn } from "@/components/ui/Animations";
+import { getCmsPage } from "@/lib/cms";
+import { CmsPageView } from "@/components/cms/CmsPageView";
 
 export const metadata = {
   title: "ВЫ + THE CASE — отзывы",
@@ -10,7 +12,12 @@ export const metadata = {
 // (фото + имя/город/специальность). Источник фото — клиент пришлёт отдельно.
 const REVIEWS_PLACEHOLDER = Array.from({ length: 6 });
 
-export default function ReviewsPage() {
+export default async function ReviewsPage() {
+  // Отзывы редактируются через CMS-страницу «reviews» (галерея фото + текст);
+  // если её нет — статические плейсхолдеры ниже (G-14, фолбэк).
+  const page = await getCmsPage("reviews");
+  if (page) return <CmsPageView page={page} />;
+
   return (
     <div className="page-transition pt-16 md:pt-20">
       <div className="container-brand py-12 md:py-16">
