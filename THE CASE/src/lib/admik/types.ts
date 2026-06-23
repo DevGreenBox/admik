@@ -258,6 +258,80 @@ export interface AdmikCdekCalcDto {
 }
 
 // ---------------------------------------------------------------------------
+// Настройки магазина (GET /settings → PublicSettingsDto). ADR-018 / G-01.
+// Источник правды: admik/lib/storefront/settings-dto.ts (PublicSettingsDto).
+// ---------------------------------------------------------------------------
+
+export interface AdmikSocialDto {
+  type: string;
+  url: string;
+}
+
+/** Редактируемый контент главной (ADR-018). Изображения — КЛЮЧИ S3 (не URL). */
+export interface AdmikHomeDto {
+  hero: {
+    title: string | null;
+    subtitle: string | null;
+    imageKey: string | null;
+    ctaLabel: string | null;
+    ctaHref: string | null;
+  };
+  about: {
+    title: string;
+    paragraphs: string[];
+    imageKeys: string[];
+    values: string[];
+  };
+  quality: { title: string; items: string[] };
+  delivery: { items: { title: string; text: string }[] };
+}
+
+export interface AdmikSettingsDto {
+  branding: {
+    shopName: string;
+    logoUrl: string | null;
+    faviconUrl: string | null;
+    theme: {
+      primaryColor: string | null;
+      accentColor: string | null;
+      mode: 'light' | 'dark' | 'system';
+    };
+    supportEmail: string | null;
+    supportPhone: string | null;
+  };
+  currency: {
+    code: string;
+    symbol: string | null;
+    locale: string | null;
+    fractionDigits: number;
+  };
+  units: { weight: 'g' | 'kg'; dimension: 'cm' | 'mm'; system: 'metric' };
+  contacts: {
+    phone: string | null;
+    email: string | null;
+    address: string | null;
+    workingHours: string | null;
+    socials: AdmikSocialDto[];
+  };
+  legalEntity: {
+    name: string | null;
+    inn: string | null;
+    kpp: string | null;
+    ogrn: string | null;
+    legalAddress: string | null;
+  };
+  delivery: { freeDeliveryThreshold: number };
+  seo: {
+    siteName: string | null;
+    siteUrl: string | null;
+    titleTemplate: string;
+    defaultDescription: string | null;
+    twitterSite: string | null;
+  };
+  home: AdmikHomeDto;
+}
+
+// ---------------------------------------------------------------------------
 // Витринная вью-модель (то, чем оперируют компоненты THE CASE).
 // ---------------------------------------------------------------------------
 

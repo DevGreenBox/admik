@@ -7,6 +7,7 @@ import { Logo } from "@/components/ui/Logo";
 import { IMAGES } from "@/lib/images";
 import { categoryLinks } from "@/lib/catalog-view";
 import type { AdmikCategoryDto } from "@/lib/admik";
+import type { ResolvedContacts } from "@/lib/store-settings";
 
 const FOOTER_LINKS = {
   service: [
@@ -23,16 +24,30 @@ const FOOTER_LINKS = {
   ],
 };
 
-// TODO(контент клиента): подставить реальный ник Telegram и телефон поддержки.
-const SUPPORT_TELEGRAM = "https://t.me/thecase_support";
-const SUPPORT_PHONE = "+70000000000";
+// Фолбэк контактов витрины (если layout не передал настройки). Реальные значения
+// приходят из админки Admik (G-01) через проп contacts.
+const CONTACTS_FALLBACK: ResolvedContacts = {
+  phoneDisplay: "+7 (___) ___-__-__",
+  phoneTel: "+70000000000",
+  email: "hello@thecase.ru",
+  telegramHandle: "@thecase",
+  telegramUrl: "https://t.me/thecase",
+  socials: [],
+};
 
 export function Footer({
   categories = [],
+  shopName = "THE CASE",
+  contacts,
 }: {
   categories?: AdmikCategoryDto[];
+  /** Имя магазина из настроек Admik (G-01). */
+  shopName?: string;
+  /** Контакты/соцсети из настроек Admik (G-01/G-08). */
+  contacts?: ResolvedContacts;
 }) {
   const [email, setEmail] = useState("");
+  const c = contacts ?? CONTACTS_FALLBACK;
 
   // Ссылки «Shop» строятся из РЕАЛЬНЫХ категорий магазина (не зашитые slug
   // women/men/suits, которых в каталоге нет → пустой каталог). «Коллекция» —
@@ -41,6 +56,15 @@ export function Footer({
     { href: "/catalog", label: "Коллекция" },
     ...categoryLinks(categories, 4).map((c) => ({ href: c.href, label: c.name })),
   ];
+
+  // Соцсети: из настроек (G-08), иначе дефолтные Instagram/Telegram витрины.
+  const socialLinks =
+    c.socials.length > 0
+      ? c.socials.map((s) => ({ label: s.type, href: s.url }))
+      : [
+          { label: "Instagram", href: "#" },
+          { label: "Telegram", href: c.telegramUrl ?? CONTACTS_FALLBACK.telegramUrl! },
+        ];
 
   return (
     <footer id="contacts" className="relative bg-graphite text-white mt-32 md:mt-40 lg:mt-48 overflow-hidden">
@@ -54,7 +78,7 @@ export function Footer({
           {/* Jil Sander / ETRU — 4-column footer grid + newsletter */}
           <div className="grid grid-cols-1 md:grid-cols-12 gap-14 md:gap-8 lg:gap-6">
             <div className="md:col-span-3">
-              <Logo variant="light" size="md" showSubtitle />
+              <Logo variant="light" size="md" showSubtitle shopName={shopName} />
             </div>
 
             <div className="md:col-span-2">
@@ -83,13 +107,15 @@ export function Footer({
               </ul>
               <div className="mt-8 space-y-3 text-[11px] text-white/55">
                 <p className="eyebrow text-white/40">Поддержка</p>
-                <a href={SUPPORT_TELEGRAM} target="_blank" rel="noopener noreferrer" className="block hover:text-white transition-colors">
-                  Написать в Telegram
-                </a>
-                <a href={`tel:${SUPPORT_PHONE}`} className="block hover:text-white transition-colors">
+                {c.telegramUrl && (
+                  <a href={c.telegramUrl} target="_blank" rel="noopener noreferrer" className="block hover:text-white transition-colors">
+                    Написать в Telegram
+                  </a>
+                )}
+                <a href={`tel:${c.phoneTel}`} className="block hover:text-white transition-colors">
                   Позвонить
                 </a>
-                <a href="mailto:hello@thecase.ru" className="block hover:text-white transition-colors">hello@thecase.ru</a>
+                <a href={`mailto:${c.email}`} className="block hover:text-white transition-colors">{c.email}</a>
               </div>
             </div>
 
@@ -105,10 +131,7 @@ export function Footer({
                 ))}
               </ul>
               <div className="mt-8 flex gap-6">
-                {[
-                  { label: "Instagram", href: "#" },
-                  { label: "Telegram", href: SUPPORT_TELEGRAM },
-                ].map((s) => (
+                {socialLinks.map((s) => (
                   <a key={s.label} href={s.href} target="_blank" rel="noopener noreferrer" className="eyebrow text-white/35 hover:text-white transition-colors">
                     {s.label}
                   </a>
@@ -142,12 +165,12 @@ export function Footer({
 
         {/* Jil Sander — oversized wordmark */}
         <div className="mt-20 md:mt-28 pt-10 border-t border-white/10">
-          <p className="footer-wordmark text-center select-none">THE CASE</p>
+          <p className="footer-wordmark text-center select-none">{shopName}</p>
           <div className="flex justify-center mt-5">
             <span className="h-[2px] w-14 bg-accent" />
           </div>
           <p className="text-center eyebrow text-white/30 mt-6">
-            © {new Date().getFullYear()} · Medical Uniform
+            © {new Date().getFullYear()} · {shopName}
           </p>
         </div>
       </div>

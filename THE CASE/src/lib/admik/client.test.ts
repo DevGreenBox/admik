@@ -9,6 +9,7 @@ import {
   createOrder,
   getOrder,
   cdekPvz,
+  getSettings,
 } from './client';
 
 const CFG = { baseUrl: 'https://admik.test/', apiKey: 'secret-key' };
@@ -180,5 +181,17 @@ describe('cdekPvz', () => {
     expect(fetchMock.mock.calls[0][0]).toBe(
       'https://admik.test/api/storefront/v1/delivery/cdek/pvz?city_code=44',
     );
+  });
+});
+
+describe('getSettings', () => {
+  it('GET /settings, разворачивает { data }', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ data: { branding: { shopName: 'Магазин' }, contacts: { socials: [] } } }),
+    );
+    const s = await getSettings(CFG);
+    expect(fetchMock.mock.calls[0][0]).toBe('https://admik.test/api/storefront/v1/settings');
+    expect((fetchMock.mock.calls[0][1] as RequestInit).method ?? 'GET').toBe('GET');
+    expect(s).toEqual({ branding: { shopName: 'Магазин' }, contacts: { socials: [] } });
   });
 });

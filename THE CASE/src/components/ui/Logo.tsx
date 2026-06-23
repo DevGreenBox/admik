@@ -7,9 +7,20 @@ interface LogoProps {
   size?: "sm" | "md" | "lg";
   showSubtitle?: boolean;
   showAccent?: boolean;
+  /** Имя магазина (G-01): из настроек Admik (branding.shopName); фолбэк — THE CASE. */
+  shopName?: string;
+  /** Подзаголовок логотипа; фолбэк — Medical Uniform. */
+  subtitle?: string;
 }
 
-export function Logo({ variant = "dark", size = "md", showSubtitle = false, showAccent = true }: LogoProps) {
+export function Logo({
+  variant = "dark",
+  size = "md",
+  showSubtitle = false,
+  showAccent = true,
+  shopName = "THE CASE",
+  subtitle = "Medical Uniform",
+}: LogoProps) {
   const textColor = variant === "dark" ? "text-graphite" : "text-white";
   const subColor = variant === "dark" ? "text-muted" : "text-white/50";
 
@@ -26,12 +37,12 @@ export function Logo({ variant = "dark", size = "md", showSubtitle = false, show
       <span
         className={`${s.title} ${textColor} font-display font-normal uppercase transition-opacity duration-700 group-hover:opacity-60`}
       >
-        THE CASE
+        {shopName}
       </span>
       {showAccent && <span className={`${s.line} h-[2px] bg-accent block`} />}
       {showSubtitle && (
         <span className={`${s.sub} ${subColor} uppercase tracking-[0.04em]`}>
-          Medical Uniform
+          {subtitle}
         </span>
       )}
     </Link>

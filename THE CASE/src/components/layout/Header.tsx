@@ -16,7 +16,14 @@ const NAV_RIGHT: NavItem[] = [
   { href: "/contacts", label: "Контакты" },
 ];
 
-export function Header({ categories = [] }: { categories?: AdmikCategoryDto[] }) {
+export function Header({
+  categories = [],
+  shopName,
+}: {
+  categories?: AdmikCategoryDto[];
+  /** Имя магазина из настроек Admik (G-01) → логотип. */
+  shopName?: string;
+}) {
   const [menuOpen, setMenuOpen] = useState(false);
   const cartCount = useStore(selectCartCount);
   const wishlistCount = useStore(selectWishlistCount);
@@ -83,7 +90,7 @@ export function Header({ categories = [] }: { categories?: AdmikCategoryDto[] })
               </nav>
             </div>
 
-            <Logo size="md" />
+            <Logo size="md" shopName={shopName} />
 
             <div className="flex items-center justify-end gap-5 md:gap-7">
               <nav className="hidden md:flex items-center gap-8 lg:gap-10 mr-2">
@@ -125,7 +132,7 @@ export function Header({ categories = [] }: { categories?: AdmikCategoryDto[] })
             className="fixed inset-0 z-[60] bg-white"
           >
             <div className="container-brand flex h-16 items-center justify-between">
-              <Logo size="md" />
+              <Logo size="md" shopName={shopName} />
               <button onClick={() => setMenuOpen(false)} aria-label="Закрыть">
                 <X className="h-5 w-5" strokeWidth={1} />
               </button>

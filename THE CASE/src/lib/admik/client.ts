@@ -23,6 +23,7 @@ import type {
   AdmikProductListItemDto,
   AdmikQuoteDto,
   AdmikQuoteInput,
+  AdmikSettingsDto,
 } from './types';
 
 export interface AdmikClientConfig {
@@ -209,6 +210,21 @@ export async function getCategories(
   config?: Partial<AdmikClientConfig>,
 ): Promise<AdmikCategoryDto[]> {
   return request<AdmikCategoryDto[]>('/categories', { config });
+}
+
+// ---------------------------------------------------------------------------
+// Настройки магазина (брендинг / контакты / SEO / контент главной). G-01.
+// ---------------------------------------------------------------------------
+
+/**
+ * Публичные настройки магазина (GET /settings). core-always-on на стороне Admik
+ * (отдаётся независимо от ADMIK_MODULES). Возвращает брендинг/контакты/реквизиты/
+ * SEO/контент главной; приватные поля (банковские реквизиты, og-ключ) скрыты DTO.
+ */
+export async function getSettings(
+  config?: Partial<AdmikClientConfig>,
+): Promise<AdmikSettingsDto> {
+  return request<AdmikSettingsDto>('/settings', { config });
 }
 
 // ---------------------------------------------------------------------------
