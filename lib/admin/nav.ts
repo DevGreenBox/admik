@@ -45,6 +45,8 @@ export const NAV: NavItem[] = [
   { href: '/admin/catalog', label: 'Каталог', permission: 'catalog.read', module: 'catalog' },
   { href: '/admin/orders', label: 'Заказы', permission: 'orders.read', module: 'orders' },
   { href: '/admin/promo', label: 'Промокоды', permission: 'orders.write', module: 'orders' },
+  // «Заявки» — core (без module): сообщения с формы витрины; право orders.read (G-09).
+  { href: '/admin/leads', label: 'Заявки', permission: 'orders.read' },
   { href: '/admin/cdek', label: 'Доставка', permission: 'cdek.manage', module: 'cdek' },
   { href: '/admin/cms', label: 'Контент', permission: 'cms.read', module: 'cms' },
   { href: '/admin/users', label: 'Пользователи', permission: 'users.read' },

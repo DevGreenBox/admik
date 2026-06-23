@@ -248,6 +248,18 @@ export async function getPage(
 }
 
 // ---------------------------------------------------------------------------
+// Заявки с витрины (форма обратной связи). G-09.
+// ---------------------------------------------------------------------------
+
+/** Отправляет заявку с формы /contacts (POST /leads). Бросает AdmikApiError при сбое. */
+export async function submitLead(
+  input: { name: string; contact: string; message: string },
+  config?: Partial<AdmikClientConfig>,
+): Promise<{ id: string }> {
+  return request<{ id: string }>('/leads', { method: 'POST', body: input, config });
+}
+
+// ---------------------------------------------------------------------------
 // Корзина / заказ.
 // ---------------------------------------------------------------------------
 

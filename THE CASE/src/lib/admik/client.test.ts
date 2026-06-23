@@ -11,6 +11,7 @@ import {
   cdekPvz,
   getSettings,
   getPage,
+  submitLead,
 } from './client';
 
 const CFG = { baseUrl: 'https://admik.test/', apiKey: 'secret-key' };
@@ -213,5 +214,17 @@ describe('getPage (CMS)', () => {
   it('403 (модуль cms выключен) → null', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ error: { code: 'module_disabled', message: 'off' } }, 403));
     expect(await getPage('terms', CFG)).toBeNull();
+  });
+});
+
+describe('submitLead (G-09)', () => {
+  it('POST /leads с телом, разворачивает { data }', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ data: { id: 'lead-1' } }, 200));
+    const r = await submitLead({ name: 'Иван', contact: 'i@e.ru', message: 'm' }, CFG);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://admik.test/api/storefront/v1/leads');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body)).toEqual({ name: 'Иван', contact: 'i@e.ru', message: 'm' });
+    expect(r).toEqual({ id: 'lead-1' });
   });
 });

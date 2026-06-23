@@ -3,21 +3,32 @@
 import { useState } from "react";
 import { Send } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { submitLead } from "@/lib/admik";
 
 /**
- * Клиентская форма обратной связи. Пока заявки никуда не уходят (заглушка) —
- * приём заявок (эндпоинт + раздел в админке) делается в волне P3 (G-09).
+ * Клиентская форма обратной связи (G-09): отправляет заявку на Storefront API
+ * (POST /leads), владелец видит её в админке (раздел «Заявки»). Браузерный запрос
+ * авторизуется по Origin (без ключа). Сбой — мягкая ошибка с предложением связаться напрямую.
  */
 export function ContactsForm() {
   const [form, setForm] = useState({ name: "", contact: "", message: "" });
   const [sent, setSent] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // TODO(G-09, волна P3): подключить реальный приём заявок. Пока — клиентская
-    // заглушка с состоянием «отправлено» (паттерн форм витрины, ср. Footer newsletter).
-    setSent(true);
-    setForm({ name: "", contact: "", message: "" });
+    setPending(true);
+    setError(null);
+    try {
+      await submitLead({ name: form.name, contact: form.contact, message: form.message });
+      setSent(true);
+      setForm({ name: "", contact: "", message: "" });
+    } catch {
+      setError("Не удалось отправить. Попробуйте позже или напишите нам напрямую.");
+    } finally {
+      setPending(false);
+    }
   };
 
   if (sent) {
@@ -62,8 +73,9 @@ export function ContactsForm() {
         onChange={(e) => setForm({ ...form, message: e.target.value })}
         className="w-full border border-border px-4 py-3 text-sm focus:border-graphite outline-none resize-none"
       />
-      <Button variant="primary" size="lg" magnetic type="submit">
-        Отправить
+      {error ? <p className="text-sm text-red-600">{error}</p> : null}
+      <Button variant="primary" size="lg" magnetic type="submit" disabled={pending}>
+        {pending ? "Отправка…" : "Отправить"}
       </Button>
     </form>
   );
