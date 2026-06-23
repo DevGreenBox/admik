@@ -267,19 +267,20 @@ export interface AdmikSocialDto {
   url: string;
 }
 
-/** Редактируемый контент главной (ADR-018). Изображения — КЛЮЧИ S3 (не URL). */
+/** Редактируемый контент главной (ADR-018). Изображения — публичные URL (бэкенд
+ *  резолвит S3-ключи в URL; сырые ключи наружу не отдаются). */
 export interface AdmikHomeDto {
   hero: {
     title: string | null;
     subtitle: string | null;
-    imageKey: string | null;
+    imageUrl: string | null;
     ctaLabel: string | null;
     ctaHref: string | null;
   };
   about: {
     title: string;
     paragraphs: string[];
-    imageKeys: string[];
+    imageUrls: string[];
     values: string[];
   };
   quality: { title: string; items: string[] };

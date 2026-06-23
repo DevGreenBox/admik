@@ -158,6 +158,25 @@ describe('storefront/settings-dto — home', () => {
     expect(dto.home.about.title).toBe(HOME_DEFAULTS.about.title);
     expect(dto.home.delivery.items).toEqual(HOME_DEFAULTS.delivery.items);
   });
+
+  it('изображения home отдаются как URL (резолв ключей через publicUrl, ключи наружу не утекают)', () => {
+    const eff = mergeSettings(envWith(), [
+      {
+        setting_key: 'home',
+        value: { hero: { imageKey: 'home/h.webp' }, about: { imageKeys: ['a1.webp', 'a2.webp'] } },
+      },
+    ]);
+    const dto = toPublicSettingsDto(eff, (k) => `https://cdn.test/${k}`);
+    expect(dto.home.hero.imageUrl).toBe('https://cdn.test/home/h.webp');
+    expect(dto.home.about.imageUrls).toEqual([
+      'https://cdn.test/a1.webp',
+      'https://cdn.test/a2.webp',
+    ]);
+    // сырые ключи наружу не раскрываются
+    const json = JSON.stringify(dto.home);
+    expect(json).not.toContain('imageKey');
+    expect(json).not.toContain('"home/h.webp"');
+  });
 });
 
 // =============================================================================

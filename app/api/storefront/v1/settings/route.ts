@@ -10,6 +10,7 @@
 import { runStorefront, jsonData, handlePreflight } from '@/lib/storefront/response';
 import { getEffectiveSettings } from '@/lib/config/settings';
 import { toPublicSettingsDto } from '@/lib/storefront/settings-dto';
+import { getStorage } from '@/lib/storage';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,7 +19,10 @@ export async function GET(req: Request): Promise<Response> {
     req,
     async ({ cors }) => {
       const eff = await getEffectiveSettings();
-      return jsonData(toPublicSettingsDto(eff), {}, cors);
+      // Изображения главной (home.*) отдаём как публичные URL: ключи S3 наружу
+      // не раскрываем (инвариант, зеркально каталог-медиа/CMS).
+      const storage = getStorage();
+      return jsonData(toPublicSettingsDto(eff, (k) => storage.url(k)), {}, cors);
     },
     { module: null },
   );

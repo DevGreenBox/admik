@@ -18,7 +18,6 @@
  */
 
 import type { EffectiveSettings } from '@/lib/config/settings';
-import type { HomeContent } from '@/lib/config/home-defaults';
 
 /** Публичная социальная ссылка. */
 export interface PublicSocialDto {
@@ -26,12 +25,27 @@ export interface PublicSocialDto {
   url: string;
 }
 
+/** Резолвер ключа объекта хранилища → публичный URL (инъекция storage.url). */
+export type PublicUrlResolver = (key: string) => string;
+
 /**
- * Публичный контент главной (ADR-018). Весь home публичен (нет приватных полей):
- * это редактируемый витринный контент. Изображения — ключи S3 (imageKey/
- * imageKeys); витрина резолвит ключ в URL на своей стороне (как CMS-секции).
+ * Публичный контент главной (ADR-018). Весь home публичен (редактируемый
+ * витринный контент, без приватных полей). Изображения отдаём как ПУБЛИЧНЫЕ URL
+ * (imageUrl/imageUrls) — сырые S3-ключи наружу НЕ раскрываем (инвариант, зеркально
+ * каталог-медиа и CMS-секциям). Резолв ключ→URL делает роут через storage.url.
  */
-export type PublicHomeDto = HomeContent;
+export interface PublicHomeDto {
+  hero: {
+    title: string | null;
+    subtitle: string | null;
+    imageUrl: string | null;
+    ctaLabel: string | null;
+    ctaHref: string | null;
+  };
+  about: { title: string; paragraphs: string[]; imageUrls: string[]; values: string[] };
+  quality: { title: string; items: string[] };
+  delivery: { items: { title: string; text: string }[] };
+}
 
 /** Публичный DTO настроек магазина (наружу витрине). */
 export interface PublicSettingsDto {
@@ -93,7 +107,10 @@ export interface PublicSettingsDto {
  * Вырезает приватные поля (bankDetails, og_image_key, robots_extra,
  * noindex_site, module_overrides) и audit-trail. Деньги остаются в копейках.
  */
-export function toPublicSettingsDto(eff: EffectiveSettings): PublicSettingsDto {
+export function toPublicSettingsDto(
+  eff: EffectiveSettings,
+  publicUrl: PublicUrlResolver = (k) => k,
+): PublicSettingsDto {
   return {
     branding: {
       shopName: eff.branding.shopName,
@@ -144,13 +161,19 @@ export function toPublicSettingsDto(eff: EffectiveSettings): PublicSettingsDto {
       twitterSite: eff.seo.twitter_site ?? null,
       // default_og_image_key (ключ S3), robots_extra, noindex_site — НЕ наружу.
     },
-    // home полностью публичен (редактируемый витринный контент, без приватного).
+    // home публичен; изображения отдаём как URL (ключи S3 наружу не раскрываем).
     home: {
-      hero: { ...eff.home.hero },
+      hero: {
+        title: eff.home.hero.title,
+        subtitle: eff.home.hero.subtitle,
+        imageUrl: eff.home.hero.imageKey ? publicUrl(eff.home.hero.imageKey) : null,
+        ctaLabel: eff.home.hero.ctaLabel,
+        ctaHref: eff.home.hero.ctaHref,
+      },
       about: {
         title: eff.home.about.title,
         paragraphs: [...eff.home.about.paragraphs],
-        imageKeys: [...eff.home.about.imageKeys],
+        imageUrls: eff.home.about.imageKeys.map((k) => publicUrl(k)),
         values: [...eff.home.about.values],
       },
       quality: { title: eff.home.quality.title, items: [...eff.home.quality.items] },

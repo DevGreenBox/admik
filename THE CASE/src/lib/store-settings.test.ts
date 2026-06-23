@@ -48,8 +48,8 @@ function dto(over: Partial<AdmikSettingsDto> = {}): AdmikSettingsDto {
       twitterSite: '@acme',
     },
     home: {
-      hero: { title: null, subtitle: null, imageKey: null, ctaLabel: null, ctaHref: null },
-      about: { title: 'О бренде', paragraphs: [], imageKeys: [], values: [] },
+      hero: { title: null, subtitle: null, imageUrl: null, ctaLabel: null, ctaHref: null },
+      about: { title: 'О бренде', paragraphs: [], imageUrls: [], values: [] },
       quality: { title: 'Качество', items: [] },
       delivery: { items: [] },
     },
@@ -141,15 +141,16 @@ describe('resolveHome', () => {
   it('заполненные блоки переопределяют дефолт', () => {
     const s = dto({
       home: {
-        hero: { title: 'Привет', subtitle: 'Саб', imageKey: 'home/hero.webp', ctaLabel: 'В каталог', ctaHref: '/c' },
-        about: { title: 'Наш бренд', paragraphs: ['p1', 'p2'], imageKeys: ['a.webp'], values: ['v1'] },
+        hero: { title: 'Привет', subtitle: 'Саб', imageUrl: 'https://cdn/hero.webp', ctaLabel: 'В каталог', ctaHref: '/c' },
+        about: { title: 'Наш бренд', paragraphs: ['p1', 'p2'], imageUrls: ['https://cdn/a.webp'], values: ['v1'] },
         quality: { title: 'Ткань', items: ['и1', 'и2'] },
         delivery: { items: [{ title: 'Почта', text: 'быстро' }] },
       },
     });
     const h = resolveHome(s);
-    expect(h.hero).toEqual({ title: 'Привет', subtitle: 'Саб', imageKey: 'home/hero.webp', ctaLabel: 'В каталог', ctaHref: '/c' });
+    expect(h.hero).toEqual({ title: 'Привет', subtitle: 'Саб', imageUrl: 'https://cdn/hero.webp', ctaLabel: 'В каталог', ctaHref: '/c' });
     expect(h.about.paragraphs).toEqual(['p1', 'p2']);
+    expect(h.about.imageUrls).toEqual(['https://cdn/a.webp']);
     expect(h.about.values).toEqual(['v1']);
     expect(h.quality).toEqual({ title: 'Ткань', items: ['и1', 'и2'] });
     expect(h.delivery.items).toEqual([{ title: 'Почта', text: 'быстро' }]);

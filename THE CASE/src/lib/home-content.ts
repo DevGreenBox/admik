@@ -14,12 +14,12 @@ export interface ResolvedHome {
   hero: {
     title: string | null;
     subtitle: string | null;
-    /** Ключ S3 фонового изображения (резолв в URL — отдельно); пусто → ассет витрины. */
-    imageKey: string | null;
+    /** Публичный URL фонового изображения (резолвлен бэкендом); null → ассет витрины. */
+    imageUrl: string | null;
     ctaLabel: string;
     ctaHref: string;
   };
-  about: { title: string; paragraphs: string[]; imageKeys: string[]; values: string[] };
+  about: { title: string; paragraphs: string[]; imageUrls: string[]; values: string[] };
   quality: { title: string; items: string[] };
   delivery: { items: { title: string; text: string }[] };
 }
@@ -30,14 +30,14 @@ export interface ResolvedHome {
  * HOME_DEFAULTS бэкенда — до первой правки внешний вид не меняется.
  */
 export const HOME_FALLBACK: ResolvedHome = {
-  hero: { title: null, subtitle: null, imageKey: null, ctaLabel: 'Смотреть коллекцию', ctaHref: '/catalog' },
+  hero: { title: null, subtitle: null, imageUrl: null, ctaLabel: 'Смотреть коллекцию', ctaHref: '/catalog' },
   about: {
     title: 'О бренде',
     paragraphs: [
       'THE CASE — медицинская униформа нового поколения: функциональная, эстетичная и премиальная. Fashion + Medicine — уверенность, профессионализм, современная эстетика.',
       'Каждая модель разрабатывается вручную — от эскиза до выбора ткани. Комфорт в длинных сменах и ощущение собранности каждый день.',
     ],
-    imageKeys: [],
+    imageUrls: [],
     values: ['Fashion + Medicine', 'Уверенность', 'Профессионализм', 'Минимализм'],
   },
   quality: {
@@ -81,14 +81,14 @@ export function resolveHome(s: AdmikSettingsDto | null): ResolvedHome {
     hero: {
       title: clean(h.hero?.title),
       subtitle: clean(h.hero?.subtitle),
-      imageKey: clean(h.hero?.imageKey),
+      imageUrl: clean(h.hero?.imageUrl),
       ctaLabel: clean(h.hero?.ctaLabel) ?? HOME_FALLBACK.hero.ctaLabel,
       ctaHref: clean(h.hero?.ctaHref) ?? HOME_FALLBACK.hero.ctaHref,
     },
     about: {
       title: clean(h.about?.title) ?? HOME_FALLBACK.about.title,
       paragraphs: arr(h.about?.paragraphs, HOME_FALLBACK.about.paragraphs),
-      imageKeys: h.about?.imageKeys ?? [],
+      imageUrls: h.about?.imageUrls ?? [],
       values: arr(h.about?.values, HOME_FALLBACK.about.values),
     },
     quality: {

@@ -24,7 +24,7 @@ export function HomeBanner({ hero = HOME_FALLBACK.hero }: { hero?: ResolvedHome[
         className="group relative block w-full"
       >
         <Image
-          src={IMAGES.home.banner}
+          src={hero.imageUrl ?? IMAGES.home.banner}
           alt="THE CASE — Medical Uniform"
           width={3620}
           height={1810}
@@ -535,7 +535,9 @@ export function About({ about = HOME_FALLBACK.about }: { about?: ResolvedHome["a
 
         <FadeIn delay={0.12}>
           <div className="mt-12 md:mt-16">
-            <AboutGallery images={ABOUT_SLIDES} />
+            {/* Фото галереи — из настроек (G-05, settings.home.about.imageUrls),
+                иначе дефолтные ассеты витрины. */}
+            <AboutGallery images={about.imageUrls.length > 0 ? about.imageUrls : ABOUT_SLIDES} />
           </div>
         </FadeIn>
 
