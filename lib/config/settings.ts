@@ -29,7 +29,9 @@ import {
   type ContactsSettings,
   type LegalEntitySettings,
   type SeoSettings,
+  type HomeSettings,
 } from '@/lib/settings/schemas';
+import { HOME_DEFAULTS, type HomeContent } from '@/lib/config/home-defaults';
 import { toMinor } from '@/lib/orders/money';
 import { getAllSettings, type SettingRow } from '@/lib/settings/repository';
 
@@ -81,6 +83,12 @@ export interface EffectiveSettings {
     noindex_site: boolean;
   };
   /**
+   * Контент главной страницы (ADR-018). Все блоки заполнены: оверрайд блока из
+   * БД заменяет блок целиком, отсутствующий блок → HOME_DEFAULTS (фолбэк
+   * витрины). Изображения хранятся ключами S3 (imageKey/imageKeys), не URL.
+   */
+  home: HomeContent;
+  /**
    * Распарсенный module_overrides из БД (частичный оверрайд ADMIK_MODULES).
    * Несётся в эффективных настройках, чтобы рантайм-гейты (getEffectiveModuleSet)
    * получали авторитетный набор модулей через тот же memo-кэш, что и остальные
@@ -116,6 +124,44 @@ function cleanLogoUrl(url: string | null | undefined): string | null {
   }
 }
 
+/**
+ * Сливает контент главной: для каждого блока — если в БД задан оверрайд блока,
+ * берётся он (отсутствующие внутри поля добиваются дефолтом, чтобы HomeContent
+ * был полностью заполнен и виджеты витрины не падали на null-блоке); иначе —
+ * дефолт блока целиком. Это «оверрайд блока» (а не поля), как и семантика JSONB
+ * value для остальных ключей: строка БД хранит конкретный блок целиком.
+ */
+function mergeHome(db: HomeSettings): HomeContent {
+  return {
+    hero: db.hero
+      ? {
+          title: db.hero.title ?? null,
+          subtitle: db.hero.subtitle ?? null,
+          imageKey: db.hero.imageKey ?? null,
+          ctaLabel: db.hero.ctaLabel ?? null,
+          ctaHref: db.hero.ctaHref ?? null,
+        }
+      : HOME_DEFAULTS.hero,
+    about: db.about
+      ? {
+          title: db.about.title ?? HOME_DEFAULTS.about.title,
+          paragraphs: db.about.paragraphs ?? [],
+          imageKeys: db.about.imageKeys ?? [],
+          values: db.about.values ?? [],
+        }
+      : HOME_DEFAULTS.about,
+    quality: db.quality
+      ? {
+          title: db.quality.title ?? HOME_DEFAULTS.quality.title,
+          items: db.quality.items ?? [],
+        }
+      : HOME_DEFAULTS.quality,
+    delivery: db.delivery?.items
+      ? { items: db.delivery.items.map((i) => ({ title: i.title, text: i.text })) }
+      : HOME_DEFAULTS.delivery,
+  };
+}
+
 /** Индексирует строки БД по ключу с безопасным парсом значения. */
 function indexRows(dbRows: SettingRow[]): Map<string, Record<string, unknown>> {
   const map = new Map<string, Record<string, unknown>>();
@@ -145,6 +191,7 @@ export function mergeSettings(env: Env, dbRows: SettingRow[]): EffectiveSettings
   const delivery = parseSettingValue('delivery', rows.get('delivery')) ?? {};
   const orders = parseSettingValue('orders', rows.get('orders')) ?? {};
   const seo: SeoSettings = parseSettingValue('seo', rows.get('seo')) ?? {};
+  const home: HomeSettings = parseSettingValue('home', rows.get('home')) ?? {};
   // module_overrides — мягкий парс (.strip): кривая строка БД → {} (нет оверрайда).
   const moduleOverrides: ModuleOverrides =
     parseSettingValue('module_overrides', rows.get('module_overrides')) ?? {};
@@ -197,6 +244,7 @@ export function mergeSettings(env: Env, dbRows: SettingRow[]): EffectiveSettings
       twitter_site: seo.twitter_site ?? undefined,
       noindex_site: seo.noindex_site ?? false,
     },
+    home: mergeHome(home),
     modules: {
       overrides: moduleOverrides,
     },

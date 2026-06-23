@@ -48,6 +48,12 @@ function makeSettingsDeps(
     getSetting: vi.fn(async () => null),
     invalidateCache: vi.fn(() => {}),
     hasPublishedCmsPages: vi.fn(async () => false),
+    validateUpload: vi.fn(async () => ({ ok: true, mime: 'image/webp' as const })),
+    generatePreviews: vi.fn(async () => ({
+      main: { buffer: Buffer.from('webp'), width: 1, height: 1, format: 'webp' },
+      thumbnail: { buffer: Buffer.from('webp'), width: 1, height: 1, format: 'webp' },
+    })),
+    getStorage: vi.fn(),
     ...overrides,
   };
 }

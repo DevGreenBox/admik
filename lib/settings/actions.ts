@@ -34,6 +34,19 @@ export async function updateModuleOverrides(raw: unknown) {
 export async function updateShopSeoSettings(raw: unknown) {
   return prod.updateShopSeoSettings(raw);
 }
+export async function updateHomeAction(raw: unknown) {
+  return prod.updateHomeAction(raw);
+}
+
+/**
+ * Загрузка изображения настроек (logo|favicon|og) из FormData. Фабричный action
+ * сам извлекает kind/байты из FormData и валидирует magic-bytes/нормализует в
+ * webp/пишет URL (logo,favicon) или S3-ключ (og)/audit.
+ */
+export async function uploadSettingsImageAction(formData: FormData) {
+  return prod.uploadSettingsImageAction(formData);
+}
+
 export async function resetSetting(raw: unknown) {
   return prod.resetSetting(raw);
 }

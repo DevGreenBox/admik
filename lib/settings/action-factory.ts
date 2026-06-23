@@ -22,6 +22,7 @@ import { z } from 'zod';
 import {
   defineAction,
   defaultDeps,
+  PublicActionError,
   type ActionDeps,
   type ActionCtx,
 } from '@/lib/server/action';
@@ -37,6 +38,7 @@ import {
   catalogSettingsSchema,
   ordersSettingsSchema,
   seoSettingsSchema,
+  homeSchema,
   SETTING_KEYS,
 } from '@/lib/settings/schemas';
 import {
@@ -46,6 +48,12 @@ import {
   type ShopSettingRow,
 } from '@/lib/settings/repository';
 import { invalidateSettingsCache } from '@/lib/config/settings';
+import { getStorage as defaultGetStorage } from '@/lib/storage';
+import { validateUpload as defaultValidateUpload } from '@/lib/storage/validate';
+import { generatePreviews as defaultGeneratePreviews } from '@/lib/storage/image';
+import type { ObjectStorage } from '@/lib/storage';
+import type { MediaValidationResult } from '@/lib/storage/validate';
+import type { PreviewSet } from '@/lib/storage/image';
 
 // =============================================================================
 // Входные схемы действий (композиция value-схем ключей).
@@ -111,6 +119,22 @@ export const ResetSettingInputSchema = z.object({
  * заголовка). Без '%s' заголовки сущностей подставлять некуда → validation.
  * site_url валидируется как url-или-отсутствует уже в seoSettingsSchema.
  */
+/** home на ВХОДЕ действия — value-схема homeSchema целиком (опц. блоки, .strip()). */
+export const HomeInputSchema = z.object({ home: homeSchema });
+
+/**
+ * Вход загрузки изображения настроек: kind (logo|favicon|og) + байты файла.
+ * Байты извлекаются из FormData в обёртке (Server Action принимает FormData);
+ * тип/размер реально проверяются validateUpload по magic-bytes (как у бренда).
+ */
+export const SETTINGS_IMAGE_KINDS = ['logo', 'favicon', 'og'] as const;
+export type SettingsImageKind = (typeof SETTINGS_IMAGE_KINDS)[number];
+export const SettingsImageUploadSchema = z.object({
+  kind: z.enum(SETTINGS_IMAGE_KINDS),
+  filename: z.string().max(255).optional().default('upload'),
+  bytes: z.instanceof(Buffer),
+});
+
 export const SeoSettingsInputSchema = z.object({
   seo: seoSettingsSchema.superRefine((value, ctx) => {
     if (value.title_template !== undefined && !value.title_template.includes('%s')) {
@@ -150,6 +174,12 @@ export interface SettingsActionDeps {
   invalidateCache: () => void;
   /** Есть ли опубликованные CMS-страницы (для warning при выключении cms). */
   hasPublishedCmsPages: () => Promise<boolean>;
+  /** Валидация загрузки по magic-bytes (storage/validate). */
+  validateUpload: (bytes: Buffer, filename: string) => Promise<MediaValidationResult>;
+  /** Генерация превью/нормализация в webp (storage/image). */
+  generatePreviews: (bytes: Buffer) => Promise<PreviewSet>;
+  /** Фабрика хранилища объектов (S3 или local mock). */
+  getStorage: () => ObjectStorage;
 }
 
 /** Пути инвалидации витрины (форматирование цен/брендинг). */
@@ -186,6 +216,9 @@ export function productionSettingsDeps(): SettingsActionDeps {
     getSetting: dbGetSetting,
     invalidateCache: invalidateSettingsCache,
     hasPublishedCmsPages: defaultHasPublishedCmsPages,
+    validateUpload: defaultValidateUpload,
+    generatePreviews: defaultGeneratePreviews,
+    getStorage: defaultGetStorage,
   };
 }
 
@@ -373,6 +406,116 @@ export function createSettingsActions(deps: SettingsActionDeps) {
     },
   });
 
+  const updateHomeAction = defineAction({
+    permission: 'settings.manage',
+    input: HomeInputSchema,
+    deps: actionDeps,
+    handler: async (data, ctx: ActionCtx) => {
+      const before = await deps.getSetting('home');
+      const row = await deps.upsertSetting('home', data.home, ctx.user.id);
+      deps.invalidateCache();
+      return {
+        result: { key: 'home' as const },
+        // Контент главной → инвалидируем витрину и форму настроек.
+        revalidate: [SETTINGS_PATH, ...STOREFRONT_PATHS],
+        audit: {
+          action: 'settings.home.update',
+          entityType: 'shop_settings',
+          entityId: 'home',
+          before: before?.value,
+          after: row.value,
+        },
+      };
+    },
+  });
+
+  /**
+   * Загрузка изображения настроек (логотип/фавикон/og). Переиспользует пайплайн
+   * медиа: validateUpload (magic-bytes) → generatePreviews (webp) → storage.put.
+   * logo/favicon → URL в branding (logoUrl/faviconUrl); og → КЛЮЧ S3 в
+   * seo.default_og_image_key (хранится ключ, не URL — единый контракт SEO/CMS).
+   * Значение мерджится в существующий блок (читаем getSetting, не затираем поля).
+   */
+  const _uploadSettingsImage = defineAction({
+    permission: 'settings.manage',
+    input: SettingsImageUploadSchema,
+    deps: actionDeps,
+    handler: async (data, ctx: ActionCtx) => {
+      const validation = await deps.validateUpload(data.bytes, data.filename);
+      if (!validation.ok || !validation.mime) {
+        throw new PublicActionError(validation.error ?? 'Недопустимый файл.');
+      }
+
+      const previews = await deps.generatePreviews(data.bytes);
+      const main = previews.main;
+
+      const storage = deps.getStorage();
+      const key = `settings/${data.kind}/${crypto.randomUUID()}.webp`;
+      let put;
+      try {
+        put = await storage.put(key, main.buffer, 'image/webp');
+      } catch {
+        throw new PublicActionError('Не удалось сохранить файл в хранилище.');
+      }
+
+      // Запись значения в соответствующий ключ настроек (мердж в существующий блок).
+      let settingKey: 'branding' | 'seo';
+      try {
+        if (data.kind === 'og') {
+          settingKey = 'seo';
+          const current = (await deps.getSetting('seo'))?.value ?? {};
+          await deps.upsertSetting(
+            'seo',
+            { ...current, default_og_image_key: put.key },
+            ctx.user.id,
+          );
+        } else {
+          settingKey = 'branding';
+          const current = (await deps.getSetting('branding'))?.value ?? {};
+          const field = data.kind === 'logo' ? 'logoUrl' : 'faviconUrl';
+          await deps.upsertSetting(
+            'branding',
+            { ...current, [field]: put.url },
+            ctx.user.id,
+          );
+        }
+      } catch (err) {
+        await storage.delete(put.key).catch(() => {});
+        throw err;
+      }
+
+      deps.invalidateCache();
+      // og отдаёт ключ (контракт SEO), logo/favicon — URL (как branding.*Url).
+      const value = data.kind === 'og' ? put.key : put.url;
+      return {
+        result: { kind: data.kind, key: put.key, url: put.url, value },
+        revalidate: ['/admin', SETTINGS_PATH, ...STOREFRONT_PATHS],
+        audit: {
+          action: 'settings.image.upload',
+          entityType: 'shop_settings',
+          entityId: settingKey,
+          after: { kind: data.kind, key: put.key },
+        },
+      };
+    },
+  });
+
+  /**
+   * Публичная обёртка загрузки изображения настроек: принимает FormData (kind +
+   * file), извлекает байты на сервере и делегирует внутреннему action (guard/
+   * Zod/валидация/запись/audit). FormData — родной формат Server Action из формы.
+   */
+  const uploadSettingsImageAction = async (formData: FormData) => {
+    const kind = formData.get('kind');
+    const file = formData.get('file');
+    if (!(file instanceof Blob)) {
+      return _uploadSettingsImage({ kind, filename: 'upload', bytes: undefined });
+    }
+    const bytes = Buffer.from(await file.arrayBuffer());
+    const filename = file instanceof File ? file.name : 'upload';
+    return _uploadSettingsImage({ kind, filename, bytes });
+  };
+
   const resetSetting = defineAction({
     permission: 'settings.manage',
     input: ResetSettingInputSchema,
@@ -402,6 +545,8 @@ export function createSettingsActions(deps: SettingsActionDeps) {
     updateCatalogOrdersSettings,
     updateModuleOverrides,
     updateShopSeoSettings,
+    updateHomeAction,
+    uploadSettingsImageAction,
     resetSetting,
   };
 }

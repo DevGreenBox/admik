@@ -18,12 +18,20 @@
  */
 
 import type { EffectiveSettings } from '@/lib/config/settings';
+import type { HomeContent } from '@/lib/config/home-defaults';
 
 /** Публичная социальная ссылка. */
 export interface PublicSocialDto {
   type: string;
   url: string;
 }
+
+/**
+ * Публичный контент главной (ADR-018). Весь home публичен (нет приватных полей):
+ * это редактируемый витринный контент. Изображения — ключи S3 (imageKey/
+ * imageKeys); витрина резолвит ключ в URL на своей стороне (как CMS-секции).
+ */
+export type PublicHomeDto = HomeContent;
 
 /** Публичный DTO настроек магазина (наружу витрине). */
 export interface PublicSettingsDto {
@@ -76,6 +84,8 @@ export interface PublicSettingsDto {
     defaultDescription: string | null;
     twitterSite: string | null;
   };
+  /** Редактируемый контент главной (ADR-018) — публичный. */
+  home: PublicHomeDto;
 }
 
 /**
@@ -133,6 +143,18 @@ export function toPublicSettingsDto(eff: EffectiveSettings): PublicSettingsDto {
       defaultDescription: eff.seo.default_description ?? null,
       twitterSite: eff.seo.twitter_site ?? null,
       // default_og_image_key (ключ S3), robots_extra, noindex_site — НЕ наружу.
+    },
+    // home полностью публичен (редактируемый витринный контент, без приватного).
+    home: {
+      hero: { ...eff.home.hero },
+      about: {
+        title: eff.home.about.title,
+        paragraphs: [...eff.home.about.paragraphs],
+        imageKeys: [...eff.home.about.imageKeys],
+        values: [...eff.home.about.values],
+      },
+      quality: { title: eff.home.quality.title, items: [...eff.home.quality.items] },
+      delivery: { items: eff.home.delivery.items.map((i) => ({ ...i })) },
     },
   };
 }

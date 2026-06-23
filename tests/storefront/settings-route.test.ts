@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 import type { EffectiveSettings } from '@/lib/config/settings';
+import { HOME_DEFAULTS } from '@/lib/config/home-defaults';
 
 /**
  * Тесты пакета 5.D-2 (docs/11 §5.4.6) — роут GET /api/storefront/v1/settings.
@@ -16,6 +17,7 @@ const ORIGINAL_ORIGINS = process.env.STOREFRONT_ALLOWED_ORIGINS;
 function fakeEffective(): EffectiveSettings {
   return {
     modules: { overrides: {} },
+    home: HOME_DEFAULTS,
     branding: {
       shopName: 'The Case',
       logoUrl: null,

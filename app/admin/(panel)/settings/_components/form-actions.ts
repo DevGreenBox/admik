@@ -15,6 +15,8 @@ import {
   updateCatalogOrdersSettings as _updateCatalogOrders,
   updateModuleOverrides as _updateModules,
   updateShopSeoSettings as _updateShopSeo,
+  updateHomeAction as _updateHome,
+  uploadSettingsImageAction as _uploadSettingsImage,
   resetSetting as _resetSetting,
 } from '@/lib/settings/actions';
 import type { ActionResult } from '@/lib/server/action';
@@ -36,6 +38,14 @@ export async function updateModulesAction(input: unknown): Promise<ActionResult<
 }
 export async function updateShopSeoAction(input: unknown): Promise<ActionResult<unknown>> {
   return _updateShopSeo(input);
+}
+export async function updateHomeContentAction(input: unknown): Promise<ActionResult<unknown>> {
+  return _updateHome(input);
+}
+export async function uploadSettingsImageAction(
+  formData: FormData,
+): Promise<ActionResult<unknown>> {
+  return _uploadSettingsImage(formData);
 }
 export async function resetSettingAction(input: unknown): Promise<ActionResult<unknown>> {
   return _resetSetting(input);

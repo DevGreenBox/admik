@@ -32,7 +32,8 @@ export type SectionFieldKind =
   | 'richtext' // Tiptap (с серверной санитизацией)
   | 'select' // выпадающий список (options обязательны)
   | 'number' // числовой input
-  | 'pairs'; // multiline «a|b» список (faq items / gallery images / slugs)
+  | 'pairs' // multiline «a|b» список (faq items / gallery images / slugs)
+  | 'image'; // загрузчик изображения → S3-ключ (фолбэк: ручной ввод ключа)
 
 /** Описание одного поля формы секции. */
 export interface SectionFieldSpec {
@@ -77,7 +78,12 @@ export const SECTION_FIELD_SPECS: Record<CmsSectionType, SectionFieldSpec[]> = {
     { name: 'title', label: 'Заголовок', kind: 'text', required: true },
     { name: 'subtitle', label: 'Подзаголовок', kind: 'text' },
     { name: 'html', label: 'Текст (rich-text)', kind: 'richtext' },
-    { name: 'imageKey', label: 'Ключ изображения (S3)', kind: 'text', hint: 'media/hero.webp' },
+    {
+      name: 'imageKey',
+      label: 'Изображение (hero)',
+      kind: 'image',
+      hint: 'Загрузите файл или укажите S3-ключ (media/hero.webp)',
+    },
     { name: 'ctaLabel', label: 'Текст кнопки', kind: 'text' },
     { name: 'ctaHref', label: 'Ссылка кнопки', kind: 'text', hint: '/catalog или https://…' },
   ],
@@ -85,7 +91,13 @@ export const SECTION_FIELD_SPECS: Record<CmsSectionType, SectionFieldSpec[]> = {
     { name: 'html', label: 'Текст (rich-text)', kind: 'richtext', required: true },
   ],
   banner: [
-    { name: 'imageKey', label: 'Ключ изображения (S3)', kind: 'text', required: true },
+    {
+      name: 'imageKey',
+      label: 'Изображение (баннер)',
+      kind: 'image',
+      required: true,
+      hint: 'Загрузите файл или укажите S3-ключ',
+    },
     { name: 'href', label: 'Ссылка', kind: 'text' },
     { name: 'alt', label: 'Alt-текст', kind: 'text' },
   ],
@@ -127,9 +139,9 @@ export const SECTION_FIELD_SPECS: Record<CmsSectionType, SectionFieldSpec[]> = {
     {
       name: 'images',
       label: 'Изображения',
-      kind: 'pairs',
+      kind: 'image',
       required: true,
-      hint: 'По строке: ключ-S3|alt (alt опционален)',
+      hint: 'Загрузите файлы или по строке: ключ-S3|alt (alt опционален)',
     },
   ],
 };
@@ -170,7 +182,9 @@ export function formStateFromContent(content: Record<string, unknown>): SectionF
     const raw = content[field.name];
     if (raw === undefined || raw === null) continue;
 
-    if (field.kind === 'pairs') {
+    // pairs-семантика по ИМЕНИ поля (items/images), а не по kind: gallery.images
+    // теперь kind='image' (загрузчик), но в форме хранится как multiline «ключ|alt».
+    if (field.kind === 'pairs' || field.name === 'items' || field.name === 'images') {
       state[field.name] = serializePairs(field.name, raw);
     } else if (Array.isArray(raw)) {
       state[field.name] = raw.join(', ');

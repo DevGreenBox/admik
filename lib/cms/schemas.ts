@@ -272,6 +272,17 @@ export const CmsPageListFilterSchema = z.object({
   pageSize: z.number().int().min(1).max(200).default(20),
 });
 
+/**
+ * Загрузка изображения CMS (ADR-018). Байты приходят Buffer (Server Action
+ * извлекает из FormData); тип/размер проверяются validateUpload по magic-bytes.
+ * Действие ВОЗВРАЩАЕТ S3-ключ (CMS-секции хранят imageKey, не URL — ADR-012).
+ */
+export const CmsImageUploadSchema = z.object({
+  filename: z.string().max(255).optional().default('upload'),
+  bytes: z.instanceof(Buffer),
+});
+export type CmsImageUploadInput = z.infer<typeof CmsImageUploadSchema>;
+
 export type CmsSectionInput = z.infer<typeof CmsSectionInputSchema>;
 export type CmsSectionReorderInput = z.infer<typeof CmsSectionReorderSchema>;
 export type CmsPageCreateInput = z.infer<typeof CmsPageCreateSchema>;

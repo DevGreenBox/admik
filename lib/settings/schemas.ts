@@ -177,6 +177,61 @@ export const seoSettingsSchema = z
   })
   .strip();
 
+/**
+ * home — редактируемый контент главной страницы витрины (ADR-018).
+ *
+ * Именованные блоки (hero/about/quality/delivery); все поля опциональны и
+ * `.strip()` (анти-tamper JSONB). Изображения хранятся КЛЮЧАМИ S3 (imageKey/
+ * imageKeys), не URL — единый контракт с CMS (ADR-012); витрина резолвит ключ в
+ * URL на своей стороне. Семантика merge (§5.4.1): строка БД хранит оверрайд
+ * блока ЦЕЛИКОМ; отсутствие блока → дефолт витрины (lib/config/home-defaults).
+ */
+export const homeSchema = z
+  .object({
+    hero: z
+      .object({
+        title: z.string().trim().min(1).optional(),
+        subtitle: z.string().trim().min(1).optional(),
+        imageKey: z.string().trim().min(1).optional(),
+        ctaLabel: z.string().trim().min(1).optional(),
+        ctaHref: z.string().trim().min(1).optional(),
+      })
+      .strip()
+      .optional(),
+    about: z
+      .object({
+        title: z.string().trim().min(1).optional(),
+        paragraphs: z.array(z.string().trim().min(1)).optional(),
+        imageKeys: z.array(z.string().trim().min(1)).optional(),
+        values: z.array(z.string().trim().min(1)).optional(),
+      })
+      .strip()
+      .optional(),
+    quality: z
+      .object({
+        title: z.string().trim().min(1).optional(),
+        items: z.array(z.string().trim().min(1)).optional(),
+      })
+      .strip()
+      .optional(),
+    delivery: z
+      .object({
+        items: z
+          .array(
+            z
+              .object({
+                title: nonEmpty,
+                text: nonEmpty,
+              })
+              .strip(),
+          )
+          .optional(),
+      })
+      .strip()
+      .optional(),
+  })
+  .strip();
+
 // -----------------------------------------------------------------------------
 // Реестр ключ → схема. Единственный источник правды о наборе ключей настроек.
 // -----------------------------------------------------------------------------
@@ -193,6 +248,7 @@ export const SETTING_KEYS = [
   'orders',
   'module_overrides',
   'seo',
+  'home',
 ] as const;
 
 export type SettingKey = (typeof SETTING_KEYS)[number];
@@ -209,6 +265,7 @@ export const SETTING_SCHEMAS = {
   orders: ordersSettingsSchema,
   module_overrides: moduleOverridesSchema,
   seo: seoSettingsSchema,
+  home: homeSchema,
 } as const satisfies Record<SettingKey, z.ZodTypeAny>;
 
 // Типы значений по ключам (выводятся из схем).
@@ -222,6 +279,7 @@ export type DeliverySettings = z.infer<typeof deliverySettingsSchema>;
 export type OrdersSettings = z.infer<typeof ordersSettingsSchema>;
 export type ModuleOverrides = z.infer<typeof moduleOverridesSchema>;
 export type SeoSettings = z.infer<typeof seoSettingsSchema>;
+export type HomeSettings = z.infer<typeof homeSchema>;
 
 /**
  * Безопасный парс значения по ключу. Возвращает провалидированный частичный

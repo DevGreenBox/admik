@@ -72,6 +72,31 @@ describe('SECTION_FIELD_SPECS — маппинг type → поля', () => {
       expect(hasRich).toBe(false);
     }
   });
+
+  it("поля imageKey hero/banner получают kind='image' (загрузчик вместо ручного ключа)", () => {
+    const heroImg = SECTION_FIELD_SPECS.hero.find((f) => f.name === 'imageKey');
+    expect(heroImg?.kind).toBe('image');
+    const bannerImg = SECTION_FIELD_SPECS.banner.find((f) => f.name === 'imageKey');
+    expect(bannerImg?.kind).toBe('image');
+  });
+
+  it("gallery.images получает kind='image' (мультизагрузка ключей)", () => {
+    const galleryImgs = SECTION_FIELD_SPECS.gallery.find((f) => f.name === 'images');
+    expect(galleryImgs?.kind).toBe('image');
+  });
+
+  it("buildSectionContent совместим с kind='image' (ключ собирается как раньше)", () => {
+    // 'image' — лишь UI-контрол; сборка content идёт по name, не по kind (фолбэк
+    // ручного ввода ключа сохранён). banner с imageKey по-прежнему валиден.
+    const ok = buildSectionContent({
+      type: 'banner',
+      imageKey: 'cms/uploaded.webp',
+      href: '',
+      alt: '',
+    });
+    expect(ok.ok).toBe(true);
+    if (ok.ok) expect(ok.content).toMatchObject({ type: 'banner', imageKey: 'cms/uploaded.webp' });
+  });
 });
 
 describe('emptyFormStateFor — стартовое состояние формы по type', () => {

@@ -5,6 +5,9 @@ import type { TransactionSql } from 'postgres';
 import { defineAction, PublicActionError, type ActionCtx } from '@/lib/server/action';
 import { sql } from '@/lib/db/client';
 import { isModuleEffectivelyEnabled } from '@/lib/config/settings';
+import { getStorage } from '@/lib/storage';
+import { validateUpload } from '@/lib/storage/validate';
+import { generatePreviews } from '@/lib/storage/image';
 
 import {
   CmsPageCreateSchema,
@@ -14,6 +17,7 @@ import {
   CmsSectionReorderSchema,
   CmsSectionSetEnabledSchema,
   CmsSectionIdSchema,
+  CmsImageUploadSchema,
 } from './schemas';
 import { CmsError } from './errors';
 import { slugifyOrFallback, uniquifySlug } from './slug';
@@ -444,3 +448,64 @@ export const deleteCmsSection = defineAction({
     };
   },
 });
+
+// =============================================================================
+// ЗАГРУЗКА ИЗОБРАЖЕНИЙ СЕКЦИЙ (ADR-018).
+// =============================================================================
+
+/**
+ * Внутренний action загрузки CMS-изображения: пайплайн медиа (validateUpload
+ * magic-bytes → generatePreviews webp → storage.put). ВОЗВРАЩАЕТ S3-ключ —
+ * CMS-секции хранят imageKey (не URL), контракт ADR-012. Ключ генерируется
+ * сервером (анти-path-traversal): cms/<uuid>.webp.
+ */
+const _uploadCmsImage = defineAction({
+  permission: 'cms.write',
+  input: CmsImageUploadSchema,
+  handler: async (data, _ctx) => {
+    await assertCmsEnabled();
+
+    const validation = await validateUpload(data.bytes, data.filename);
+    if (!validation.ok || !validation.mime) {
+      throw new PublicActionError(validation.error ?? 'Недопустимый файл.');
+    }
+
+    const previews = await generatePreviews(data.bytes);
+    const main = previews.main;
+
+    const storage = getStorage();
+    const key = `cms/${crypto.randomUUID()}.webp`;
+    let put;
+    try {
+      put = await storage.put(key, main.buffer, 'image/webp');
+    } catch {
+      throw new PublicActionError('Не удалось сохранить файл в хранилище.');
+    }
+
+    return {
+      // url отдаём для предпросмотра в форме; в content секции сохраняется key.
+      result: { key: put.key, url: put.url },
+      audit: {
+        action: 'cms.image.upload',
+        entityType: 'cms_image',
+        entityId: put.key,
+        after: { key: put.key },
+      },
+    };
+  },
+});
+
+/**
+ * Загрузка изображения CMS из FormData (Server Action для формы редактора секций).
+ * Извлекает байты файла на сервере и делегирует внутреннему action. Возвращает
+ * S3-ключ (imageKey), который UI подставит в поле секции (hero/banner/gallery).
+ */
+export async function uploadCmsImageAction(formData: FormData) {
+  const file = formData.get('file');
+  if (!(file instanceof Blob)) {
+    return _uploadCmsImage({ filename: 'upload', bytes: undefined });
+  }
+  const bytes = Buffer.from(await file.arrayBuffer());
+  const filename = file instanceof File ? file.name : 'upload';
+  return _uploadCmsImage({ filename, bytes });
+}

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 
 import { toPublicSettingsDto } from '@/lib/storefront/settings-dto';
 import type { EffectiveSettings } from '@/lib/config/settings';
+import { HOME_DEFAULTS } from '@/lib/config/home-defaults';
 
 /**
  * Тесты пакета 5.D-2 (docs/11 §5.4.6) — публичный DTO настроек.
@@ -12,6 +13,7 @@ import type { EffectiveSettings } from '@/lib/config/settings';
 function makeEffective(): EffectiveSettings {
   return {
     modules: { overrides: {} },
+    home: HOME_DEFAULTS,
     branding: {
       shopName: 'Gang Auto',
       logoUrl: 'https://cdn/logo.png',
