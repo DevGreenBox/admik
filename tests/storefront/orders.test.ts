@@ -147,6 +147,15 @@ describe('order-dto — публичный маппинг заказа (без �
     expect(dto.grandTotal).toBe('2700.00');
     expect(dto.delivery.track).toBe('1234567890');
     expect(dto.items).toHaveLength(1);
+    // G-15: готовые подписи статусов в DTO (единый источник lib/orders/labels).
+    expect(dto.statusLabel).toBe('Новый');
+    expect(dto.paymentStatusLabel).toBe('Ожидает');
+    expect(dto.deliveryStatusLabel).toBe('Ожидает');
+  });
+
+  it('G-15: statusLabel — каноничная подпись (shipped → «Отгружен», без расхождения с админкой)', () => {
+    const dto = toOrderPublicDto(makeOrder({ status: 'shipped' }), [makeItem()]);
+    expect(dto.statusLabel).toBe('Отгружен');
   });
 
   it('toOrderItemDto отдаёт снимок без orderId/itemId', () => {

@@ -213,6 +213,10 @@ export interface AdmikOrderPublicDto {
   status: string;
   paymentStatus: string;
   deliveryStatus: string;
+  /** Готовые РУССКИЕ подписи статусов от Admik (G-15) — единый источник, без своей карты. */
+  statusLabel: string;
+  paymentStatusLabel: string;
+  deliveryStatusLabel: string;
   itemsTotal: string;
   discountTotal: string;
   deliveryTotal: string;

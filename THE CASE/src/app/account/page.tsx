@@ -10,32 +10,9 @@ import { Button } from "@/components/ui/Button";
 import { FadeIn } from "@/components/ui/Animations";
 import { IMAGES } from "@/lib/images";
 
-const STATUS_LABELS: Record<string, string> = {
-  // статусы заказа
-  new: "Новый",
-  awaiting_payment: "Ожидает оплаты",
-  paid: "Оплачен",
-  packed: "Собран",
-  processing: "В обработке",
-  confirmed: "Подтверждён",
-  shipped: "Отправлен",
-  delivered: "Доставлен",
-  completed: "Завершён",
-  cancelled: "Отменён",
-  refunded: "Возврат оформлен",
-  // статусы оплаты (statusLabel общий для заказа/оплаты/доставки)
-  pending: "Ожидает оплаты",
-  authorized: "Оплата захолдирована",
-  failed: "Оплата не прошла",
-  // статусы доставки
-  registered: "Накладная создана",
-  in_transit: "В пути",
-  returned: "Возвращена",
-};
-
-function statusLabel(status: string): string {
-  return STATUS_LABELS[status.toLowerCase()] ?? status;
-}
+// Подписи статусов приходят готовыми из Admik (G-15): order.statusLabel /
+// paymentStatusLabel / deliveryStatusLabel — единый источник, без своей карты
+// (устранено расхождение admin↔витрина, напр. shipped «Отгружен»).
 
 /**
  * Можно ли доплатить заказ онлайн: не оплачен (pending/failed/unset) и метод —
@@ -92,7 +69,7 @@ function OrderCard({
       <div className="flex justify-between items-start">
         <div>
           <p className="text-[11px] uppercase tracking-[0.12em]">#{order.number}</p>
-          <p className="text-[10px] text-muted mt-1">{statusLabel(order.status)}</p>
+          <p className="text-[10px] text-muted mt-1">{order.statusLabel}</p>
         </div>
         <p className="text-sm">{formatPrice(Number(order.grandTotal))}</p>
       </div>
@@ -124,8 +101,8 @@ function OrderCard({
         </div>
       </div>
       <div className="border-t border-border pt-4 text-[10px] text-muted space-y-1">
-        <p>Оплата: {statusLabel(order.paymentStatus)}</p>
-        <p>Доставка: {statusLabel(order.deliveryStatus)}</p>
+        <p>Оплата: {order.paymentStatusLabel}</p>
+        <p>Доставка: {order.deliveryStatusLabel}</p>
         {order.delivery.city && <p>Город: {order.delivery.city}</p>}
         {order.delivery.track && <p>Трек СДЭК: {order.delivery.track}</p>}
       </div>

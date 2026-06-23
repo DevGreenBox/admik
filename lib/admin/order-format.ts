@@ -25,35 +25,8 @@ import type {
 // Лейблы (русский). Record по литералам → исчерпывающая проверка компилятором.
 // -----------------------------------------------------------------------------
 
-const ORDER_STATUS_LABEL: Record<OrderStatus, string> = {
-  new: 'Новый',
-  awaiting_payment: 'Ожидает оплаты',
-  paid: 'Оплачен',
-  packed: 'Собран',
-  shipped: 'Отгружен',
-  delivered: 'Доставлен',
-  completed: 'Завершён',
-  cancelled: 'Отменён',
-  refunded: 'Возврат',
-};
-
-const PAYMENT_STATUS_LABEL: Record<PaymentStatus, string> = {
-  pending: 'Ожидает',
-  authorized: 'Авторизована',
-  paid: 'Оплачена',
-  failed: 'Ошибка',
-  refunded: 'Возврат',
-};
-
-const DELIVERY_STATUS_LABEL: Record<DeliveryStatus, string> = {
-  pending: 'Ожидает',
-  registered: 'Зарегистрирована',
-  in_transit: 'В пути',
-  delivered: 'Доставлена',
-  returned: 'Возврат',
-  cancelled: 'Отменена',
-};
-
+// Подписи статусов заказа/оплаты/доставки — единый источник lib/orders/labels
+// (G-15): используются и здесь (админка), и в публичном DTO заказа (витрина).
 const DELIVERY_TYPE_LABEL: Record<DeliveryType, string> = {
   courier: 'Курьер',
   pvz: 'ПВЗ',
@@ -87,15 +60,13 @@ function label<T extends string>(map: Record<T, string>, code: string): string {
   return (map as Record<string, string>)[code] ?? code;
 }
 
-export function orderStatusLabel(status: string): string {
-  return label(ORDER_STATUS_LABEL, status);
-}
-export function paymentStatusLabel(status: string): string {
-  return label(PAYMENT_STATUS_LABEL, status);
-}
-export function deliveryStatusLabel(status: string): string {
-  return label(DELIVERY_STATUS_LABEL, status);
-}
+// Подписи статусов заказа/оплаты/доставки — из общего lib/orders/labels (G-15).
+export {
+  orderStatusLabel,
+  paymentStatusLabel,
+  deliveryStatusLabel,
+} from '@/lib/orders/labels';
+
 export function deliveryTypeLabel(type: string): string {
   return label(DELIVERY_TYPE_LABEL, type);
 }

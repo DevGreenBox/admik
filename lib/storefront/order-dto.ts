@@ -18,6 +18,11 @@ import { createHmac } from 'node:crypto';
 
 import type { Order, OrderItem, PromoCode, PromoApplyScope, PromoKind } from '@/lib/orders/types';
 import type { QuoteResult } from '@/lib/orders/pricing';
+import {
+  orderStatusLabel,
+  paymentStatusLabel,
+  deliveryStatusLabel,
+} from '@/lib/orders/labels';
 
 // ---------------------------------------------------------------------------
 // Токен доступа к заказу (анти-перебор номеров).
@@ -145,6 +150,11 @@ export interface OrderPublicDto {
   status: Order['status'];
   paymentStatus: Order['paymentStatus'];
   deliveryStatus: Order['deliveryStatus'];
+  /** Готовые РУССКИЕ подписи статусов (G-15) — единый источник lib/orders/labels;
+   *  витрина показывает их вместо своей карты (устранено расхождение admin↔витрина). */
+  statusLabel: string;
+  paymentStatusLabel: string;
+  deliveryStatusLabel: string;
 
   itemsTotal: string;
   discountTotal: string;
@@ -206,6 +216,9 @@ export function toOrderPublicDto(order: Order, items: OrderItem[]): OrderPublicD
     status: order.status,
     paymentStatus: order.paymentStatus,
     deliveryStatus: order.deliveryStatus,
+    statusLabel: orderStatusLabel(order.status),
+    paymentStatusLabel: paymentStatusLabel(order.paymentStatus),
+    deliveryStatusLabel: deliveryStatusLabel(order.deliveryStatus),
 
     itemsTotal: order.itemsTotal,
     discountTotal: order.discountTotal,
