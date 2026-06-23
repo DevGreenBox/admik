@@ -7,6 +7,7 @@ import { Forbidden } from '../_components/Forbidden';
 import { PageHeader } from '../_components/PageHeader';
 import { guardSettings } from './_components/guard';
 import { BrandingForm } from './_components/BrandingForm';
+import { HomeContentForm } from './_components/HomeContentForm';
 import { CurrencyUnitsForm } from './_components/CurrencyUnitsForm';
 import { LegalContactsForm } from './_components/LegalContactsForm';
 import { CatalogOrdersForm } from './_components/CatalogOrdersForm';
@@ -41,6 +42,7 @@ export default async function SettingsPage() {
   // (Prevki.md): он виден в навигации сразу, наравне с остальными разделами.
   const sections = [
     { id: 'branding', title: 'Брендинг' },
+    { id: 'home', title: 'Главная страница' },
     { id: 'currency', title: 'Валюта и единицы измерения' },
     { id: 'contacts', title: 'Реквизиты и контакты' },
     { id: 'catalog', title: 'Каталог, доставка, заказы' },
@@ -77,6 +79,10 @@ export default async function SettingsPage() {
         <div className="min-w-0">
           <Section id="branding" title="Брендинг">
             <BrandingForm branding={eff.branding} />
+          </Section>
+
+          <Section id="home" title="Главная страница">
+            <HomeContentForm home={eff.home} />
           </Section>
 
           <Section id="currency" title="Валюта и единицы измерения">
