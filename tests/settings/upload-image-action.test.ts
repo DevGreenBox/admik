@@ -170,3 +170,43 @@ describe('settings/actions — uploadSettingsImageAction', () => {
     expect(res.error).toBe('validation');
   });
 });
+
+describe('settings/actions — uploadStoreImageAction (возврат ключа для home.*)', () => {
+  it('без settings.manage → forbidden, хранилище не тронуто', async () => {
+    const deps = makeSettingsDeps(makeActionDeps(makeUser(['catalog.write'])));
+    const { uploadStoreImageAction } = createSettingsActions(deps);
+    const res = await uploadStoreImageAction(fd('x'));
+    expect(res).toEqual({ ok: false, error: 'forbidden' });
+    expect(deps.getStorage).not.toHaveBeenCalled();
+  });
+
+  it('успех: webp в settings/home/<uuid>, ВОЗВРАЩАЕТ {key,url}, НЕ пишет в настройки', async () => {
+    const actionDeps = makeActionDeps(makeUser(['settings.manage']));
+    const deps = makeSettingsDeps(actionDeps);
+    const { uploadStoreImageAction } = createSettingsActions(deps);
+    const res = await uploadStoreImageAction(fd('x'));
+    expect(res.ok).toBe(true);
+    if (!res.ok) throw new Error('ожидался успех');
+    const data = res.data as { key: string; url: string };
+    expect(data.key).toMatch(/^settings\/home\/[0-9a-f-]+\.webp$/);
+    expect(data.url).toMatch(/^https:\/\/cdn\.test\/settings\/home\//);
+    // возврат ключа — без записи в branding/seo/home
+    expect(deps.upsertSetting).not.toHaveBeenCalled();
+    const storage = (deps.getStorage as ReturnType<typeof vi.fn>).mock.results[0]!.value;
+    expect((storage.put as ReturnType<typeof vi.fn>).mock.calls[0]![2]).toBe('image/webp');
+    const auditArg = (actionDeps.writeAudit as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(auditArg.action).toBe('settings.image.upload');
+  });
+
+  it('reject по magic-bytes → validation, put не вызван', async () => {
+    const deps = makeSettingsDeps(makeActionDeps(makeUser(['settings.manage'])), {
+      validateUpload: vi.fn(async () => ({ ok: false, error: 'bad' })),
+    });
+    const { uploadStoreImageAction } = createSettingsActions(deps);
+    const res = await uploadStoreImageAction(fd('x'));
+    expect(res.ok).toBe(false);
+    if (res.ok) throw new Error('ожидался отказ');
+    expect(res.error).toBe('validation');
+    expect(deps.upsertSetting).not.toHaveBeenCalled();
+  });
+});

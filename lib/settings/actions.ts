@@ -47,6 +47,14 @@ export async function uploadSettingsImageAction(formData: FormData) {
   return prod.uploadSettingsImageAction(formData);
 }
 
+/**
+ * Загрузка изображения, возвращающая S3-ключ (для контента главной home.*).
+ * Не пишет в настройки — ключ кладётся в форму и сохраняется updateHomeAction.
+ */
+export async function uploadStoreImageAction(formData: FormData) {
+  return prod.uploadStoreImageAction(formData);
+}
+
 export async function resetSetting(raw: unknown) {
   return prod.resetSetting(raw);
 }

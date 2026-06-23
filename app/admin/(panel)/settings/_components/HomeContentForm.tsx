@@ -8,6 +8,7 @@ import type { EffectiveSettings } from '@/lib/config/settings';
 
 import { updateHomeContentAction } from './form-actions';
 import { errorMessage } from './action-result';
+import { ImageUploadButton } from './ImageUploadButton';
 
 /**
  * Форма «Главная страница» (ADR-018, закрывает G-02/G-03): редактируемый контент
@@ -152,10 +153,11 @@ export function HomeContentForm({ home }: { home: EffectiveSettings['home'] }) {
             <input id="home-hero-sub" value={heroSubtitle} onChange={(e) => setHeroSubtitle(e.target.value)} className={inputCls} />
           </div>
           <div className="lg:col-span-2">
-            <label htmlFor="home-hero-img" className={labelCls}>Фон обложки (адрес файла S3)</label>
+            <label htmlFor="home-hero-img" className={labelCls}>Фон обложки</label>
             <input id="home-hero-img" value={heroImageKey} onChange={(e) => setHeroImageKey(e.target.value)}
               placeholder="home/hero.webp" className={inputCls} />
-            <p className={hintCls}>Загрузка файлов — следующим шагом; пока можно указать ключ загруженного файла.</p>
+            <ImageUploadButton label="Загрузить фон обложки" onUploaded={(key) => setHeroImageKey(key)} />
+            <p className={hintCls}>Загрузите файл или укажите адрес уже загруженного. Пусто — фон витрины по умолчанию.</p>
           </div>
         </div>
       </fieldset>
@@ -180,9 +182,10 @@ export function HomeContentForm({ home }: { home: EffectiveSettings['home'] }) {
               rows={3} className={inputCls} />
           </div>
           <div>
-            <label htmlFor="home-about-img" className={labelCls}>Фото галереи (адреса файлов S3, по одному на строку)</label>
+            <label htmlFor="home-about-img" className={labelCls}>Фото галереи «О бренде» (по одному адресу на строку)</label>
             <textarea id="home-about-img" value={aboutImageKeys} onChange={(e) => setAboutImageKeys(e.target.value)}
               rows={2} className={inputCls} />
+            <ImageUploadButton label="Загрузить фото" onUploaded={(key) => setAboutImageKeys((p) => (p ? `${p}\n${key}` : key))} />
           </div>
         </div>
       </fieldset>

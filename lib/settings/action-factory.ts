@@ -516,6 +516,58 @@ export function createSettingsActions(deps: SettingsActionDeps) {
     return _uploadSettingsImage({ kind, filename, bytes });
   };
 
+  /**
+   * Загрузка изображения, ВОЗВРАЩАЮЩАЯ S3-ключ (без записи в настройки). Для
+   * контента главной (home.*): виджет загружает файл, кладёт полученный ключ в
+   * поле формы, и форма сохраняет его через updateHomeAction. Пайплайн тот же:
+   * validateUpload (magic-bytes) → generatePreviews (webp) → storage.put.
+   */
+  const _uploadStoreImage = defineAction({
+    permission: 'settings.manage',
+    input: z.object({
+      filename: z.string().max(255).optional().default('upload'),
+      bytes: z.instanceof(Buffer),
+    }),
+    deps: actionDeps,
+    handler: async (data, _ctx: ActionCtx) => {
+      const validation = await deps.validateUpload(data.bytes, data.filename);
+      if (!validation.ok || !validation.mime) {
+        throw new PublicActionError(validation.error ?? 'Недопустимый файл.');
+      }
+      const previews = await deps.generatePreviews(data.bytes);
+      const storage = deps.getStorage();
+      const key = `settings/home/${crypto.randomUUID()}.webp`;
+      let put;
+      try {
+        put = await storage.put(key, previews.main.buffer, 'image/webp');
+      } catch {
+        throw new PublicActionError('Не удалось сохранить файл в хранилище.');
+      }
+      return {
+        // ВОЗВРАЩАЕМ ключ (для home.*) + url (для превью в форме). Запись значения
+        // в настройки делает updateHomeAction при сохранении формы.
+        result: { key: put.key, url: put.url },
+        audit: {
+          action: 'settings.image.upload',
+          entityType: 'shop_settings',
+          entityId: 'home',
+          after: { key: put.key },
+        },
+      };
+    },
+  });
+
+  /** FormData-обёртка загрузки изображения главной: извлекает файл → {key,url}. */
+  const uploadStoreImageAction = async (formData: FormData) => {
+    const file = formData.get('file');
+    if (!(file instanceof Blob)) {
+      return _uploadStoreImage({ filename: 'upload', bytes: undefined });
+    }
+    const bytes = Buffer.from(await file.arrayBuffer());
+    const filename = file instanceof File ? file.name : 'upload';
+    return _uploadStoreImage({ filename, bytes });
+  };
+
   const resetSetting = defineAction({
     permission: 'settings.manage',
     input: ResetSettingInputSchema,
@@ -547,6 +599,7 @@ export function createSettingsActions(deps: SettingsActionDeps) {
     updateShopSeoSettings,
     updateHomeAction,
     uploadSettingsImageAction,
+    uploadStoreImageAction,
     resetSetting,
   };
 }

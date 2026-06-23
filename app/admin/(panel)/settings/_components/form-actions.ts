@@ -17,6 +17,7 @@ import {
   updateShopSeoSettings as _updateShopSeo,
   updateHomeAction as _updateHome,
   uploadSettingsImageAction as _uploadSettingsImage,
+  uploadStoreImageAction as _uploadStoreImage,
   resetSetting as _resetSetting,
 } from '@/lib/settings/actions';
 import type { ActionResult } from '@/lib/server/action';
@@ -46,6 +47,11 @@ export async function uploadSettingsImageAction(
   formData: FormData,
 ): Promise<ActionResult<unknown>> {
   return _uploadSettingsImage(formData);
+}
+export async function uploadStoreImageAction(
+  formData: FormData,
+): Promise<ActionResult<unknown>> {
+  return _uploadStoreImage(formData);
 }
 export async function resetSettingAction(input: unknown): Promise<ActionResult<unknown>> {
   return _resetSetting(input);
