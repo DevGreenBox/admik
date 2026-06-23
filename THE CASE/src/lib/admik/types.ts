@@ -333,6 +333,43 @@ export interface AdmikSettingsDto {
 }
 
 // ---------------------------------------------------------------------------
+// CMS-страницы (GET /pages/[slug]). Секции — { type, content }; изображения уже
+// резолвлены бэкендом в URL (imageUrl). G-13.
+// ---------------------------------------------------------------------------
+
+export type AdmikSectionType =
+  | 'hero'
+  | 'text'
+  | 'banner'
+  | 'products_grid'
+  | 'faq'
+  | 'cta'
+  | 'gallery';
+
+export interface AdmikSectionDto {
+  type: AdmikSectionType;
+  /** Валидированный контент секции (форма зависит от type; см. рендерер). */
+  content: Record<string, unknown>;
+}
+
+export interface AdmikSeoMetaDto {
+  title: string;
+  description: string | null;
+  canonicalUrl?: string | null;
+  robots?: string | null;
+  ogTitle?: string | null;
+  ogDescription?: string | null;
+  ogImage?: string | null;
+}
+
+export interface AdmikPageDto {
+  slug: string;
+  title: string;
+  meta: AdmikSeoMetaDto;
+  sections: AdmikSectionDto[];
+}
+
+// ---------------------------------------------------------------------------
 // Витринная вью-модель (то, чем оперируют компоненты THE CASE).
 // ---------------------------------------------------------------------------
 

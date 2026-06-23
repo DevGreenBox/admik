@@ -1,11 +1,16 @@
 import { FadeIn } from "@/components/ui/Animations";
+import { getCmsPage } from "@/lib/cms";
+import { CmsPageView } from "@/components/cms/CmsPageView";
 
 export const metadata = {
   title: "Оплата — THE CASE",
   description: "Способы оплаты заказов в интернет-магазине THE CASE.",
 };
 
-export default function PaymentPage() {
+export default async function PaymentPage() {
+  const page = await getCmsPage("payment");
+  if (page) return <CmsPageView page={page} />;
+
   return (
     <div className="page-transition pt-16 md:pt-20">
       <div className="container-brand py-12 md:py-16 max-w-3xl">

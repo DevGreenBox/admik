@@ -1,11 +1,18 @@
 import { FadeIn } from "@/components/ui/Animations";
+import { getCmsPage } from "@/lib/cms";
+import { CmsPageView } from "@/components/cms/CmsPageView";
 
 export const metadata = {
   title: "Пользовательское соглашение — THE CASE",
   description: "Условия использования сайта и продажи товаров интернет-магазина THE CASE.",
 };
 
-export default function TermsPage() {
+export default async function TermsPage() {
+  // CMS-версия страницы (если владелец создал её в админке) имеет приоритет;
+  // иначе — статический фолбэк ниже (G-13).
+  const page = await getCmsPage("terms");
+  if (page) return <CmsPageView page={page} />;
+
   return (
     <div className="page-transition pt-16 md:pt-20">
       <div className="container-brand py-12 md:py-16 max-w-3xl">

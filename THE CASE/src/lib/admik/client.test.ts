@@ -10,6 +10,7 @@ import {
   getOrder,
   cdekPvz,
   getSettings,
+  getPage,
 } from './client';
 
 const CFG = { baseUrl: 'https://admik.test/', apiKey: 'secret-key' };
@@ -193,5 +194,24 @@ describe('getSettings', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('https://admik.test/api/storefront/v1/settings');
     expect((fetchMock.mock.calls[0][1] as RequestInit).method ?? 'GET').toBe('GET');
     expect(s).toEqual({ branding: { shopName: 'Магазин' }, contacts: { socials: [] } });
+  });
+});
+
+describe('getPage (CMS)', () => {
+  it('200 → страница; GET /pages/<slug>', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ data: { slug: 'terms', title: 'Условия', meta: { title: 'Условия', description: null }, sections: [] } }),
+    );
+    const p = await getPage('terms', CFG);
+    expect(fetchMock.mock.calls[0][0]).toBe('https://admik.test/api/storefront/v1/pages/terms');
+    expect(p?.slug).toBe('terms');
+  });
+  it('404 → null (статический фолбэк)', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ error: { code: 'not_found', message: 'нет' } }, 404));
+    expect(await getPage('missing', CFG)).toBeNull();
+  });
+  it('403 (модуль cms выключен) → null', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ error: { code: 'module_disabled', message: 'off' } }, 403));
+    expect(await getPage('terms', CFG)).toBeNull();
   });
 });

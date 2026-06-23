@@ -21,6 +21,7 @@ import type {
   AdmikPaymentMethod,
   AdmikProductDetailDto,
   AdmikProductListItemDto,
+  AdmikPageDto,
   AdmikQuoteDto,
   AdmikQuoteInput,
   AdmikSettingsDto,
@@ -225,6 +226,25 @@ export async function getSettings(
   config?: Partial<AdmikClientConfig>,
 ): Promise<AdmikSettingsDto> {
   return request<AdmikSettingsDto>('/settings', { config });
+}
+
+// ---------------------------------------------------------------------------
+// CMS-страницы (G-13). Гейт module:'cms' на стороне Admik — если модуль выключен
+// или страницы нет, отдаётся ошибка; клиент трактует любую ошибку как null
+// (CMS опциональна: страница падает на статический фолбэк витрины).
+// ---------------------------------------------------------------------------
+
+/** Опубликованная CMS-страница по slug. null при 404 / выключенном модуле / ошибке. */
+export async function getPage(
+  slug: string,
+  config?: Partial<AdmikClientConfig>,
+): Promise<AdmikPageDto | null> {
+  try {
+    return await request<AdmikPageDto>(`/pages/${encodeURIComponent(slug)}`, { config });
+  } catch (e) {
+    if (e instanceof AdmikApiError) return null;
+    throw e;
+  }
 }
 
 // ---------------------------------------------------------------------------

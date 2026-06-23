@@ -1,11 +1,16 @@
 import { FadeIn } from "@/components/ui/Animations";
+import { getCmsPage } from "@/lib/cms";
+import { CmsPageView } from "@/components/cms/CmsPageView";
 
 export const metadata = {
   title: "Обработка персональных данных — THE CASE",
   description: "Политика обработки и защиты персональных данных пользователей THE CASE (152-ФЗ).",
 };
 
-export default function PrivacyPage() {
+export default async function PrivacyPage() {
+  const page = await getCmsPage("privacy");
+  if (page) return <CmsPageView page={page} />;
+
   return (
     <div className="page-transition pt-16 md:pt-20">
       <div className="container-brand py-12 md:py-16 max-w-3xl">

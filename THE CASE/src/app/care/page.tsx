@@ -1,11 +1,16 @@
 import { FadeIn } from "@/components/ui/Animations";
+import { getCmsPage } from "@/lib/cms";
+import { CmsPageView } from "@/components/cms/CmsPageView";
 
 export const metadata = {
   title: "Уход за вещами — THE CASE",
   description: "Состав ткани и рекомендации по уходу за медицинской формой THE CASE.",
 };
 
-export default function CarePage() {
+export default async function CarePage() {
+  const page = await getCmsPage("care");
+  if (page) return <CmsPageView page={page} />;
+
   return (
     <div className="page-transition pt-16 md:pt-20">
       <div className="container-brand py-12 md:py-16 max-w-3xl">
