@@ -24,8 +24,12 @@ const FOOTER_LINKS = {
   ],
 };
 
-// Фолбэк контактов витрины (если layout не передал настройки). Реальные значения
-// приходят из админки Admik (G-01) через проп contacts.
+// Колонки футера по умолчанию (если настройки навигации пусты).
+const DEFAULT_COLUMNS = [
+  { title: "Service", links: FOOTER_LINKS.service },
+  { title: "Legal", links: FOOTER_LINKS.legal },
+];
+
 const CONTACTS_FALLBACK: ResolvedContacts = {
   phoneDisplay: "+7 (___) ___-__-__",
   phoneTel: "+70000000000",
@@ -35,26 +39,31 @@ const CONTACTS_FALLBACK: ResolvedContacts = {
   socials: [],
 };
 
+type FooterColumn = { title: string; links: { label: string; href: string }[] };
+
 export function Footer({
   categories = [],
   shopName = "THE CASE",
   contacts,
+  columns,
 }: {
   categories?: AdmikCategoryDto[];
   /** Имя магазина из настроек Admik (G-01). */
   shopName?: string;
   /** Контакты/соцсети из настроек Admik (G-01/G-08). */
   contacts?: ResolvedContacts;
+  /** Колонки футера из настроек Admik (G-11); пусто → DEFAULT_COLUMNS. */
+  columns?: FooterColumn[];
 }) {
   const [email, setEmail] = useState("");
   const c = contacts ?? CONTACTS_FALLBACK;
+  const cols = columns && columns.length > 0 ? columns : DEFAULT_COLUMNS;
+  const lastCol = cols.length - 1;
 
-  // Ссылки «Shop» строятся из РЕАЛЬНЫХ категорий магазина (не зашитые slug
-  // women/men/suits, которых в каталоге нет → пустой каталог). «Коллекция» —
-  // всегда; далее до 4 реальных категорий. Пустое дерево → только «Коллекция».
+  // Ссылки «Shop» строятся из РЕАЛЬНЫХ категорий магазина. «Коллекция» — всегда.
   const shopLinks = [
     { href: "/catalog", label: "Коллекция" },
-    ...categoryLinks(categories, 4).map((c) => ({ href: c.href, label: c.name })),
+    ...categoryLinks(categories, 4).map((cat) => ({ href: cat.href, label: cat.name })),
   ];
 
   // Соцсети: из настроек (G-08), иначе дефолтные Instagram/Telegram витрины.
@@ -75,7 +84,6 @@ export function Footer({
       <div className="absolute inset-0 bg-black/25 pointer-events-none" />
       <div className="container-brand py-20 md:py-28 relative z-10">
         <FadeIn>
-          {/* Jil Sander / ETRU — 4-column footer grid + newsletter */}
           <div className="grid grid-cols-1 md:grid-cols-12 gap-14 md:gap-8 lg:gap-6">
             <div className="md:col-span-3">
               <Logo variant="light" size="md" showSubtitle shopName={shopName} />
@@ -94,50 +102,45 @@ export function Footer({
               </ul>
             </div>
 
-            <div className="md:col-span-2">
-              <h4 className="eyebrow text-white/40 mb-6">Service</h4>
-              <ul className="space-y-3">
-                {FOOTER_LINKS.service.map((link) => (
-                  <li key={link.href}>
-                    <Link href={link.href} className="text-[11px] tracking-[0.1em] text-white/55 hover:text-white transition-colors duration-500">
-                      {link.label}
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-              <div className="mt-8 space-y-3 text-[11px] text-white/55">
-                <p className="eyebrow text-white/40">Поддержка</p>
-                {c.telegramUrl && (
-                  <a href={c.telegramUrl} target="_blank" rel="noopener noreferrer" className="block hover:text-white transition-colors">
-                    Написать в Telegram
-                  </a>
-                )}
-                <a href={`tel:${c.phoneTel}`} className="block hover:text-white transition-colors">
-                  Позвонить
-                </a>
-                <a href={`mailto:${c.email}`} className="block hover:text-white transition-colors">{c.email}</a>
-              </div>
-            </div>
+            {/* Колонки из настроек (G-11) или дефолтные. Под первой — «Поддержка»,
+                под последней — соцсети (как в исходном футере). */}
+            {cols.map((col, ci) => (
+              <div key={ci} className="md:col-span-2">
+                <h4 className="eyebrow text-white/40 mb-6">{col.title}</h4>
+                <ul className="space-y-3">
+                  {col.links.map((link) => (
+                    <li key={`${link.href}-${link.label}`}>
+                      <Link href={link.href} className="text-[11px] tracking-[0.1em] text-white/55 hover:text-white transition-colors duration-500">
+                        {link.label}
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
 
-            <div className="md:col-span-2">
-              <h4 className="eyebrow text-white/40 mb-6">Legal</h4>
-              <ul className="space-y-3">
-                {FOOTER_LINKS.legal.map((link) => (
-                  <li key={link.href}>
-                    <Link href={link.href} className="text-[11px] tracking-[0.1em] text-white/55 hover:text-white transition-colors duration-500">
-                      {link.label}
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-              <div className="mt-8 flex gap-6">
-                {socialLinks.map((s) => (
-                  <a key={s.label} href={s.href} target="_blank" rel="noopener noreferrer" className="eyebrow text-white/35 hover:text-white transition-colors">
-                    {s.label}
-                  </a>
-                ))}
+                {ci === 0 ? (
+                  <div className="mt-8 space-y-3 text-[11px] text-white/55">
+                    <p className="eyebrow text-white/40">Поддержка</p>
+                    {c.telegramUrl ? (
+                      <a href={c.telegramUrl} target="_blank" rel="noopener noreferrer" className="block hover:text-white transition-colors">
+                        Написать в Telegram
+                      </a>
+                    ) : null}
+                    <a href={`tel:${c.phoneTel}`} className="block hover:text-white transition-colors">Позвонить</a>
+                    <a href={`mailto:${c.email}`} className="block hover:text-white transition-colors">{c.email}</a>
+                  </div>
+                ) : null}
+
+                {ci === lastCol ? (
+                  <div className="mt-8 flex gap-6">
+                    {socialLinks.map((s) => (
+                      <a key={s.label} href={s.href} target="_blank" rel="noopener noreferrer" className="eyebrow text-white/35 hover:text-white transition-colors">
+                        {s.label}
+                      </a>
+                    ))}
+                  </div>
+                ) : null}
               </div>
-            </div>
+            ))}
 
             <div className="md:col-span-3">
               <h4 className="eyebrow text-white/40 mb-6">Newsletter</h4>
@@ -163,7 +166,6 @@ export function Footer({
           </div>
         </FadeIn>
 
-        {/* Jil Sander — oversized wordmark */}
         <div className="mt-20 md:mt-28 pt-10 border-t border-white/10">
           <p className="footer-wordmark text-center select-none">{shopName}</p>
           <div className="flex justify-center mt-5">

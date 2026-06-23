@@ -30,6 +30,7 @@ import {
   type LegalEntitySettings,
   type SeoSettings,
   type HomeSettings,
+  type NavigationSettings,
 } from '@/lib/settings/schemas';
 import { HOME_DEFAULTS, type HomeContent } from '@/lib/config/home-defaults';
 import { toMinor } from '@/lib/orders/money';
@@ -97,6 +98,14 @@ export interface EffectiveSettings {
    */
   modules: {
     overrides: ModuleOverrides;
+  };
+  /**
+   * Навигация витрины (G-10/G-11): меню шапки и колонки футера. Пустые массивы =
+   * «не задано» → витрина показывает навигацию по умолчанию (фолбэк на её стороне).
+   */
+  navigation: {
+    header: { label: string; href: string }[];
+    footer: { title: string; links: { label: string; href: string }[] }[];
   };
 }
 
@@ -192,6 +201,8 @@ export function mergeSettings(env: Env, dbRows: SettingRow[]): EffectiveSettings
   const orders = parseSettingValue('orders', rows.get('orders')) ?? {};
   const seo: SeoSettings = parseSettingValue('seo', rows.get('seo')) ?? {};
   const home: HomeSettings = parseSettingValue('home', rows.get('home')) ?? {};
+  const navigation: NavigationSettings =
+    parseSettingValue('navigation', rows.get('navigation')) ?? {};
   // module_overrides — мягкий парс (.strip): кривая строка БД → {} (нет оверрайда).
   const moduleOverrides: ModuleOverrides =
     parseSettingValue('module_overrides', rows.get('module_overrides')) ?? {};
@@ -247,6 +258,10 @@ export function mergeSettings(env: Env, dbRows: SettingRow[]): EffectiveSettings
     home: mergeHome(home),
     modules: {
       overrides: moduleOverrides,
+    },
+    navigation: {
+      header: navigation.header ?? [],
+      footer: (navigation.footer ?? []).map((c) => ({ title: c.title, links: c.links ?? [] })),
     },
   };
 }

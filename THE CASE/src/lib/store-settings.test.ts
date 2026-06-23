@@ -8,6 +8,7 @@ import {
   resolveSeo,
   resolveContacts,
   resolveHome,
+  resolveNavigation,
 } from './store-settings';
 
 /**
@@ -53,6 +54,7 @@ function dto(over: Partial<AdmikSettingsDto> = {}): AdmikSettingsDto {
       quality: { title: 'Качество', items: [] },
       delivery: { items: [] },
     },
+    navigation: { header: [], footer: [] },
     ...over,
   };
 }
@@ -154,5 +156,22 @@ describe('resolveHome', () => {
     expect(h.about.values).toEqual(['v1']);
     expect(h.quality).toEqual({ title: 'Ткань', items: ['и1', 'и2'] });
     expect(h.delivery.items).toEqual([{ title: 'Почта', text: 'быстро' }]);
+  });
+});
+
+describe('resolveNavigation', () => {
+  it('null → пустые массивы (витрина покажет дефолтную навигацию)', () => {
+    expect(resolveNavigation(null)).toEqual({ header: [], footer: [] });
+  });
+  it('берёт меню/колонки из настроек', () => {
+    const s = dto({
+      navigation: {
+        header: [{ label: 'Каталог', href: '/catalog' }],
+        footer: [{ title: 'Сервис', links: [{ label: 'Доставка', href: '/d' }] }],
+      },
+    });
+    const n = resolveNavigation(s);
+    expect(n.header).toEqual([{ label: 'Каталог', href: '/catalog' }]);
+    expect(n.footer[0]).toEqual({ title: 'Сервис', links: [{ label: 'Доставка', href: '/d' }] });
   });
 });

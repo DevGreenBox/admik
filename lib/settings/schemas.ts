@@ -233,6 +233,30 @@ export const homeSchema = z
   .strip();
 
 // -----------------------------------------------------------------------------
+/**
+ * navigation — меню шапки и колонки футера витрины (G-10/G-11). Все элементы
+ * опциональны; пусто → витрина показывает навигацию по умолчанию. Позволяет
+ * переименовать/добавить пункты меню и ссылки футера без правки кода (мультитенант).
+ */
+const navLinkSchema = z.object({ label: nonEmpty, href: nonEmpty }).strip();
+
+export const navigationSchema = z
+  .object({
+    header: z.array(navLinkSchema).optional(),
+    footer: z
+      .array(
+        z
+          .object({
+            title: nonEmpty,
+            links: z.array(navLinkSchema),
+          })
+          .strip(),
+      )
+      .optional(),
+  })
+  .strip();
+
+// -----------------------------------------------------------------------------
 // Реестр ключ → схема. Единственный источник правды о наборе ключей настроек.
 // -----------------------------------------------------------------------------
 
@@ -249,6 +273,7 @@ export const SETTING_KEYS = [
   'module_overrides',
   'seo',
   'home',
+  'navigation',
 ] as const;
 
 export type SettingKey = (typeof SETTING_KEYS)[number];
@@ -266,6 +291,7 @@ export const SETTING_SCHEMAS = {
   module_overrides: moduleOverridesSchema,
   seo: seoSettingsSchema,
   home: homeSchema,
+  navigation: navigationSchema,
 } as const satisfies Record<SettingKey, z.ZodTypeAny>;
 
 // Типы значений по ключам (выводятся из схем).
@@ -280,6 +306,7 @@ export type OrdersSettings = z.infer<typeof ordersSettingsSchema>;
 export type ModuleOverrides = z.infer<typeof moduleOverridesSchema>;
 export type SeoSettings = z.infer<typeof seoSettingsSchema>;
 export type HomeSettings = z.infer<typeof homeSchema>;
+export type NavigationSettings = z.infer<typeof navigationSchema>;
 
 /**
  * Безопасный парс значения по ключу. Возвращает провалидированный частичный

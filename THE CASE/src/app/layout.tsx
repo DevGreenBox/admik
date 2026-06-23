@@ -4,7 +4,7 @@ import { Footer } from "@/components/layout/Footer";
 import Providers from "@/components/Providers";
 import { getSiteUrl, isNoindex } from "@/lib/site-url";
 import { getCategories, type AdmikCategoryDto } from "@/lib/admik";
-import { getStoreSettings, resolveSeo, resolveShopName, resolveContacts } from "@/lib/store-settings";
+import { getStoreSettings, resolveSeo, resolveShopName, resolveContacts, resolveNavigation } from "@/lib/store-settings";
 import "./globals.css";
 
 // generateMetadata (а не статический объект) — чтобы metadataBase и robots
@@ -67,14 +67,15 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const settings = await getStoreSettings();
   const shopName = resolveShopName(settings);
   const contacts = resolveContacts(settings);
+  const nav = resolveNavigation(settings);
 
   return (
     <html lang="ru">
       <body className="min-h-screen flex flex-col">
         <Providers>
-          <Header categories={categories} shopName={shopName} />
+          <Header categories={categories} shopName={shopName} headerItems={nav.header} />
           <main className="flex-1">{children}</main>
-          <Footer categories={categories} shopName={shopName} contacts={contacts} />
+          <Footer categories={categories} shopName={shopName} contacts={contacts} columns={nav.footer} />
         </Providers>
       </body>
     </html>

@@ -330,6 +330,10 @@ export interface AdmikSettingsDto {
     twitterSite: string | null;
   };
   home: AdmikHomeDto;
+  navigation: {
+    header: { label: string; href: string }[];
+    footer: { title: string; links: { label: string; href: string }[] }[];
+  };
 }
 
 // ---------------------------------------------------------------------------

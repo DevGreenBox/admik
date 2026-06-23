@@ -39,6 +39,7 @@ import {
   ordersSettingsSchema,
   seoSettingsSchema,
   homeSchema,
+  navigationSchema,
   SETTING_KEYS,
 } from '@/lib/settings/schemas';
 import {
@@ -121,6 +122,9 @@ export const ResetSettingInputSchema = z.object({
  */
 /** home на ВХОДЕ действия — value-схема homeSchema целиком (опц. блоки, .strip()). */
 export const HomeInputSchema = z.object({ home: homeSchema });
+
+/** navigation на ВХОДЕ действия (G-10/G-11): меню шапки + колонки футера. */
+export const NavigationInputSchema = z.object({ navigation: navigationSchema });
 
 /**
  * Вход загрузки изображения настроек: kind (logo|favicon|og) + байты файла.
@@ -429,6 +433,29 @@ export function createSettingsActions(deps: SettingsActionDeps) {
     },
   });
 
+  const updateNavigationAction = defineAction({
+    permission: 'settings.manage',
+    input: NavigationInputSchema,
+    deps: actionDeps,
+    handler: async (data, ctx: ActionCtx) => {
+      const before = await deps.getSetting('navigation');
+      const row = await deps.upsertSetting('navigation', data.navigation, ctx.user.id);
+      deps.invalidateCache();
+      return {
+        result: { key: 'navigation' as const },
+        // Навигация → инвалидируем витрину (шапка/футер) и форму настроек.
+        revalidate: [SETTINGS_PATH, ...STOREFRONT_PATHS],
+        audit: {
+          action: 'settings.navigation.update',
+          entityType: 'shop_settings',
+          entityId: 'navigation',
+          before: before?.value,
+          after: row.value,
+        },
+      };
+    },
+  });
+
   /**
    * Загрузка изображения настроек (логотип/фавикон/og). Переиспользует пайплайн
    * медиа: validateUpload (magic-bytes) → generatePreviews (webp) → storage.put.
@@ -598,6 +625,7 @@ export function createSettingsActions(deps: SettingsActionDeps) {
     updateModuleOverrides,
     updateShopSeoSettings,
     updateHomeAction,
+    updateNavigationAction,
     uploadSettingsImageAction,
     uploadStoreImageAction,
     resetSetting,

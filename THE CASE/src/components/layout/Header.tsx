@@ -19,10 +19,13 @@ const NAV_RIGHT: NavItem[] = [
 export function Header({
   categories = [],
   shopName,
+  headerItems,
 }: {
   categories?: AdmikCategoryDto[];
   /** Имя магазина из настроек Admik (G-01) → логотип. */
   shopName?: string;
+  /** Пункты меню из настроек Admik (G-10); пусто → меню по умолчанию с подменю «Коллекция». */
+  headerItems?: { label: string; href: string }[];
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const cartCount = useStore(selectCartCount);
@@ -32,13 +35,19 @@ export function Header({
   // которых может не быть → пустой каталог). Если категорий нет — «Коллекция»
   // деградирует до простой ссылки на /catalog.
   const collectionChildren = flattenCategoryNav(categories);
-  const NAV_LEFT: NavItem[] = [
-    { href: "/catalog", label: "Каталог" },
-    collectionChildren.length > 0
-      ? { href: "/catalog", label: "Коллекция", children: collectionChildren }
-      : { href: "/catalog", label: "Коллекция" },
-    { href: "/#about", label: "О бренде" },
-  ];
+  // Кастомное меню из настроек (G-10) заменяет дефолтное (плоские пункты, без
+  // подменю); пусто → меню по умолчанию с динамическим подменю «Коллекция».
+  const customNav = (headerItems?.length ?? 0) > 0;
+  const NAV_LEFT: NavItem[] = customNav
+    ? headerItems!.map((i) => ({ href: i.href, label: i.label }))
+    : [
+        { href: "/catalog", label: "Каталог" },
+        collectionChildren.length > 0
+          ? { href: "/catalog", label: "Коллекция", children: collectionChildren }
+          : { href: "/catalog", label: "Коллекция" },
+        { href: "/#about", label: "О бренде" },
+      ];
+  const navRight: NavItem[] = customNav ? [] : NAV_RIGHT;
 
   useEffect(() => {
     document.body.style.overflow = menuOpen ? "hidden" : "";
@@ -94,7 +103,7 @@ export function Header({
 
             <div className="flex items-center justify-end gap-5 md:gap-7">
               <nav className="hidden md:flex items-center gap-8 lg:gap-10 mr-2">
-                {NAV_RIGHT.map((link) => (
+                {navRight.map((link) => (
                   <Link key={link.href} href={link.href} className="eyebrow text-graphite link-underline">
                     {link.label}
                   </Link>
@@ -143,7 +152,7 @@ export function Header({
               transition={{ delay: 0.1, duration: 0.6 }}
               className="container-brand flex flex-col gap-10 pt-20"
             >
-              {[...NAV_LEFT, ...NAV_RIGHT].map((link, i) => (
+              {[...NAV_LEFT, ...navRight].map((link, i) => (
                 <motion.div
                   key={link.label}
                   initial={{ opacity: 0, y: 12 }}

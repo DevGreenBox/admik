@@ -37,6 +37,9 @@ export async function updateShopSeoSettings(raw: unknown) {
 export async function updateHomeAction(raw: unknown) {
   return prod.updateHomeAction(raw);
 }
+export async function updateNavigationAction(raw: unknown) {
+  return prod.updateNavigationAction(raw);
+}
 
 /**
  * Загрузка изображения настроек (logo|favicon|og) из FormData. Фабричный action

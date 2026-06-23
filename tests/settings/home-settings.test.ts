@@ -221,3 +221,53 @@ describe('settings/actions — updateHomeAction', () => {
     expect(deps.upsertSetting).not.toHaveBeenCalled();
   });
 });
+
+// =============================================================================
+// navigation (G-10/G-11) — меню шапки + колонки футера.
+// =============================================================================
+describe('navigation (G-10/G-11)', () => {
+  it('пустая БД → navigation пустой', () => {
+    const eff = mergeSettings(envWith(), []);
+    expect(eff.navigation).toEqual({ header: [], footer: [] });
+  });
+
+  it('оверрайд → header/footer из БД + проброс в DTO', () => {
+    const eff = mergeSettings(envWith(), [
+      {
+        setting_key: 'navigation',
+        value: {
+          header: [{ label: 'Каталог', href: '/catalog' }],
+          footer: [{ title: 'Сервис', links: [{ label: 'Доставка', href: '/d' }] }],
+        },
+      },
+    ]);
+    expect(eff.navigation.header).toEqual([{ label: 'Каталог', href: '/catalog' }]);
+    expect(eff.navigation.footer[0]!.title).toBe('Сервис');
+    const dto = toPublicSettingsDto(eff);
+    expect(dto.navigation.header).toEqual([{ label: 'Каталог', href: '/catalog' }]);
+    expect(dto.navigation.footer[0]!.links[0]).toEqual({ label: 'Доставка', href: '/d' });
+  });
+
+  it('updateNavigationAction: guard settings.manage + upsert + audit', async () => {
+    const actionDeps = makeActionDeps(makeUser(['settings.manage']));
+    const deps = makeSettingsDeps(actionDeps);
+    const { updateNavigationAction } = createSettingsActions(deps);
+    const res = await updateNavigationAction({ navigation: { header: [{ label: 'X', href: '/x' }] } });
+    expect(res.ok).toBe(true);
+    expect(deps.upsertSetting).toHaveBeenCalledWith(
+      'navigation',
+      expect.objectContaining({ header: [{ label: 'X', href: '/x' }] }),
+      'u-1',
+    );
+    const auditArg = (actionDeps.writeAudit as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(auditArg.action).toBe('settings.navigation.update');
+  });
+
+  it('updateNavigationAction без прав → forbidden', async () => {
+    const deps = makeSettingsDeps(makeActionDeps(makeUser(['catalog.write'])));
+    const { updateNavigationAction } = createSettingsActions(deps);
+    const res = await updateNavigationAction({ navigation: { header: [] } });
+    expect(res).toEqual({ ok: false, error: 'forbidden' });
+    expect(deps.upsertSetting).not.toHaveBeenCalled();
+  });
+});

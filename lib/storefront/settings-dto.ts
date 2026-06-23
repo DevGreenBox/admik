@@ -100,6 +100,11 @@ export interface PublicSettingsDto {
   };
   /** Редактируемый контент главной (ADR-018) — публичный. */
   home: PublicHomeDto;
+  /** Навигация витрины (G-10/G-11): меню шапки и колонки футера — публичная. */
+  navigation: {
+    header: { label: string; href: string }[];
+    footer: { title: string; links: { label: string; href: string }[] }[];
+  };
 }
 
 /**
@@ -178,6 +183,13 @@ export function toPublicSettingsDto(
       },
       quality: { title: eff.home.quality.title, items: [...eff.home.quality.items] },
       delivery: { items: eff.home.delivery.items.map((i) => ({ ...i })) },
+    },
+    navigation: {
+      header: eff.navigation.header.map((i) => ({ label: i.label, href: i.href })),
+      footer: eff.navigation.footer.map((c) => ({
+        title: c.title,
+        links: c.links.map((l) => ({ label: l.label, href: l.href })),
+      })),
     },
   };
 }

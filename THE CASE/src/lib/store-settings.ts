@@ -19,6 +19,28 @@ import { getSettings, type AdmikSettingsDto, type AdmikSocialDto } from '@/lib/a
 // Контент главной — в client-safe модуле (без react/cache), реэкспорт для удобства.
 export { HOME_FALLBACK, resolveHome, type ResolvedHome } from './home-content';
 
+export interface NavLink {
+  label: string;
+  href: string;
+}
+export interface ResolvedNav {
+  header: NavLink[];
+  footer: { title: string; links: NavLink[] }[];
+}
+
+/**
+ * Навигация витрины из настроек Admik (G-10/G-11). Возвращает заданные владельцем
+ * пункты меню/колонки футера или ПУСТЫЕ массивы — в этом случае компоненты
+ * (Header/Footer) показывают свою навигацию по умолчанию (фолбэк на их стороне,
+ * включая динамическое подменю «Коллекция» из категорий).
+ */
+export function resolveNavigation(s: AdmikSettingsDto | null): ResolvedNav {
+  return {
+    header: s?.navigation?.header ?? [],
+    footer: s?.navigation?.footer ?? [],
+  };
+}
+
 /** Нейтральные дефолты витрины (фолбэк до первой правки в админке). */
 export const STORE_DEFAULTS = {
   shopName: 'THE CASE',
