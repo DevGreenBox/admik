@@ -32,6 +32,10 @@ const nextConfig: NextConfig = {
   images: {
     formats: ["image/avif", "image/webp"],
     deviceSizes: [640, 750, 828, 1080, 1200, 1440],
+    // Качество оптимизации (Next 16 требует список разрешённых значений; в 15
+    // поле также поддерживается). Поднято до 85 — дефолтные 75 «замыливали»
+    // премиальные фото каталога/обложек; <Image quality={85}> ниже использует его.
+    qualities: [85],
     remotePatterns: buildRemotePatterns(),
   },
   experimental: {

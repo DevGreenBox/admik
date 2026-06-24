@@ -72,8 +72,8 @@ export function Header({
               <nav className="hidden md:flex items-center gap-8 lg:gap-10">
                 {NAV_LEFT.map((link) =>
                   link.children ? (
-                    <div key={link.label} className="relative group/nav">
-                      <Link href={link.href} className="eyebrow text-graphite link-underline">
+                    <div key={link.label} className="relative group/nav flex items-center">
+                      <Link href={link.href} className="eyebrow leading-none text-graphite link-underline">
                         {link.label}
                       </Link>
                       <div className="invisible absolute left-0 top-full pt-4 opacity-0 transition-opacity duration-300 group-hover/nav:visible group-hover/nav:opacity-100">
@@ -91,7 +91,7 @@ export function Header({
                       </div>
                     </div>
                   ) : (
-                    <Link key={link.label} href={link.href} className="eyebrow text-graphite link-underline">
+                    <Link key={link.label} href={link.href} className="eyebrow leading-none text-graphite link-underline">
                       {link.label}
                     </Link>
                   ),
@@ -104,7 +104,7 @@ export function Header({
             <div className="flex items-center justify-end gap-5 md:gap-7">
               <nav className="hidden md:flex items-center gap-8 lg:gap-10 mr-2">
                 {navRight.map((link) => (
-                  <Link key={link.href} href={link.href} className="eyebrow text-graphite link-underline">
+                  <Link key={link.href} href={link.href} className="eyebrow leading-none text-graphite link-underline">
                     {link.label}
                   </Link>
                 ))}

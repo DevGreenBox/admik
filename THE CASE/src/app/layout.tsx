@@ -7,6 +7,11 @@ import { getCategories, type AdmikCategoryDto } from "@/lib/admik";
 import { getStoreSettings, resolveSeo, resolveShopName, resolveContacts, resolveNavigation } from "@/lib/store-settings";
 import "./globals.css";
 
+// Рендер layout — динамический: шапка/футер (shopName, навигация, контакты из
+// getStoreSettings) и подменю «Коллекция» обязаны отражать свежие правки из
+// админки Admik на каждый запрос, а не запекаться на сборке (как на страницах).
+export const dynamic = "force-dynamic";
+
 // generateMetadata (а не статический объект) — чтобы metadataBase и robots
 // читали env в РАНТАЙМЕ: иначе Next запекает build-time URL (localhost) и
 // открытую индексацию в standalone-сборку. STOREFRONT_NOINDEX управляет

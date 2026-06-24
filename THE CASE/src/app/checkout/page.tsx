@@ -50,6 +50,11 @@ export default function CheckoutPage() {
   // Шаг 3 — оплата + серверный итог (quote).
   const [paymentMethod, setPaymentMethod] = useState(PAYMENT_METHODS[0]?.id ?? "card");
   const [quote, setQuote] = useState<AdmikQuoteDto | null>(null);
+  // Промокод (опционально). Сервер — источник истины: применённость/скидку
+  // возвращает quote.promo / quote.discountTotal (anti-tamper); пустую строку
+  // шлём как undefined.
+  const [promoCode, setPromoCode] = useState("");
+  const [applyingPromo, setApplyingPromo] = useState(false);
 
   const [form, setForm] = useState({ firstName: "", lastName: "", email: "", phone: "" });
 
@@ -147,6 +152,7 @@ export default function CheckoutPage() {
     try {
       const q = await quoteCart({
         items: cartToItems(cart),
+        promoCode: promoCode.trim() || undefined,
         delivery: { type: "pvz", city: selectedCity!.name, cityCode: selectedCity!.code, pvzCode: pvz.code },
       });
       setQuote(q);
@@ -164,6 +170,7 @@ export default function CheckoutPage() {
     try {
       const q = await quoteCart({
         items: cartToItems(cart),
+        promoCode: promoCode.trim() || undefined,
         delivery: { type: "pvz", city: selectedCity.name, cityCode: selectedCity.code, pvzCode: selectedPickup.code },
       });
       setQuote(q);
@@ -172,6 +179,27 @@ export default function CheckoutPage() {
       setError(e instanceof AdmikApiError ? e.message : "Не удалось рассчитать заказ");
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Применение промокода на шаге 3: пересчёт quote с текущим promoCode — итог/скидку
+  // считает сервер (anti-tamper), мы лишь показываем результат. Доставка уже выбрана,
+  // поэтому пересчёт идёт с тем же ПВЗ.
+  const applyPromo = async () => {
+    if (!selectedCity || !selectedPickup) return;
+    setError("");
+    setApplyingPromo(true);
+    try {
+      const q = await quoteCart({
+        items: cartToItems(cart),
+        promoCode: promoCode.trim() || undefined,
+        delivery: { type: "pvz", city: selectedCity.name, cityCode: selectedCity.code, pvzCode: selectedPickup.code },
+      });
+      setQuote(q);
+    } catch (e) {
+      setError(e instanceof AdmikApiError ? e.message : "Не удалось применить промокод");
+    } finally {
+      setApplyingPromo(false);
     }
   };
 
@@ -192,6 +220,7 @@ export default function CheckoutPage() {
           },
           delivery: { type: "pvz", city: selectedCity.name, cityCode: selectedCity.code, pvzCode: selectedPickup.code },
           paymentMethod: mapPaymentMethod(paymentMethod),
+          promoCode: promoCode.trim() || undefined,
         },
         { idempotencyKey: idempotencyKey.current },
       );
@@ -344,6 +373,41 @@ export default function CheckoutPage() {
             <div className="space-y-6 mt-8">
               <OptionGroup title="Оплата" options={PAYMENT_METHODS} selected={paymentMethod}
                 onSelect={(m) => setPaymentMethod(m.id)} render={(m) => m.name} sub={(m) => m.description} />
+
+              <div>
+                <label htmlFor="promo-code" className="label-caps text-muted block mb-3">Промокод</label>
+                <div className="flex gap-3">
+                  <input
+                    id="promo-code"
+                    type="text"
+                    value={promoCode}
+                    onChange={(e) => setPromoCode(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        applyPromo();
+                      }
+                    }}
+                    placeholder="Введите промокод"
+                    autoCapitalize="characters"
+                    className="flex-1 border border-border px-4 py-3 text-sm uppercase tracking-wide focus:border-graphite outline-none transition-colors"
+                  />
+                  <Button variant="outline" size="md" disabled={applyingPromo || promoCode.trim() === ""} onClick={applyPromo}>
+                    {applyingPromo ? "Проверка..." : "Применить"}
+                  </Button>
+                </div>
+                {/* Статус из серверного quote.promo (anti-tamper): применён → подтверждаем,
+                    иначе показываем причину отказа (если код вводили). */}
+                {quote?.promo?.applied && (
+                  <p className="text-[11px] text-muted mt-2">
+                    Промокод {quote.promo.code} применён.
+                  </p>
+                )}
+                {!quote?.promo?.applied && promoCode.trim() !== "" && quote?.promo?.reason && (
+                  <p className="text-[11px] text-accent mt-2">{quote.promo.reason}</p>
+                )}
+              </div>
+
               <div className="bg-surface p-6 space-y-3">
                 <Row label="Товары" value={formatPrice(Number(quote?.itemsTotal ?? 0))} />
                 {Number(quote?.discountTotal ?? 0) > 0 && (

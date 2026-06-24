@@ -83,10 +83,13 @@ export function CoverSlides({ quality = HOME_FALLBACK.quality }: { quality?: Res
             className="relative mt-6 flex min-h-[360px] items-center overflow-hidden md:min-h-[420px]"
             style={{ background: "linear-gradient(135deg,#9a9da1,#7e8186 40%,#6f7277)" }}
           >
-            {/* TODO(контент клиента): заменить серый градиент на фото фактуры ткани */}
+            {/* TODO(контент клиента): заменить серый градиент на фото фактуры ткани.
+                Светлые диагональные линии (а не чёрные) дают видимую фактуру ткани
+                поверх тёмного градиента вместо «грязного серого»; opacity поднята до
+                0.2 — текстура читается, но остаётся фоном под текстом. */}
             <div
-              className="absolute inset-0 opacity-[0.12]"
-              style={{ backgroundImage: "repeating-linear-gradient(45deg,#000 0 1px,transparent 1px 4px)" }}
+              className="absolute inset-0 opacity-20 mix-blend-soft-light"
+              style={{ backgroundImage: "repeating-linear-gradient(45deg,#fff 0 1px,transparent 1px 5px)" }}
             />
             <div className="relative w-full px-8 py-14 text-white md:px-14 md:py-20">
               <p className="eyebrow mb-6 text-white/60">{quality.title}</p>
