@@ -245,6 +245,27 @@ describe('config/settings — кеш getEffectiveSettings / invalidate', () => {
     expect(reader).toHaveBeenCalledTimes(2);
     expect(after.branding.shopName).toBe('V2');
   });
+
+  it('кэш живёт на globalThis (общий для всех бандлов Next) — инвалидация видна «другому экземпляру»', async () => {
+    // Регрессия бага «правка в админке не видна на витрине»: Next инстанцирует
+    // lib/config/settings в РАЗНЫХ бандлах (server-action vs route-handler). Если
+    // состояние держать в модульных `let`, у каждого бандла свой memo и
+    // invalidate из экшена НЕ достанет до кэша, который читает публичный API.
+    // Поэтому состояние обязано лежать на globalThis под общим registry-Symbol.
+    const reader = vi.fn(async () => [{ setting_key: 'branding', value: { shopName: 'G1' } }]);
+    await getEffectiveSettings({ readRows: reader, env: envWith() });
+
+    // «Другой экземпляр модуля» дотягивается до того же состояния через globalThis.
+    const slot = (globalThis as unknown as Record<symbol, { cached?: unknown } | undefined>)[
+      Symbol.for('admik.config.settings.effectiveCache')
+    ];
+    expect(slot).toBeDefined();
+    expect(slot!.cached).toBeDefined();
+
+    // Инвалидация (как из settings-action) немедленно видна через тот же слот.
+    invalidateSettingsCache();
+    expect(slot!.cached).toBeUndefined();
+  });
 });
 
 // =============================================================================

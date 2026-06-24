@@ -305,50 +305,88 @@ export interface EffectiveSettingsDeps {
   env?: Env;
 }
 
-/** Module-level memo эффективных настроек (1 чтение БД на процесс до инвалидации). */
-let cached: EffectiveSettings | undefined;
-/** In-flight промис, чтобы конкурентные вызовы дали ОДНО чтение БД. */
-let inflight: Promise<EffectiveSettings> | undefined;
 /**
- * Монотонный счётчик поколений кеша (epoch/generation guard против TOCTOU).
+ * Состояние memo-кэша эффективных настроек.
  *
- * invalidateSettingsCache() инкрементирует его. In-flight IIFE захватывает epoch
- * ДО `await read()` и кеширует результат ТОЛЬКО если epoch не сменился за время
- * чтения. Иначе во время зависшего SELECT произошла запись настроек + инвалидация
- * → прочитанный снапшот устарел, кешировать его нельзя (иначе перезапишет
- * инвалидацию и сломает read-your-own-writes на всей поверхности рантайм-гейтов).
+ * ⚠️ Хранится на globalThis (через registry-Symbol), а НЕ в модульных `let`.
+ * Причина: Next.js инстанцирует один и тот же модуль (`lib/config/settings`) в
+ * РАЗНЫХ серверных бандлах — отдельно для Server Actions и отдельно для Route
+ * Handlers/RSC. С модульными переменными у каждого бандла была бы СВОЯ копия
+ * memo: invalidateSettingsCache() из settings-action сбрасывал бы кэш только
+ * СВОЕГО экземпляра, а публичный GET /api/storefront/v1/settings читал бы memo
+ * ДРУГОГО экземпляра и бесконечно отдавал устаревший снимок — вплоть до рестарта
+ * процесса app. Именно так проявлялся баг «правка контента в админке сохраняется
+ * в БД, но не видна на витрине». globalThis — единственный объект, общий для всех
+ * экземпляров модуля в одном процессе, поэтому и кэш, и его инвалидация
+ * становятся по-настоящему процесс-широкими. Registry-Symbol (Symbol.for) даёт
+ * один и тот же ключ во всех бандлах. Прямая правка shop_settings в БД (внешний
+ * SQL) по-прежнему требует рестарта app — invalidate из неё не вызывается.
  */
-let cacheEpoch = 0;
+interface SettingsCacheState {
+  /** Снапшот эффективных настроек (1 чтение БД на процесс до инвалидации). */
+  cached: EffectiveSettings | undefined;
+  /** In-flight промис, чтобы конкурентные вызовы дали ОДНО чтение БД. */
+  inflight: Promise<EffectiveSettings> | undefined;
+  /**
+   * Монотонный счётчик поколений кеша (epoch/generation guard против TOCTOU).
+   * invalidateSettingsCache() инкрементирует его. In-flight IIFE захватывает
+   * epoch ДО `await read()` и кеширует результат ТОЛЬКО если epoch не сменился за
+   * время чтения. Иначе во время зависшего SELECT произошла запись настроек +
+   * инвалидация → прочитанный снапшот устарел, кешировать его нельзя (иначе
+   * перезапишет инвалидацию и сломает read-your-own-writes по всей поверхности
+   * рантайм-гейтов).
+   */
+  cacheEpoch: number;
+}
+
+/** Registry-Symbol: одинаков во всех бандлах/экземплярах модуля одного процесса. */
+const SETTINGS_CACHE_SLOT = Symbol.for('admik.config.settings.effectiveCache');
+
+/** Возвращает (создавая однажды) общее на процесс состояние кэша из globalThis. */
+function settingsCache(): SettingsCacheState {
+  const store = globalThis as unknown as Record<symbol, SettingsCacheState | undefined>;
+  let state = store[SETTINGS_CACHE_SLOT];
+  if (!state) {
+    state = { cached: undefined, inflight: undefined, cacheEpoch: 0 };
+    store[SETTINGS_CACHE_SLOT] = state;
+  }
+  return state;
+}
 
 /**
- * Возвращает эффективные настройки. Читает БД ОДИН раз и мемоизирует (module-level).
- * `invalidateSettingsCache()` вызывается из каждого settings-action для
- * read-your-own-writes. Redis-кеш — задел на будущее (1 магазин = 1 БД).
+ * Возвращает эффективные настройки. Читает БД ОДИН раз и мемоизирует (на процесс,
+ * через globalThis — общий кэш для всех бандлов Next). `invalidateSettingsCache()`
+ * вызывается из каждого settings-action для read-your-own-writes. Redis-кеш —
+ * задел на будущее (1 магазин = 1 БД).
  */
 export async function getEffectiveSettings(
   deps: EffectiveSettingsDeps = {},
 ): Promise<EffectiveSettings> {
-  if (cached) return cached;
-  if (inflight) return inflight;
+  const state = settingsCache();
+  if (state.cached) return state.cached;
+  if (state.inflight) return state.inflight;
 
   const read = deps.readRows ?? getAllSettings;
   const env = deps.env ?? getEnv();
 
-  inflight = (async () => {
+  const mine = (async () => {
     // Захватываем поколение кеша ДО зависающего чтения. Если за время await
     // произошла инвалидация (cacheEpoch сменился) — снапшот устарел: возвращаем
     // его вызывающему (read-your-own-read), но НЕ кешируем (не затираем инвалидацию).
-    const startEpoch = cacheEpoch;
+    const startEpoch = state.cacheEpoch;
     const rows = await read();
     const merged = mergeSettings(env, rows);
-    if (startEpoch === cacheEpoch) cached = merged;
+    if (startEpoch === state.cacheEpoch) state.cached = merged;
     return merged;
   })();
+  state.inflight = mine;
 
   try {
-    return await inflight;
+    return await mine;
   } finally {
-    inflight = undefined;
+    // Снимаем только СВОЙ in-flight: если за время чтения была инвалидация и
+    // стартовал новый read, его промис не должен быть затёрт.
+    if (state.inflight === mine) state.inflight = undefined;
   }
 }
 
@@ -357,11 +395,12 @@ export async function getEffectiveSettings(
  * после успешной мутации (read-your-own-writes) и в тестах.
  */
 export function invalidateSettingsCache(): void {
+  const state = settingsCache();
   // Инкремент поколения «отзывает» право любого in-flight чтения закешировать
   // свой (уже устаревший) снапшот — см. epoch-guard в getEffectiveSettings.
-  cacheEpoch += 1;
-  cached = undefined;
-  inflight = undefined;
+  state.cacheEpoch += 1;
+  state.cached = undefined;
+  state.inflight = undefined;
 }
 
 // -----------------------------------------------------------------------------
