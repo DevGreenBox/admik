@@ -1,16 +1,35 @@
+import type { Metadata } from "next";
+
 import { FadeIn } from "@/components/ui/Animations";
 import { getCmsPage } from "@/lib/cms";
 import { CmsPageView } from "@/components/cms/CmsPageView";
 
-export const metadata = {
+// CMS-overridable с фолбэком (G-13): опубликованная страница 'care' из админки
+// имеет приоритет; при её отсутствии/ошибке API — статический фолбэк ниже.
+export const dynamic = "force-dynamic";
+
+const FALLBACK_METADATA: Metadata = {
   title: "Уход за вещами — THE CASE",
   description: "Состав ткани и рекомендации по уходу за медицинской формой THE CASE.",
 };
+
+export async function generateMetadata(): Promise<Metadata> {
+  const page = await getCmsPage("care");
+  if (!page) return FALLBACK_METADATA;
+  return {
+    title: page.meta.title ?? page.title ?? FALLBACK_METADATA.title,
+    description: page.meta.description ?? FALLBACK_METADATA.description,
+  };
+}
 
 export default async function CarePage() {
   const page = await getCmsPage("care");
   if (page) return <CmsPageView page={page} />;
 
+  return <CareFallback />;
+}
+
+function CareFallback() {
   return (
     <div className="page-transition pt-16 md:pt-20">
       <div className="container-brand py-12 md:py-16 max-w-3xl">

@@ -1,18 +1,35 @@
+import type { Metadata } from "next";
+
 import { FadeIn } from "@/components/ui/Animations";
 import { getCmsPage } from "@/lib/cms";
 import { CmsPageView } from "@/components/cms/CmsPageView";
 
-export const metadata = {
+// CMS-overridable с фолбэком (G-13): опубликованная страница 'terms' из админки
+// имеет приоритет; при её отсутствии/ошибке API — статический фолбэк ниже.
+export const dynamic = "force-dynamic";
+
+const FALLBACK_METADATA: Metadata = {
   title: "Пользовательское соглашение — THE CASE",
   description: "Условия использования сайта и продажи товаров интернет-магазина THE CASE.",
 };
 
+export async function generateMetadata(): Promise<Metadata> {
+  const page = await getCmsPage("terms");
+  if (!page) return FALLBACK_METADATA;
+  return {
+    title: page.meta.title ?? page.title ?? FALLBACK_METADATA.title,
+    description: page.meta.description ?? FALLBACK_METADATA.description,
+  };
+}
+
 export default async function TermsPage() {
-  // CMS-версия страницы (если владелец создал её в админке) имеет приоритет;
-  // иначе — статический фолбэк ниже (G-13).
   const page = await getCmsPage("terms");
   if (page) return <CmsPageView page={page} />;
 
+  return <TermsFallback />;
+}
+
+function TermsFallback() {
   return (
     <div className="page-transition pt-16 md:pt-20">
       <div className="container-brand py-12 md:py-16 max-w-3xl">
