@@ -77,15 +77,16 @@ export function Footer({
       setSubPending(false);
     }
   };
-  // Колонки футера строятся АВТОМАТИЧЕСКИ из опубликованных страниц «Контента»:
-  // каждая страница → кликабельная ссылка в колонке «Информация» (ни одна страница
-  // не остаётся «осиротевшей»). Пока в Контенте нет страниц — дефолтные колонки.
+  // Базовые колонки (Сервис/Legal) показываем ВСЕГДА — юридические и сервисные
+  // ссылки не должны исчезать, даже если соответствующая страница не опубликована в
+  // Контенте. Дополнительно — колонка «Информация» с опубликованными страницами,
+  // которых ещё НЕТ в базовых колонках (без дублей). Так любая страница достижима
+  // кликом (нет «осиротевших»), и при этом юридические ссылки на месте.
+  const baseHrefs = new Set(DEFAULT_COLUMNS.flatMap((c) => c.links.map((l) => l.href)));
+  const extraPages = (infoLinks ?? []).filter((l) => !baseHrefs.has(l.href));
   const cols: FooterColumn[] =
-    infoLinks && infoLinks.length > 0
-      ? [
-          { title: "Информация", links: infoLinks },
-          { title: "Аккаунт", links: [{ href: "/account", label: "Личный кабинет" }] },
-        ]
+    extraPages.length > 0
+      ? [...DEFAULT_COLUMNS, { title: "Информация", links: extraPages }]
       : DEFAULT_COLUMNS;
   const lastCol = cols.length - 1;
 

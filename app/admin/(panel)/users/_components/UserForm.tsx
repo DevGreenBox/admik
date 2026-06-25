@@ -115,10 +115,11 @@ export function UserForm({
     return fieldError(error, f);
   }
 
-  // Статусы, доступные для выбора: на создании — без «Приглашён».
-  const statusOptions = isEdit
-    ? (['active', 'disabled', 'invited'] as const)
-    : (['active', 'disabled'] as const);
+  // Статусы для выбора: только active/disabled. «Приглашён» убран как мёртвая
+  // опция — флоу приглашений (письмо-инвайт) нет, а пользователь со статусом
+  // invited войти НЕ может (session пускает только active) → тупик «создал, а
+  // человек не заходит». Вернуть «Приглашён», когда появится реальный invite-флоу.
+  const statusOptions = ['active', 'disabled'] as const;
 
   return (
     <div>

@@ -45,11 +45,23 @@ export default async function DashboardPage() {
   // расходясь с моделью гейтинга (nav.ts / guardOrders) и собственным комментарием
   // карточек. Гейтим чтения orders флагом модуля; «Посещения» от модуля orders не
   // зависят и показываются всегда.
-  const ordersOn = await isModuleEffectivelyEnabled('orders');
+  // Эффективный набор модулей: дашборд обязан совпадать с боковым меню и
+  // страницами (которые требуют ВКЛЮЧЁННЫЙ модуль, а не только право). Иначе при
+  // выключенном модуле дашборд показывает счётчики/кнопки, ведущие на «модуль
+  // выключен» (тупик) — расхождение «настроил → всё равно видно».
+  const [ordersOn, catalogOn, cdekOn] = await Promise.all([
+    isModuleEffectivelyEnabled('orders'),
+    isModuleEffectivelyEnabled('catalog'),
+    isModuleEffectivelyEnabled('cdek'),
+  ]);
 
   const [products, categories, ordersTotal, ordersToday, series] = await Promise.all([
-    safeCount(sql<{ n: string }[]>`SELECT count(*)::text AS n FROM products`),
-    safeCount(sql<{ n: string }[]>`SELECT count(*)::text AS n FROM categories`),
+    catalogOn
+      ? safeCount(sql<{ n: string }[]>`SELECT count(*)::text AS n FROM products`)
+      : Promise.resolve(null),
+    catalogOn
+      ? safeCount(sql<{ n: string }[]>`SELECT count(*)::text AS n FROM categories`)
+      : Promise.resolve(null),
     ordersOn
       ? safeCount(sql<{ n: string }[]>`SELECT count(*)::text AS n FROM orders`)
       : Promise.resolve(null),
@@ -64,11 +76,11 @@ export default async function DashboardPage() {
 
   // Быстрые ссылки — только те, на что есть право (owner видит всё).
   const links: { href: string; label: string; show: boolean }[] = [
-    { href: '/admin/catalog/products/new', label: '+ Создать товар', show: can(user, 'catalog.write') },
-    { href: '/admin/catalog', label: 'Каталог товаров', show: can(user, 'catalog.read') },
-    { href: '/admin/catalog/categories', label: 'Категории', show: can(user, 'catalog.read') },
-    { href: '/admin/orders', label: 'Заказы', show: can(user, 'orders.read') },
-    { href: '/admin/cdek', label: 'Доставка', show: can(user, 'cdek.manage') },
+    { href: '/admin/catalog/products/new', label: '+ Создать товар', show: catalogOn && can(user, 'catalog.write') },
+    { href: '/admin/catalog', label: 'Каталог товаров', show: catalogOn && can(user, 'catalog.read') },
+    { href: '/admin/catalog/categories', label: 'Категории', show: catalogOn && can(user, 'catalog.read') },
+    { href: '/admin/orders', label: 'Заказы', show: ordersOn && can(user, 'orders.read') },
+    { href: '/admin/cdek', label: 'Доставка', show: cdekOn && can(user, 'cdek.manage') },
     { href: '/admin/settings', label: 'Настройки', show: can(user, 'settings.manage') },
   ].filter((l) => l.show);
 
