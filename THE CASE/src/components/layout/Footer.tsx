@@ -94,8 +94,12 @@ export function Footer({
   const lastCol = cols.length - 1;
 
   // Ссылки «Shop» строятся из РЕАЛЬНЫХ категорий магазина. «Коллекция» — всегда.
+  // «Распродажа»/«Новинки» (F18) — точки входа в серверные фасеты каталога
+  // (?sale=1 / ?new=1), иначе эти фильтры недостижимы из UI.
   const shopLinks = [
     { href: "/catalog", label: "Коллекция" },
+    { href: "/catalog?sale=1", label: "Распродажа" },
+    { href: "/catalog?new=1", label: "Новинки" },
     ...categoryLinks(categories, 4).map((cat) => ({ href: cat.href, label: cat.name })),
   ];
 

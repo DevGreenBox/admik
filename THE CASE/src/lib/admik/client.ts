@@ -286,6 +286,66 @@ export async function subscribeNewsletter(
 }
 
 // ---------------------------------------------------------------------------
+// Аналитика посещений (beacon). F23.
+// ---------------------------------------------------------------------------
+
+/**
+ * Готовит параметры запроса beacon-а посещения (чистая функция — тестируема без сети).
+ * Тело Admik ИГНОРИРУЕТ (никакого PII — считается только факт открытия страницы), но
+ * шлём пустой JSON-объект, чтобы у запроса был корректный Content-Type и единый стиль
+ * с остальными POST-вызовами клиента. Заголовок X-Storefront-Key — только server-side
+ * (в браузере его нет, авторизация по Origin-allowlist на стороне Admik).
+ */
+export function buildPageviewRequest(config?: Partial<AdmikClientConfig>): {
+  url: string;
+  apiKey: string | null;
+  body: string;
+} {
+  const { baseUrl, apiKey } = resolveConfig(config);
+  return {
+    url: `${baseUrl}/api/storefront/v1/events/pageview`,
+    apiKey,
+    body: JSON.stringify({}),
+  };
+}
+
+/**
+ * Beacon посещения витрины (POST /events/pageview, F23): инкрементит суточный счётчик
+ * storefront_pageviews в Admik для графика «Посещения» на дашборде.
+ *
+ * Мягкая деградация: аналитика НЕ должна влиять на UX — любые ошибки глотаются, метод
+ * никогда не бросает. При наличии navigator.sendBeacon используем его (переживает уход
+ * со страницы и не блокирует выгрузку), иначе fetch с keepalive: true.
+ */
+export async function recordPageview(
+  config?: Partial<AdmikClientConfig>,
+): Promise<void> {
+  try {
+    const { url, apiKey, body } = buildPageviewRequest(config);
+    if (!url || url.startsWith('/api')) return; // нет baseUrl → тихо выходим
+
+    // sendBeacon: предпочтительно в браузере — не теряется при навигации/закрытии
+    // вкладки. Заголовки задать нельзя, поэтому он годится только когда ключ не
+    // требуется (браузерный запрос авторизуется по Origin на стороне Admik).
+    if (
+      !apiKey &&
+      typeof navigator !== 'undefined' &&
+      typeof navigator.sendBeacon === 'function'
+    ) {
+      const blob = new Blob([body], { type: 'application/json' });
+      navigator.sendBeacon(url, blob);
+      return;
+    }
+
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (apiKey) headers['X-Storefront-Key'] = apiKey;
+    await fetch(url, { method: 'POST', headers, body, keepalive: true });
+  } catch {
+    // Глотаем: сбой аналитики не должен влиять на UX витрины.
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Корзина / заказ.
 // ---------------------------------------------------------------------------
 

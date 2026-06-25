@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import Providers from "@/components/Providers";
+import PageviewBeacon from "@/components/PageviewBeacon";
 import { CurrencyProvider } from "@/components/CurrencyProvider";
 import { getSiteUrlFromSources, isNoindexFromSources } from "@/lib/site-url";
 import { getCategories, listPages, type AdmikCategoryDto } from "@/lib/admik";
@@ -120,6 +121,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     <html lang="ru" style={themeStyle}>
       <body className="min-h-screen flex flex-col">
         <Providers>
+          <PageviewBeacon />
           <CurrencyProvider currency={currency}>
             <Header categories={categories} shopName={shopName} logoUrl={logoUrl} infoItems={infoLinks} />
             <main className="flex-1">{children}</main>

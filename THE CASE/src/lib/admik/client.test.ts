@@ -13,6 +13,8 @@ import {
   getPage,
   submitLead,
   subscribeNewsletter,
+  buildPageviewRequest,
+  recordPageview,
 } from './client';
 
 const CFG = { baseUrl: 'https://admik.test/', apiKey: 'secret-key' };
@@ -239,5 +241,55 @@ describe('subscribeNewsletter (G-12)', () => {
     expect(init.method).toBe('POST');
     expect(JSON.parse(init.body)).toEqual({ email: 'i@e.ru' });
     expect(r).toEqual({ ok: true });
+  });
+});
+
+describe('buildPageviewRequest (F23)', () => {
+  it('собирает URL /events/pageview, пустое тело, прокидывает ключ', () => {
+    const r = buildPageviewRequest(CFG);
+    expect(r.url).toBe('https://admik.test/api/storefront/v1/events/pageview');
+    expect(r.apiKey).toBe('secret-key');
+    expect(r.body).toBe('{}');
+  });
+
+  it('без ключа (браузерный запрос) → apiKey=null', () => {
+    const r = buildPageviewRequest({ baseUrl: 'https://shop.test', apiKey: null });
+    expect(r.url).toBe('https://shop.test/api/storefront/v1/events/pageview');
+    expect(r.apiKey).toBeNull();
+  });
+});
+
+describe('recordPageview (F23, beacon)', () => {
+  it('server-side (есть ключ, нет navigator) → POST с keepalive и X-Storefront-Key', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ data: { ok: true } }, 200));
+    await recordPageview(CFG);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://admik.test/api/storefront/v1/events/pageview');
+    expect(init.method).toBe('POST');
+    expect(init.keepalive).toBe(true);
+    expect(init.body).toBe('{}');
+    const headers = init.headers as Record<string, string>;
+    expect(headers['Content-Type']).toBe('application/json');
+    expect(headers['X-Storefront-Key']).toBe('secret-key');
+  });
+
+  it('браузер без ключа: использует navigator.sendBeacon, fetch НЕ вызывается', async () => {
+    const beacon = vi.fn().mockReturnValue(true);
+    vi.stubGlobal('navigator', { sendBeacon: beacon });
+    await recordPageview({ baseUrl: 'https://shop.test', apiKey: null });
+    expect(beacon).toHaveBeenCalledTimes(1);
+    expect(beacon.mock.calls[0][0]).toBe('https://shop.test/api/storefront/v1/events/pageview');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('нет baseUrl → ничего не шлёт (тихий выход)', async () => {
+    await recordPageview({ baseUrl: '', apiKey: null });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('ошибка сети глотается (не бросает)', async () => {
+    fetchMock.mockRejectedValueOnce(new Error('network down'));
+    await expect(recordPageview(CFG)).resolves.toBeUndefined();
   });
 });

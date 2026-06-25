@@ -56,6 +56,10 @@ export function Header({
         collectionChildren.length > 0
           ? { href: "/catalog", label: "Коллекция", children: collectionChildren }
           : { href: "/catalog", label: "Коллекция" },
+        // Точки входа в серверные фасеты каталога (F18): без этих ссылок параметры
+        // ?sale=1 / ?new=1 недостижимы из UI. Фильтрацию делает сервер (catalog/page).
+        { href: "/catalog?sale=1", label: "Распродажа" },
+        { href: "/catalog?new=1", label: "Новинки" },
         { href: "/#about", label: "О бренде" },
         ...(infoNav
           ? [{ href: infoItems![0].href, label: "Информация", children: infoItems! }]
