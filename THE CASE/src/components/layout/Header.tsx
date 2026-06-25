@@ -20,12 +20,16 @@ export function Header({
   categories = [],
   shopName,
   headerItems,
+  infoItems,
 }: {
   categories?: AdmikCategoryDto[];
   /** Имя магазина из настроек Admik (G-01) → логотип. */
   shopName?: string;
   /** Пункты меню из настроек Admik (G-10); пусто → меню по умолчанию с подменю «Коллекция». */
   headerItems?: { label: string; href: string }[];
+  /** Ссылки «Информация» — АВТО из опубликованных страниц Контента (выпадающее меню);
+   *  каждая опубликованная страница сама попадает в меню, без ручной настройки. */
+  infoItems?: { href: string; label: string }[];
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const cartCount = useStore(selectCartCount);
@@ -38,6 +42,10 @@ export function Header({
   // Кастомное меню из настроек (G-10) заменяет дефолтное (плоские пункты, без
   // подменю); пусто → меню по умолчанию с динамическим подменю «Коллекция».
   const customNav = (headerItems?.length ?? 0) > 0;
+  // «Информация» — выпадающее меню из опубликованных страниц Контента (авто). Любая
+  // страница сама становится кликабельной — устраняет недостижимые («осиротевшие»)
+  // страницы. Родитель ведёт на первую страницу, дети — все страницы.
+  const infoNav = (infoItems?.length ?? 0) > 0;
   const NAV_LEFT: NavItem[] = customNav
     ? headerItems!.map((i) => ({ href: i.href, label: i.label }))
     : [
@@ -46,6 +54,9 @@ export function Header({
           ? { href: "/catalog", label: "Коллекция", children: collectionChildren }
           : { href: "/catalog", label: "Коллекция" },
         { href: "/#about", label: "О бренде" },
+        ...(infoNav
+          ? [{ href: infoItems![0].href, label: "Информация", children: infoItems! }]
+          : []),
       ];
   const navRight: NavItem[] = customNav ? [] : NAV_RIGHT;
 

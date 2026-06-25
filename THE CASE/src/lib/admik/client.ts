@@ -22,6 +22,7 @@ import type {
   AdmikProductDetailDto,
   AdmikProductListItemDto,
   AdmikPageDto,
+  AdmikPageListItemDto,
   AdmikQuoteDto,
   AdmikQuoteInput,
   AdmikSettingsDto,
@@ -243,6 +244,23 @@ export async function getPage(
     return await request<AdmikPageDto>(`/pages/${encodeURIComponent(slug)}`, { config });
   } catch (e) {
     if (e instanceof AdmikApiError) return null;
+    throw e;
+  }
+}
+
+/**
+ * Список опубликованных CMS-страниц (GET /pages) — для АВТО-навигации витрины.
+ * Любая опубликованная страница автоматически попадает в меню/футер, владельцу не
+ * нужно вручную прописывать ссылки. Пустой массив при выключенном модуле cms или
+ * любой ошибке (навигация деградирует до дефолтной, layout не падает).
+ */
+export async function listPages(
+  config?: Partial<AdmikClientConfig>,
+): Promise<AdmikPageListItemDto[]> {
+  try {
+    return await request<AdmikPageListItemDto[]>('/pages', { config });
+  } catch (e) {
+    if (e instanceof AdmikApiError) return [];
     throw e;
   }
 }

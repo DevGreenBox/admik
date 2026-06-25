@@ -3,8 +3,9 @@ import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import Providers from "@/components/Providers";
 import { getSiteUrl, isNoindex } from "@/lib/site-url";
-import { getCategories, type AdmikCategoryDto } from "@/lib/admik";
-import { getStoreSettings, resolveSeo, resolveShopName, resolveContacts, resolveNavigation } from "@/lib/store-settings";
+import { getCategories, listPages, type AdmikCategoryDto } from "@/lib/admik";
+import { getStoreSettings, resolveSeo, resolveShopName, resolveContacts } from "@/lib/store-settings";
+import { buildInfoLinks } from "@/lib/site-nav";
 import "./globals.css";
 
 // Рендер layout — динамический: шапка/футер (shopName, навигация, контакты из
@@ -66,21 +67,33 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     categories = [];
   }
 
+  // Опубликованные страницы «Контента» для АВТО-навигации (шапка «Информация» +
+  // футер). Любая страница, опубликованная в админке, сама становится кликабельной
+  // ссылкой — без ручной настройки меню (решает «осиротевшие» страницы). Тот же
+  // потолок ожидания (2.5с) и грациозная деградация, что и у категорий.
+  let infoLinks: { href: string; label: string }[] = [];
+  try {
+    const timeout = new Promise<never[]>((resolve) => setTimeout(() => resolve([]), 2500));
+    const pages = await Promise.race([listPages(), timeout]);
+    infoLinks = buildInfoLinks(pages.map((p) => ({ slug: p.slug, title: p.title })));
+  } catch {
+    infoLinks = [];
+  }
+
   // Брендинг/контакты магазина из настроек Admik (G-01) с грациозной деградацией
   // (getStoreSettings: таймаут+фолбэк на дефолты витрины). Мемоизирован с
   // generateMetadata — один запрос настроек на рендер страницы.
   const settings = await getStoreSettings();
   const shopName = resolveShopName(settings);
   const contacts = resolveContacts(settings);
-  const nav = resolveNavigation(settings);
 
   return (
     <html lang="ru">
       <body className="min-h-screen flex flex-col">
         <Providers>
-          <Header categories={categories} shopName={shopName} headerItems={nav.header} />
+          <Header categories={categories} shopName={shopName} infoItems={infoLinks} />
           <main className="flex-1">{children}</main>
-          <Footer categories={categories} shopName={shopName} contacts={contacts} columns={nav.footer} />
+          <Footer categories={categories} shopName={shopName} contacts={contacts} infoLinks={infoLinks} />
         </Providers>
       </body>
     </html>

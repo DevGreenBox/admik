@@ -8,7 +8,6 @@ import { PageHeader } from '../_components/PageHeader';
 import { guardSettings } from './_components/guard';
 import { BrandingForm } from './_components/BrandingForm';
 import { HomeContentForm } from './_components/HomeContentForm';
-import { NavigationForm } from './_components/NavigationForm';
 import { CurrencyUnitsForm } from './_components/CurrencyUnitsForm';
 import { LegalContactsForm } from './_components/LegalContactsForm';
 import { CatalogOrdersForm } from './_components/CatalogOrdersForm';
@@ -44,7 +43,6 @@ export default async function SettingsPage() {
   const sections = [
     { id: 'branding', title: 'Брендинг' },
     { id: 'home', title: 'Главная страница' },
-    { id: 'navigation', title: 'Навигация и футер' },
     { id: 'currency', title: 'Валюта и единицы измерения' },
     { id: 'contacts', title: 'Реквизиты и контакты' },
     { id: 'catalog', title: 'Каталог, доставка, заказы' },
@@ -85,10 +83,6 @@ export default async function SettingsPage() {
 
           <Section id="home" title="Главная страница">
             <HomeContentForm home={eff.home} />
-          </Section>
-
-          <Section id="navigation" title="Навигация и футер">
-            <NavigationForm navigation={eff.navigation} />
           </Section>
 
           <Section id="currency" title="Валюта и единицы измерения">

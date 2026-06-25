@@ -46,15 +46,16 @@ export function Footer({
   categories = [],
   shopName = "THE CASE",
   contacts,
-  columns,
+  infoLinks,
 }: {
   categories?: AdmikCategoryDto[];
   /** Имя магазина из настроек Admik (G-01). */
   shopName?: string;
   /** Контакты/соцсети из настроек Admik (G-01/G-08). */
   contacts?: ResolvedContacts;
-  /** Колонки футера из настроек Admik (G-11); пусто → DEFAULT_COLUMNS. */
-  columns?: FooterColumn[];
+  /** Ссылки «Информация» — АВТО из опубликованных страниц Контента (любая страница
+   *  становится кликабельной без ручной настройки); пусто → DEFAULT_COLUMNS. */
+  infoLinks?: { href: string; label: string }[];
 }) {
   const [email, setEmail] = useState("");
   const [subscribed, setSubscribed] = useState(false);
@@ -76,7 +77,16 @@ export function Footer({
       setSubPending(false);
     }
   };
-  const cols = columns && columns.length > 0 ? columns : DEFAULT_COLUMNS;
+  // Колонки футера строятся АВТОМАТИЧЕСКИ из опубликованных страниц «Контента»:
+  // каждая страница → кликабельная ссылка в колонке «Информация» (ни одна страница
+  // не остаётся «осиротевшей»). Пока в Контенте нет страниц — дефолтные колонки.
+  const cols: FooterColumn[] =
+    infoLinks && infoLinks.length > 0
+      ? [
+          { title: "Информация", links: infoLinks },
+          { title: "Аккаунт", links: [{ href: "/account", label: "Личный кабинет" }] },
+        ]
+      : DEFAULT_COLUMNS;
   const lastCol = cols.length - 1;
 
   // Ссылки «Shop» строятся из РЕАЛЬНЫХ категорий магазина. «Коллекция» — всегда.
