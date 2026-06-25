@@ -131,6 +131,7 @@ export function mapOrder(row: Record<string, unknown>): Order {
     paymentStatus: row.payment_status as Order['paymentStatus'],
     paidAt: row.paid_at ? asDate(row.paid_at) : null,
     paymentRef: strOrNull(row.payment_ref),
+    paymentProvider: strOrNull(row.payment_provider),
     deliveryType: row.delivery_type as Order['deliveryType'],
     deliveryStatus: row.delivery_status as Order['deliveryStatus'],
     deliveryCity: strOrNull(row.delivery_city),

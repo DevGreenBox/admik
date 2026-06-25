@@ -281,6 +281,61 @@ TBANK_REDIRECT_DUE_MIN=60
   в `pending` (потеря денег). Теперь сбой откатывает ВСЁ, включая вставку лога, и повтор события
   снова применяет статус.
 
+### 4.5 Сверка статуса оплаты (cron `reconcile-pending`) — фоллбэк потерянного webhook
+
+Потерянный/недоставленный webhook оставлял реально оплаченный заказ в `payment_status='pending'`
+(или `authorized`). Фоллбэк-сверка дотягивает такой заказ до актуального статуса через `GetState`:
+
+- **`PaymentService.reconcilePayment({ orderId, orderNumber, paymentId, amountKop? })`** (`service.ts`):
+  mock → `manager.mock.mockGetState(paymentId).status`; боевой → `client.call('GetState', …)`
+  (`Success:false` → `{ ok:false }`, повторим на следующем прогоне). Маппинг `Status → payment_status`
+  (`status-map`) и доведение через **тот же** `recordWebhookEvent` — значит идемпотентно (UNIQUE
+  `(payment_id, status)`), гард C4-1 не пометит `paid` отменённый/возвращённый заказ. `applied=true`
+  только если переход реально применён. Суммы — серверные (`amountKop` из `grand_total`).
+- **Воркер `runReconcilePending(deps?)`** (`lib/payments/tbank/cron.ts`, порт `lib/cdek/cron.ts`):
+  весь прогон под транзакционным advisory-lock (`pg_try_advisory_xact_lock('tbank:reconcile-pending')`)
+  — перекрывшийся/двойной тик → `lockSkipped`. Кандидаты (`findPendingTbankPayments`):
+  `payment_provider='tbank'`, `payment_status ∈ (pending, authorized)`, есть `payment_ref`, заказ не
+  отменён/возвращён, создан за последние **3 дня** (не дёргать вечно зависшие). Ошибка одного заказа
+  → `failed++`, прогон продолжается. `deps` инъецируемы (тесты без БД/сети).
+- **Роут** `POST|GET /api/cron/payments/reconcile-pending?key=<секрет>` (или `X-Cron-Secret`):
+  cron-секрет **общий** для всех cron-роутов инстанса — `getCdekConfig().cronSecret` (исторически
+  `CDEK_CRON_SECRET`; хелперы вынесены в `lib/cron/secret.ts`, переиспользуются и cdek-роутом). Нет
+  секрета → 503, неверный → 401, неизвестная задача → 404, модуль `payments` выключен → 200 `skipped`.
+  Расписание (`docker-compose.yml`, сервис `cron`): `*/15 * * * *`.
+
+### 4.6 Возврат денег через Т-Банк (`Cancel`) — экшен `refundOrder`
+
+Экшен `refundOrder` помечал заказ `refunded` (release резерва + откат промокода), но **не возвращал
+деньги** через шлюз. Теперь ДО смены статуса вызывается `Cancel`:
+
+- **ПРЕДПРОВЕРКА ПЕРЕХОДА ДО ШЛЮЗА (security-fix MEDIUM):** экшен `refundOrder` сначала грузит заказ,
+  затем проверяет `canTransition('order', cur.status, 'refunded')` и **только при допустимом переходе**
+  вызывает `refundPayment`. Иначе (например `authorized`-заказ в статусе `new`/`awaiting_payment`, откуда
+  `refunded` недопустим) `Cancel` снял бы холд в банке, а `applyOrderStatusTransition` затем бросил бы
+  `invalid_transition` → деньги/холд отпущены, а заказ не возвращён. `applyOrderStatusTransition`
+  перепроверяет переход под guarded-UPDATE (двойная проверка — норма против гонок).
+- **`PaymentService.refundPayment({ orderId, orderNumber, paymentStatus, paymentProvider, paymentRef,
+  amountKop })`** (`service.ts`): `provider!=='tbank'` или нет `payment_ref` → `skipped:'no_gateway'`
+  (COD/manual); `payment_status` не `paid`/`authorized` → `skipped:'not_captured'`. Иначе шлюз: mock →
+  `mockCancel({ authorizedOnly })` (`authorized`→`REVERSED`, `paid`→`REFUNDED`); боевой →
+  `client.call('Cancel', …)` (`Success:false` → `{ ok:false }`).
+- **Аудит-лог пишется с СИНТЕТИЧЕСКИМ статусом `ADMIN_REFUND`** (не реальным Т-Банк-статусом), реальный —
+  в `rawPayload.gatewayStatus`. Зачем (security-fix, самозалечивание): при редкой гонке «`Cancel` успешен,
+  но переход упал на DB-ошибке» аудит-строка с реальным `REFUNDED` заняла бы ключ UNIQUE
+  `(payment_id, 'REFUNDED')`, и поздний НАСТОЯЩИЙ `REFUNDED`-webhook получил бы `ON CONFLICT DO NOTHING`
+  и не довёл бы `payment_status='refunded'` → заказ навсегда застрял бы в `paid`. Синтетический статус не
+  коллизирует → webhook самозалечит. Возвращаемый методом `status` — реальный (`gatewayStatus`).
+- **ИНВАРИАНТ «двойного сетла нет»:** `refundPayment` **только** дёргает шлюз и пишет лог —
+  `payment_status` он **не меняет**. Внутренний сетл (`payment_status='refunded'` + release + промо)
+  делает `applyOrderStatusTransition` в экшене (он же грузит заказ один раз — передаётся `preloaded`,
+  без второго SELECT). Реальный `REFUNDED`-webhook, который придёт позже, идемпотентен (UNIQUE → no-op).
+- **При провале шлюза (`ok:false`) переход НЕ выполняется** — заказ НЕ помечается `refunded` (не врём
+  про возврат), экшен возвращает доменную ошибку `payment_refund_failed`; оператор повторит позже.
+- В `audit` экшена добавлено `after.gatewayRefund { status, skipped, isMock }` для трассировки.
+- В DTO `Order` добавлено поле `paymentProvider` (`orders.payment_provider`, миграция `0027`) — чтобы
+  решать, нужен ли шлюзовой возврат, без отдельного SELECT.
+
 ---
 
 ## 5. Подпись Token
