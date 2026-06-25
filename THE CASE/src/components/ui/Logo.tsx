@@ -11,7 +11,17 @@ interface LogoProps {
   shopName?: string;
   /** Подзаголовок логотипа; фолбэк — Medical Uniform. */
   subtitle?: string;
+  /** URL логотипа-картинки (Находка-12, branding.logoUrl). Задан → рисуем картинку
+   *  вместо текста; пусто → текстовый логотип витрины (прежний вид). */
+  logoUrl?: string | null;
 }
+
+// Высота логотипа-картинки по размеру (ширина — auto, пропорции сохраняются).
+const IMG_HEIGHT: Record<NonNullable<LogoProps["size"]>, string> = {
+  sm: "h-5",
+  md: "h-6 md:h-7",
+  lg: "h-9 md:h-11 lg:h-12",
+};
 
 export function Logo({
   variant = "dark",
@@ -20,6 +30,7 @@ export function Logo({
   showAccent = true,
   shopName = "THE CASE",
   subtitle = "Medical Uniform",
+  logoUrl,
 }: LogoProps) {
   const textColor = variant === "dark" ? "text-graphite" : "text-white";
   const subColor = variant === "dark" ? "text-muted" : "text-white/50";
@@ -31,15 +42,35 @@ export function Logo({
   };
 
   const s = sizes[size];
+  const hasLogo = typeof logoUrl === "string" && logoUrl.trim().length > 0;
 
   return (
-    <Link href="/" className="group inline-flex flex-col items-center gap-2">
-      <span
-        className={`${s.title} ${textColor} font-display font-normal uppercase transition-opacity duration-700 group-hover:opacity-60`}
-      >
-        {shopName}
-      </span>
-      {showAccent && <span className={`${s.line} h-[2px] bg-accent block`} />}
+    <Link
+      href="/"
+      aria-label={shopName}
+      className="group inline-flex flex-col items-center gap-2"
+    >
+      {hasLogo ? (
+        // Логотип-картинка из брендинга (Находка-12). <img> (а не next/image) —
+        // домен CDN логотипа произвольный, не обязан быть в remotePatterns; ассет
+        // мелкий, оптимизация не критична. На тёмном фоне (variant=light) светлый
+        // логотип читается, на белом — тёмный; alt = имя магазина (a11y).
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={logoUrl!.trim()}
+          alt={shopName}
+          className={`${IMG_HEIGHT[size]} w-auto object-contain transition-opacity duration-700 group-hover:opacity-60`}
+          loading="eager"
+          decoding="async"
+        />
+      ) : (
+        <span
+          className={`${s.title} ${textColor} font-display font-normal uppercase transition-opacity duration-700 group-hover:opacity-60`}
+        >
+          {shopName}
+        </span>
+      )}
+      {showAccent && !hasLogo && <span className={`${s.line} h-[2px] bg-accent block`} />}
       {showSubtitle && (
         <span className={`${s.sub} ${subColor} uppercase tracking-[0.04em]`}>
           {subtitle}

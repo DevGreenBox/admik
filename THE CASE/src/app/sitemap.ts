@@ -1,12 +1,15 @@
 import { MetadataRoute } from "next";
 import { listProducts } from "@/lib/admik";
-import { getSiteUrl } from "@/lib/site-url";
+import { getSiteUrlFromSources } from "@/lib/site-url";
+import { getStoreSettings, resolveSeo } from "@/lib/store-settings";
 
-// Рантайм-чтение NEXT_PUBLIC_SITE_URL: иначе Next запекает build-time URL (localhost).
+// Рантайм-чтение env + домена из настроек (Находка-14). NEXT_PUBLIC_SITE_URL имеет
+// приоритет над seo.siteUrl из админки (канонический домен стенда не подменяется).
 export const dynamic = "force-dynamic";
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const BASE = getSiteUrl();
+  const seo = resolveSeo(await getStoreSettings());
+  const BASE = getSiteUrlFromSources(seo.siteUrl);
   let productUrls: MetadataRoute.Sitemap = [];
   try {
     const items = await listProducts({ limit: 200 });

@@ -332,6 +332,11 @@ export interface AdmikSettingsDto {
     titleTemplate: string;
     defaultDescription: string | null;
     twitterSite: string | null;
+    /** Закрыть весь сайт от индексации (Находка-14). Опционально: публичный DTO
+     *  бэкенда пока может не отдавать это поле — тогда undefined и витрина не
+     *  закрывается из настроек (индексацией управляет ENV STOREFRONT_NOINDEX).
+     *  ENV всегда имеет приоритет над этим флагом (staging-защита). */
+    noindex?: boolean | null;
   };
   home: AdmikHomeDto;
   navigation: {

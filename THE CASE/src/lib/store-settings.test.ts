@@ -5,11 +5,15 @@ import {
   HOME_FALLBACK,
   resolveShopName,
   resolveLogoUrl,
+  resolveFaviconUrl,
+  resolveTheme,
+  resolveCurrency,
   resolveSeo,
   resolveContacts,
   resolveHome,
   resolveNavigation,
 } from './store-settings';
+import { DEFAULT_CURRENCY } from './format';
 
 /**
  * Тесты G-01 — резолвинг настроек магазина с фолбэком на дефолты витрины.
@@ -74,6 +78,53 @@ describe('resolveShopName / resolveLogoUrl', () => {
   });
 });
 
+describe('resolveFaviconUrl / resolveTheme (Находка-12)', () => {
+  it('null → нет фавикона и пустая тема', () => {
+    expect(resolveFaviconUrl(null)).toBeNull();
+    expect(resolveTheme(null)).toEqual({ primaryColor: null, accentColor: null });
+  });
+  it('фавикон и цвета из настроек переопределяют', () => {
+    const s = dto({
+      branding: {
+        ...dto().branding,
+        faviconUrl: 'https://cdn.test/favicon.ico',
+        theme: { primaryColor: '#101820', accentColor: '#C8A96A', mode: 'light' },
+      },
+    });
+    expect(resolveFaviconUrl(s)).toBe('https://cdn.test/favicon.ico');
+    expect(resolveTheme(s)).toEqual({ primaryColor: '#101820', accentColor: '#C8A96A' });
+  });
+  it('пустые/пробельные цвета → null (фолбэк на стили витрины)', () => {
+    const s = dto({
+      branding: { ...dto().branding, theme: { primaryColor: '  ', accentColor: '', mode: 'light' } },
+    });
+    expect(resolveTheme(s)).toEqual({ primaryColor: null, accentColor: null });
+  });
+});
+
+describe('resolveCurrency (Находка-13)', () => {
+  it('null → дефолт витрины (₽, ru-RU, без копеек)', () => {
+    expect(resolveCurrency(null)).toEqual(DEFAULT_CURRENCY);
+  });
+  it('берёт код/локаль/символ/знаки из настроек', () => {
+    const s = dto({ currency: { code: 'USD', symbol: '$', locale: 'en-US', fractionDigits: 2 } });
+    expect(resolveCurrency(s)).toEqual({ code: 'USD', symbol: '$', locale: 'en-US', fractionDigits: 2 });
+  });
+  it('пустые code/locale/symbol → пофилдовый фолбэк', () => {
+    const s = dto({ currency: { code: '  ', symbol: '   ', locale: '', fractionDigits: 0 } });
+    expect(resolveCurrency(s)).toEqual({
+      code: DEFAULT_CURRENCY.code,
+      locale: DEFAULT_CURRENCY.locale,
+      symbol: null,
+      fractionDigits: 0,
+    });
+  });
+  it('fractionDigits клампится в пределы Intl (0..20)', () => {
+    expect(resolveCurrency(dto({ currency: { code: 'RUB', symbol: null, locale: 'ru-RU', fractionDigits: 99 } })).fractionDigits).toBe(20);
+    expect(resolveCurrency(dto({ currency: { code: 'RUB', symbol: null, locale: 'ru-RU', fractionDigits: -5 } })).fractionDigits).toBe(0);
+  });
+});
+
 describe('resolveSeo', () => {
   it('null → дефолты витрины', () => {
     const seo = resolveSeo(null);
@@ -82,6 +133,14 @@ describe('resolveSeo', () => {
     expect(seo.description).toBe(STORE_DEFAULTS.seo.description);
     expect(seo.siteName).toBe(STORE_DEFAULTS.shopName);
     expect(seo.twitterSite).toBeNull();
+    expect(seo.siteUrl).toBeNull();
+    expect(seo.noindex).toBeNull();
+  });
+  it('siteUrl/noindex из настроек (Находка-14)', () => {
+    const s = dto({ seo: { ...dto().seo, siteUrl: 'https://shop.ru', noindex: true } });
+    const seo = resolveSeo(s);
+    expect(seo.siteUrl).toBe('https://shop.ru');
+    expect(seo.noindex).toBe(true);
   });
   it('настройки переопределяют title/description/siteName', () => {
     const seo = resolveSeo(dto());

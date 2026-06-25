@@ -19,12 +19,15 @@ const NAV_RIGHT: NavItem[] = [
 export function Header({
   categories = [],
   shopName,
+  logoUrl,
   headerItems,
   infoItems,
 }: {
   categories?: AdmikCategoryDto[];
   /** Имя магазина из настроек Admik (G-01) → логотип. */
   shopName?: string;
+  /** URL логотипа-картинки из брендинга (Находка-12); пусто → текстовый логотип. */
+  logoUrl?: string | null;
   /** Пункты меню из настроек Admik (G-10); пусто → меню по умолчанию с подменю «Коллекция». */
   headerItems?: { label: string; href: string }[];
   /** Ссылки «Информация» — АВТО из опубликованных страниц Контента (выпадающее меню);
@@ -110,7 +113,7 @@ export function Header({
               </nav>
             </div>
 
-            <Logo size="md" shopName={shopName} />
+            <Logo size="md" shopName={shopName} logoUrl={logoUrl} />
 
             <div className="flex items-center justify-end gap-5 md:gap-7">
               <nav className="hidden md:flex items-center gap-8 lg:gap-10 mr-2">
@@ -152,7 +155,7 @@ export function Header({
             className="fixed inset-0 z-[60] bg-white"
           >
             <div className="container-brand flex h-16 items-center justify-between">
-              <Logo size="md" shopName={shopName} />
+              <Logo size="md" shopName={shopName} logoUrl={logoUrl} />
               <button onClick={() => setMenuOpen(false)} aria-label="Закрыть">
                 <X className="h-5 w-5" strokeWidth={1} />
               </button>

@@ -5,6 +5,7 @@ import { useState } from 'react';
 
 import type { CmsPageWithSections } from '@/lib/cms/types';
 import { SITEMAP_CHANGEFREQS } from '@/lib/cms/types';
+import { slugify } from '@/lib/cms/slug';
 import type { ActionResult } from '@/lib/server/action';
 import { SeoFieldset, type SeoFieldsetValue } from '../../_components/SeoFieldset';
 
@@ -35,14 +36,21 @@ type Fail = Extract<ActionResult<unknown>, { ok: false }>;
 const inputCls = 'mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm';
 const labelCls = 'block text-sm font-medium text-gray-700';
 
-/** slugify-превью на клиенте (UX-подсказка; источник правды — сервер). */
+/**
+ * slugify-превью на клиенте (UX-подсказка; источник правды — сервер).
+ *
+ * ПЕРЕИСПОЛЬЗУЕМ серверный slugify (lib/cms/slug → lib/catalog/slug): он
+ * транслитерирует кириллицу → латиницу («О компании» → «o-kompanii»), а значит
+ * превью тождественно тому, что примет серверная slugSchema. Раньше здесь был
+ * самописный regex, оставлявший кириллицу — форма слала непустой кириллический
+ * slug, Zod-схема его отвергала, и создание русскоязычной страницы падало с
+ * ошибкой у поля «ЧПУ», которое владелец даже не заполнял (находка 7 аудита).
+ *
+ * slugify — чистая функция (только String API, без Node-зависимостей в этой
+ * ветке), поэтому безопасна в client-компоненте.
+ */
 function previewSlug(title: string): string {
-  return title
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9а-яё\s-]/gi, '')
-    .replace(/\s+/g, '-')
-    .replace(/-+/g, '-');
+  return slugify(title);
 }
 
 export function PageForm({ page }: { page: CmsPageWithSections | null }) {

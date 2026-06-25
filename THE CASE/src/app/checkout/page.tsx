@@ -26,6 +26,7 @@ import {
   isDeliveryStepValid,
   formatDeliveryCost,
 } from "@/lib/checkout";
+import { appliedPromoCode, isPromoInSync } from "@/lib/promo";
 import { Button } from "@/components/ui/Button";
 import { FadeIn } from "@/components/ui/Animations";
 
@@ -207,6 +208,10 @@ export default function CheckoutPage() {
     if (!selectedCity || !selectedPickup || !quote || !quote.fulfillable) return;
     // Нельзя оформлять, пока доставка не посчитана (явный available === false).
     if (quote.delivery?.available === false) return;
+    // Находка 19: поле промокода правили после применения, не нажав «Применить»
+    // заново — показанный итог посчитан по ДРУГОМУ коду. Не оформляем «вслепую»:
+    // требуем привести ввод в соответствие с применённым кодом (или очистить).
+    if (!isPromoInSync(promoCode, quote.promo)) return;
     setError("");
     setLoading(true);
     try {
@@ -220,7 +225,10 @@ export default function CheckoutPage() {
           },
           delivery: { type: "pvz", city: selectedCity.name, cityCode: selectedCity.code, pvzCode: selectedPickup.code },
           paymentMethod: mapPaymentMethod(paymentMethod),
-          promoCode: promoCode.trim() || undefined,
+          // Источник истины для ОТПРАВКИ = применённый сервером код (по которому
+          // посчитан показанный итог), а НЕ сырое значение поля ввода. Так заказ
+          // не расходится с тем, что покупатель видел на экране (находка 19).
+          promoCode: appliedPromoCode(quote.promo),
         },
         { idempotencyKey: idempotencyKey.current },
       );
@@ -277,6 +285,11 @@ export default function CheckoutPage() {
   // отсутствует/undefined (старый контракт) — считаем расчёт доступным (мягкая
   // деградация). Нельзя платить за непосчитанную доставку → блокируем подтверждение.
   const deliveryUnavailable = quote?.delivery?.available === false;
+  // Находка 19: совпадает ли текущий ввод поля с применённым сервером кодом.
+  // Рассинхрон → показанный итог посчитан по другому коду: блокируем подтверждение
+  // и просим нажать «Применить» заново (или очистить поле).
+  const promoInSync = isPromoInSync(promoCode, quote?.promo);
+  const promoApplied = (quote?.promo?.applied ?? false) && promoInSync;
 
   return (
     <div className="page-transition pt-16 md:pt-20 relative min-h-screen">
@@ -396,14 +409,22 @@ export default function CheckoutPage() {
                     {applyingPromo ? "Проверка..." : "Применить"}
                   </Button>
                 </div>
-                {/* Статус из серверного quote.promo (anti-tamper): применён → подтверждаем,
-                    иначе показываем причину отказа (если код вводили). */}
-                {quote?.promo?.applied && (
+                {/* Статус из серверного quote.promo (anti-tamper) И только пока ввод
+                    совпадает с применённым кодом (находка 19): применён → подтверждаем. */}
+                {promoApplied && (
                   <p className="text-[11px] text-muted mt-2">
-                    Промокод {quote.promo.code} применён.
+                    Промокод {quote?.promo?.code} применён.
                   </p>
                 )}
-                {!quote?.promo?.applied && promoCode.trim() !== "" && quote?.promo?.reason && (
+                {/* Поле правили после применения, не нажав «Применить» заново — итог
+                    на экране посчитан по другому коду. Просим переприменить/очистить. */}
+                {!promoInSync && (
+                  <p className="text-[11px] text-accent mt-2">
+                    Поле изменено — нажмите «Применить», чтобы пересчитать итог
+                    {promoCode.trim() === "" ? " (или подтвердите без промокода)" : ""}.
+                  </p>
+                )}
+                {promoInSync && !quote?.promo?.applied && promoCode.trim() !== "" && quote?.promo?.reason && (
                   <p className="text-[11px] text-accent mt-2">{quote.promo.reason}</p>
                 )}
               </div>
@@ -432,7 +453,7 @@ export default function CheckoutPage() {
               {error && <p className="text-sm text-accent">{error}</p>}
               <div className="flex gap-4">
                 <Button variant="outline" size="md" onClick={() => setStep(2)}>Назад</Button>
-                <Button variant="primary" size="lg" magnetic disabled={loading || !fulfillable || deliveryUnavailable} onClick={handleSubmit} className="flex-1">
+                <Button variant="primary" size="lg" magnetic disabled={loading || !fulfillable || deliveryUnavailable || !promoInSync} onClick={handleSubmit} className="flex-1">
                   {loading ? "Оформление..." : "Подтвердить заказ"}
                 </Button>
               </div>

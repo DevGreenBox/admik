@@ -1,4 +1,6 @@
-import { formatPrice } from "@/lib/format";
+"use client";
+
+import { usePriceFormatter } from "@/components/CurrencyProvider";
 import { resolveSaleView, type SalePriceInput } from "@/lib/pricing";
 
 /**
@@ -16,6 +18,7 @@ interface PriceDisplayProps {
 }
 
 export function PriceDisplay({ product, className = "", showBadge = true }: PriceDisplayProps) {
+  const formatPrice = usePriceFormatter();
   const sale = resolveSaleView(product);
 
   if (!sale.onSale || sale.oldPrice == null) {

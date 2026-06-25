@@ -15,6 +15,7 @@
 
 import { cache } from 'react';
 import { getSettings, type AdmikSettingsDto, type AdmikSocialDto } from '@/lib/admik';
+import { DEFAULT_CURRENCY, type StorefrontCurrency } from './format';
 
 // Контент главной — в client-safe модуле (без react/cache), реэкспорт для удобства.
 export { HOME_FALLBACK, resolveHome, type ResolvedHome } from './home-content';
@@ -93,6 +94,44 @@ export function resolveLogoUrl(s: AdmikSettingsDto | null): string | null {
   return clean(s?.branding.logoUrl);
 }
 
+/** URL фавикона из брендинга. null → фавикон-ассет витрины по умолчанию. */
+export function resolveFaviconUrl(s: AdmikSettingsDto | null): string | null {
+  return clean(s?.branding.faviconUrl);
+}
+
+/** Цвета темы из брендинга (для CSS-переменных). null-поля → дефолтные стили витрины. */
+export interface ResolvedTheme {
+  primaryColor: string | null;
+  accentColor: string | null;
+}
+
+export function resolveTheme(s: AdmikSettingsDto | null): ResolvedTheme {
+  return {
+    primaryColor: clean(s?.branding.theme.primaryColor),
+    accentColor: clean(s?.branding.theme.accentColor),
+  };
+}
+
+/**
+ * Валюта витрины из settings.currency (Находка-13). Фолбэк по КАЖДОМУ полю на
+ * DEFAULT_CURRENCY (₽, ru-RU, без копеек), чтобы частично заполненная настройка
+ * не ломала формат. `fractionDigits` берётся из настроек как есть (0 — валидно),
+ * клампится в разумные пределы Intl (0..20).
+ */
+export function resolveCurrency(s: AdmikSettingsDto | null): StorefrontCurrency {
+  const cur = s?.currency;
+  if (!cur) return DEFAULT_CURRENCY;
+  const fd = Number.isFinite(cur.fractionDigits)
+    ? Math.min(20, Math.max(0, Math.trunc(cur.fractionDigits)))
+    : DEFAULT_CURRENCY.fractionDigits;
+  return {
+    code: clean(cur.code) ?? DEFAULT_CURRENCY.code,
+    locale: clean(cur.locale) ?? DEFAULT_CURRENCY.locale,
+    symbol: clean(cur.symbol),
+    fractionDigits: fd,
+  };
+}
+
 export interface ResolvedSeo {
   titleDefault: string;
   titleTemplate: string;
@@ -100,6 +139,10 @@ export interface ResolvedSeo {
   ogDescription: string;
   siteName: string;
   twitterSite: string | null;
+  /** Канонический домен из настроек (Находка-14); null → берётся ENV/дефолт. */
+  siteUrl: string | null;
+  /** Запрос на noindex из настроек (Находка-14); ENV имеет приоритет. */
+  noindex: boolean | null;
 }
 
 /** SEO-метаданные с фолбэком на дефолты витрины. */
@@ -113,6 +156,8 @@ export function resolveSeo(s: AdmikSettingsDto | null): ResolvedSeo {
     ogDescription: description ?? STORE_DEFAULTS.seo.ogDescription,
     siteName: siteName ?? resolveShopName(s),
     twitterSite: clean(s?.seo.twitterSite),
+    siteUrl: clean(s?.seo.siteUrl),
+    noindex: s?.seo.noindex ?? null,
   };
 }
 

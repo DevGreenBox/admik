@@ -12,12 +12,15 @@ import { resolveCategoryHref } from "@/lib/catalog-view";
 import type { AdmikCategoryDto } from "@/lib/admik";
 import { HOME_FALLBACK, type ResolvedHome } from "@/lib/home-content";
 
-/** Full-width banner — первый блок под меню (+ CTA «смотреть коллекцию») */
+/** Full-width banner — первый блок под меню (+ заголовок/подзаголовок и CTA) */
 export function HomeBanner({ hero = HOME_FALLBACK.hero }: { hero?: ResolvedHome["hero"] }) {
+  // Заголовок/подзаголовок обложки — из настроек Admik (Находка-17, settings.home.hero);
+  // показываем оверлеем над CTA только когда владелец их задал (иначе чистая обложка).
+  const hasHeading = Boolean(hero.title) || Boolean(hero.subtitle);
   return (
     <section className={HEADER_OFFSET}>
-      {/* Весь первый блок кликабелен → каталог; текст и ссылка CTA — из настроек
-          Admik (G-03, settings.home.hero) с фолбэком на дефолт витрины. */}
+      {/* Весь первый блок кликабелен → каталог; текст/заголовок и ссылка CTA — из
+          настроек Admik (G-03, settings.home.hero) с фолбэком на дефолт витрины. */}
       <Link
         href={hero.ctaHref}
         aria-label={hero.ctaLabel}
@@ -25,15 +28,31 @@ export function HomeBanner({ hero = HOME_FALLBACK.hero }: { hero?: ResolvedHome[
       >
         <Image
           src={hero.imageUrl ?? IMAGES.home.banner}
-          alt="THE CASE — Medical Uniform"
+          alt={hero.title ?? "THE CASE — Medical Uniform"}
           width={3620}
           height={1810}
           priority
           className="block w-full h-auto object-contain"
           sizes="100vw"
         />
-        {/* CTA на обложке — центрирован (правка клиента) */}
-        <div className="pointer-events-none absolute inset-x-0 bottom-[6%] flex justify-center md:bottom-[8%]">
+        {/* Оверлей обложки: заголовок + подзаголовок (Находка-17) над CTA, по центру.
+            Полупрозрачная подложка обеспечивает контраст текста на любом фото (a11y). */}
+        <div className="pointer-events-none absolute inset-x-0 bottom-[6%] flex flex-col items-center gap-4 px-6 md:bottom-[8%] md:gap-6">
+          {hasHeading && (
+            <div className="max-w-3xl text-center">
+              {hero.title && (
+                <h1 className="font-display text-2xl uppercase leading-tight tracking-[0.04em] text-white drop-shadow-[0_2px_12px_rgba(0,0,0,0.45)] sm:text-3xl md:text-4xl lg:text-5xl">
+                  {hero.title}
+                </h1>
+              )}
+              {hero.subtitle && (
+                <p className="mt-3 text-[11px] uppercase tracking-[0.2em] text-white/85 drop-shadow-[0_1px_8px_rgba(0,0,0,0.5)] sm:text-xs md:mt-4 md:text-sm">
+                  {hero.subtitle}
+                </p>
+              )}
+            </div>
+          )}
+          {/* CTA на обложке — центрирован (правка клиента) */}
           <span className="inline-block bg-white/90 px-8 py-3 text-center text-[10px] uppercase tracking-[0.22em] text-graphite backdrop-blur-sm transition-colors duration-500 group-hover:bg-white md:px-10 md:py-4 md:text-[11px]">
             {hero.ctaLabel}
           </span>

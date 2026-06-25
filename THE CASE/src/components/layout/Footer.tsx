@@ -45,12 +45,15 @@ type FooterColumn = { title: string; links: { label: string; href: string }[] };
 export function Footer({
   categories = [],
   shopName = "THE CASE",
+  logoUrl,
   contacts,
   infoLinks,
 }: {
   categories?: AdmikCategoryDto[];
   /** Имя магазина из настроек Admik (G-01). */
   shopName?: string;
+  /** URL логотипа-картинки из брендинга (Находка-12); пусто → текстовый логотип. */
+  logoUrl?: string | null;
   /** Контакты/соцсети из настроек Admik (G-01/G-08). */
   contacts?: ResolvedContacts;
   /** Ссылки «Информация» — АВТО из опубликованных страниц Контента (любая страница
@@ -116,7 +119,7 @@ export function Footer({
         <FadeIn>
           <div className="grid grid-cols-1 md:grid-cols-12 gap-14 md:gap-8 lg:gap-6">
             <div className="md:col-span-3">
-              <Logo variant="light" size="md" showSubtitle shopName={shopName} />
+              <Logo variant="light" size="md" showSubtitle shopName={shopName} logoUrl={logoUrl} />
             </div>
 
             <div className="md:col-span-2">

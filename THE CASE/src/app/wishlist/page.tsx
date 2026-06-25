@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Heart } from "lucide-react";
 import { useStore, useHydrated, pruneWishlist } from "@/lib/store";
@@ -8,11 +9,11 @@ import { getProduct, fromDetail, type StorefrontProduct } from "@/lib/admik";
 import { Button } from "@/components/ui/Button";
 import { FadeIn } from "@/components/ui/Animations";
 import { LuxuryImageSwap } from "@/components/ui/LuxuryImageSwap";
+import { wishlistAddIntent } from "@/lib/wishlist";
 import { formatPrice } from "@/lib/format";
 
 export default function WishlistPage() {
   const wishlist = useStore((s) => s.wishlist);
-  const toggleWishlist = useStore((s) => s.toggleWishlist);
   const hydrated = useHydrated();
   const [products, setProducts] = useState<StorefrontProduct[]>([]);
   const [loading, setLoading] = useState(true);
@@ -83,36 +84,93 @@ export default function WishlistPage() {
                 <div key={i} className="skeleton aspect-[3/4]" />
               ))
             : products.map((product) => (
-                <FadeIn key={product.slug}>
-                  <div className="group">
-                    <div className="relative">
-                      <Link href={`/product/${product.slug}`} className="block">
-                        <LuxuryImageSwap
-                          primary={product.images[0]}
-                          secondary={product.images[1]}
-                          alt={product.name}
-                          sizes="(max-width: 768px) 50vw, 25vw"
-                          imageClassName="object-contain object-center"
-                          className="aspect-[3/4] bg-surface"
-                        />
-                      </Link>
-                      <button
-                        onClick={() => toggleWishlist(product.slug)}
-                        className="absolute top-4 right-4 p-2 bg-white/90"
-                        aria-label="Удалить из избранного"
-                      >
-                        <Heart className="h-4 w-4 fill-accent text-accent" strokeWidth={1.5} />
-                      </button>
-                    </div>
-                    <div className="mt-5 flex justify-between">
-                      <h3 className="label-caps">{product.name}</h3>
-                      <p className="text-[11px] tracking-[0.1em] tabular-nums">{formatPrice(product.price)}</p>
-                    </div>
-                  </div>
-                </FadeIn>
+                <WishlistCard key={product.slug} product={product} />
               ))}
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Карточка Избранного с кнопкой быстрого добавления в корзину (находка 20).
+ *
+ * Товар БЕЗ вариантов в наличии → добавляем сразу (addToCart по productId).
+ * Товар С вариантами/размерами → ведём на карточку товара, где покупатель
+ * выбирает размер (намеренно не тащим тяжёлую модалку выбора в /wishlist — это
+ * раздувало бы бандл страницы; карточка товара уже умеет выбор размера и «В
+ * корзину»). Недоступный товар → тоже на карточку (не блокируем UI).
+ */
+function WishlistCard({ product }: { product: StorefrontProduct }) {
+  const router = useRouter();
+  const toggleWishlist = useStore((s) => s.toggleWishlist);
+  const addToCart = useStore((s) => s.addToCart);
+  const [added, setAdded] = useState(false);
+
+  const intent = wishlistAddIntent(product);
+  const label =
+    added
+      ? "Добавлено"
+      : intent.kind === "add"
+        ? "В корзину"
+        : intent.kind === "choose-size"
+          ? "Выбрать размер"
+          : "Подробнее";
+
+  const handleAdd = () => {
+    if (intent.kind === "add") {
+      addToCart(intent.item);
+      setAdded(true);
+      // Короткая подсветка «Добавлено», затем возврат подписи (счётчик корзины в
+      // шапке обновляется сам через стор — отдельно его не трогаем).
+      setTimeout(() => setAdded(false), 1500);
+    } else {
+      // С вариантами (выбор размера) ИЛИ нечего купить из снимка → карточка товара.
+      router.push(`/product/${product.slug}`);
+    }
+  };
+
+  return (
+    <FadeIn>
+      <div className="group">
+        <div className="relative">
+          <Link href={`/product/${product.slug}`} className="block">
+            <LuxuryImageSwap
+              primary={product.images[0]}
+              secondary={product.images[1]}
+              alt={product.name}
+              sizes="(max-width: 768px) 50vw, 25vw"
+              imageClassName="object-contain object-center"
+              className="aspect-[3/4] bg-surface"
+            />
+          </Link>
+          <button
+            onClick={() => toggleWishlist(product.slug)}
+            className="absolute top-4 right-4 p-2 bg-white/90"
+            aria-label="Удалить из избранного"
+          >
+            <Heart className="h-4 w-4 fill-accent text-accent" strokeWidth={1.5} />
+          </button>
+        </div>
+        <div className="mt-5 flex justify-between">
+          <h3 className="label-caps">{product.name}</h3>
+          <p className="text-[11px] tracking-[0.1em] tabular-nums">{formatPrice(product.price)}</p>
+        </div>
+        <button
+          type="button"
+          onClick={handleAdd}
+          aria-label={
+            intent.kind === "add"
+              ? `Добавить «${product.name}» в корзину`
+              : intent.kind === "choose-size"
+                ? `Выбрать размер для «${product.name}»`
+                : `Открыть карточку «${product.name}»`
+          }
+          className="mt-4 w-full border border-border px-4 py-3 text-[10px] uppercase tracking-[0.18em] text-graphite transition-colors hover:border-graphite hover:bg-surface"
+        >
+          {label}
+        </button>
+      </div>
+    </FadeIn>
   );
 }
