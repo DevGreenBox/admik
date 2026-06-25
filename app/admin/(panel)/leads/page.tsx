@@ -1,6 +1,8 @@
 import { Forbidden } from '../_components/Forbidden';
 import { PageHeader } from '../_components/PageHeader';
 import { guardLeads } from './_components/guard';
+import { LeadStatusBadge } from './_components/LeadStatusBadge';
+import { LeadRowActions } from './_components/LeadRowActions';
 import { listLeads } from '@/lib/leads/repository';
 import { formatDateTime } from '@/lib/admin/order-format';
 
@@ -22,7 +24,7 @@ export default async function LeadsPage() {
     <div className="max-w-5xl">
       <PageHeader
         title="Заявки"
-        subtitle="Сообщения с формы обратной связи витрины (/contacts)."
+        subtitle="Сообщения с формы обратной связи витрины (/contacts). Меняйте статус или удаляйте обработанные."
         breadcrumbs={[{ label: 'Заявки' }]}
       />
 
@@ -38,6 +40,7 @@ export default async function LeadsPage() {
                 <th className="px-4 py-2 font-medium">Контакт</th>
                 <th className="px-4 py-2 font-medium">Сообщение</th>
                 <th className="px-4 py-2 font-medium">Статус</th>
+                <th className="px-4 py-2 font-medium">Действия</th>
               </tr>
             </thead>
             <tbody>
@@ -47,7 +50,12 @@ export default async function LeadsPage() {
                   <td className="px-4 py-2">{l.name}</td>
                   <td className="px-4 py-2">{l.contact}</td>
                   <td className="px-4 py-2 text-gray-700">{l.message}</td>
-                  <td className="px-4 py-2 text-gray-500">{l.status}</td>
+                  <td className="px-4 py-2">
+                    <LeadStatusBadge status={l.status} />
+                  </td>
+                  <td className="px-4 py-2">
+                    <LeadRowActions id={l.id} status={l.status} />
+                  </td>
                 </tr>
               ))}
             </tbody>

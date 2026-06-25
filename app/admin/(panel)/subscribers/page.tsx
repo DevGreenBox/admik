@@ -5,6 +5,8 @@ import { Forbidden } from '../_components/Forbidden';
 import { PageHeader } from '../_components/PageHeader';
 import { listSubscribers } from '@/lib/newsletter/repository';
 import { formatDateTime } from '@/lib/admin/order-format';
+import { ExportToolbar } from './_components/ExportToolbar';
+import { SubscriberRowActions } from './_components/SubscriberRowActions';
 
 /**
  * Раздел «Подписчики» (G-12): email-подписчики рассылки из футера витрины.
@@ -19,6 +21,16 @@ export default async function SubscribersPage() {
   }
 
   const subscribers = await listSubscribers(500);
+  // Может ли владелец выполнять действия (отписка) — отдельное право записи.
+  const canWrite = can(user, 'orders.write');
+
+  // Адреса для клиентского экспорта (копирование/CSV). Date → ISO для сериализации
+  // из Server Component в Client Component (Date через границу приходит строкой).
+  const exportRows = subscribers.map((s) => ({
+    email: s.email,
+    status: s.status,
+    createdAtIso: s.created_at.toISOString(),
+  }));
 
   return (
     <div className="max-w-3xl">
@@ -26,6 +38,7 @@ export default async function SubscribersPage() {
         title="Подписчики"
         subtitle="Email-подписчики рассылки (форма в футере витрины)."
         breadcrumbs={[{ label: 'Подписчики' }]}
+        action={<ExportToolbar rows={exportRows} />}
       />
 
       {subscribers.length === 0 ? (
@@ -38,6 +51,7 @@ export default async function SubscribersPage() {
                 <th className="px-4 py-2 font-medium">Дата</th>
                 <th className="px-4 py-2 font-medium">Email</th>
                 <th className="px-4 py-2 font-medium">Статус</th>
+                {canWrite ? <th className="px-4 py-2 text-right font-medium">Действия</th> : null}
               </tr>
             </thead>
             <tbody>
@@ -46,6 +60,11 @@ export default async function SubscribersPage() {
                   <td className="whitespace-nowrap px-4 py-2 text-gray-600">{formatDateTime(s.created_at)}</td>
                   <td className="px-4 py-2">{s.email}</td>
                   <td className="px-4 py-2 text-gray-500">{s.status}</td>
+                  {canWrite ? (
+                    <td className="px-4 py-2 text-right">
+                      <SubscriberRowActions id={s.id} email={s.email} status={s.status} />
+                    </td>
+                  ) : null}
                 </tr>
               ))}
             </tbody>
