@@ -332,7 +332,12 @@ export async function recordPageview(
       typeof navigator !== 'undefined' &&
       typeof navigator.sendBeacon === 'function'
     ) {
-      const blob = new Blob([body], { type: 'application/json' });
+      // text/plain входит в CORS-safelist content-type → запрос «простой», без
+      // preflight. application/json его не входит, и тогда sendBeacon вынужден
+      // делать preflight в режиме credentials:include, который браузер режет
+      // (beacon не доходит до Admik → график «Посещения» пуст). Тело роутом
+      // /events/pageview игнорируется, поэтому content-type серверу безразличен.
+      const blob = new Blob([body], { type: 'text/plain' });
       navigator.sendBeacon(url, blob);
       return;
     }

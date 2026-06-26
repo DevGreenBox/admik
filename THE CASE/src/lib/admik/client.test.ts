@@ -283,6 +283,18 @@ describe('recordPageview (F23, beacon)', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('beacon-blob имеет тип text/plain (CORS-safelist → без preflight)', async () => {
+    // application/json НЕ входит в CORS-safelist content-type → sendBeacon
+    // вынужден делать preflight в режиме credentials:include и браузер режет его.
+    // text/plain делает запрос «простым»: без preflight, доходит до Admik. Тело
+    // роутом игнорируется, поэтому content-type значения для сервера не имеет.
+    const beacon = vi.fn().mockReturnValue(true);
+    vi.stubGlobal('navigator', { sendBeacon: beacon });
+    await recordPageview({ baseUrl: 'https://shop.test', apiKey: null });
+    const blob = beacon.mock.calls[0][1] as Blob;
+    expect(blob.type).toBe('text/plain');
+  });
+
   it('нет baseUrl → ничего не шлёт (тихий выход)', async () => {
     await recordPageview({ baseUrl: '', apiKey: null });
     expect(fetchMock).not.toHaveBeenCalled();
