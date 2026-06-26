@@ -2,39 +2,70 @@
 
 > **Назначение.** Durable-список оставшихся тупиков (что нетех-пользователь не может сделать/увидеть/понять через кнопки). Воссоздан мультиагентным сканом 2026-06-26 (14 финдеров по разделам админки+витрины → дедуп → перепроверка каждой по коду: 35 находок → 29 CONFIRMED + 6 WONT_FIX). Прошлый список жил в scratchpad сессии и был утерян при обрыве — теперь он в репозитории. Рецепт закрытия: TDD → гейт → деплой → живой прогон, батчами (docs/10, docs/00). Нумерация Cn — из воркфлоу-скана.
 
+## ✅ Batch 7 — ВСЕ 29 ЗАКРЫТЫ (две проверки), 2026-06-26
+
+> Кампания закрытия medium/low-тупиков **завершена**. Все C0–C28 реализованы мультиагентным
+> workflow `admik-batch7-deadends` (8 кластеров непересекающихся файлов, TDD-first, адверсариальное
+> ревью каждого по диффу — **все 8 review=pass, 0 блокеров**) и доведены до двух проверок.
+>
+> **Коммиты (ветка `foundation/etap-0-1`, HEAD `0f304ad`):** catalog C2/C3/C4/C12/C13/C14 `0e49ec1` ·
+> audit+users C0/C1/C11/C19 `dde9c69` · promo C5/C15/C16/C26 `120b7cd` · leads C7/C8/C20 `10ec451` ·
+> cdek C17 `2a3b2f8` · cms C18 (+миграция `0033_cms_pages_og_text`) `82dc4c4` · settings C6/C27 `e76ab1b` ·
+> storefront C9/C10/C21/C22/C23/C24/C25/C28 `0f304ad`.
+>
+> **Проверка 1 (код-гейт):** admik `tsc 0 / eslint 0 / vitest 1946 passed / 108 skipped` (+92 теста);
+> THE CASE `tsc 0 / lint 0 / vitest 252 passed` (+60). Чистая логика каждого пункта вынесена в
+> тестируемые модули; DB-завязанные — `skipIf(!hasDb)` (C4 дополнительно прогнан вживую против dev-БД).
+>
+> **Проверка 2 (живой прогон на стенде `erfgq.website`/`admin.erfgq.website`):** деплой rsync→build→
+> миграция `0033` (под `admik_migrator`, idemp.)→up→health-gate `ok` (db/redis/s3). Откат — образы
+> `:rollback-batch7` + дамп `backups/predeploy-batch7-*.sql`. Живьём: **verify-admin `sections` 13/0**
+> (все админ-разделы рендерятся под новым билдом), **`e2e` 24/0** (каталог→карточка→размер→корзина→
+> checkout→оплата→ЛК→админ-заказ, консоль чистая), публичные маршруты: `/catalog?sale=1`/`?new=1` 200,
+> футер без мёртвого Instagram-якоря + реальный Telegram (C10/C21), CMS `/terms` 200, миграция добавила
+> колонки `og_title/og_description` в `cms_pages`.
+>
+> **Owner manual spot-check (по желанию — не блокер):** прицельно прокликать новые виджеты, чьи
+> UI-обвязки помечены manual-only (node-харнес без jsdom/RTL не рендерит .tsx): инлайн-правка варианта
+> и поле «Цена было» (C2/C3), кнопка Скрыть/Показать категории (C4), кнопки ↑/↓ порядка вариантов (C12),
+> страница SEO категории `/admin/catalog/categories/[id]` (C13), удаление значения характеристики (C14),
+> фильтры/дифф журнала аудита (C0/C1), скачивание CSV заявок (C8), форма навигации и кнопки «Сбросить
+> раздел» (C6/C27), чипы фасетов и бренд на витрине с реальным каталогом (C22/C23). Логика за ними
+> покрыта юнитами; страницы рендерятся (sections 13/0).
+
 ## Трекер статуса
 
 | ID | Сев. | Раздел | Тупик | Статус |
 |----|------|--------|-------|--------|
-| C0 | medium | admin/audit | Orphan поля audit_log (before_data/after_data) не видны в журнале аудита | ⬜ |
-| C1 | medium | admin/audit | Отсутствие фильтров в журнале аудита (по дате, действию, инициатору) | ⬜ |
-| C2 | medium | admin/catalog-products/VariantsSection | Невозможно отредактировать вариант после создания | ⬜ |
-| C3 | medium | admin/catalog-products/VariantsSection | Отсутствует поле compareAtPrice (цена «было») для варианта | ⬜ |
-| C4 | medium | admin/catalog-categories | Скрытую категорию нельзя активировать через UI | ⬜ |
-| C5 | medium | admin/promo | Варианты не загружаются в picker для таргетов промокода | ⬜ |
-| C6 | medium | admin/settings/navigation | Orphan navigation settings: schema есть, но нет UI-формы для редактирования | ⬜ |
-| C7 | medium | admin/leads | Missing truncation notice for leads list | ⬜ |
-| C8 | medium | admin/leads | No export/bulk operations for leads | ⬜ |
-| C9 | medium | storefront/header-nav | Выпадающее меню не открывается при клавиатурной навигации | ⬜ |
-| C10 | medium | storefront/footer | Instagram ссылка неработающая в футере без настроек социальных сетей | ⬜ |
-| C11 | low | admin/audit | Orphan поле ip в audit_log не видно для отслеживания подозрительного доступа | ⬜ |
-| C12 | low | admin/catalog-products/VariantsSection | Нет интерфейса для переупорядочения вариантов (sort) | ⬜ |
-| C13 | low | admin/catalog-categories | SEO-поля категории (OG-метатеги, canonical, noindex) недоступны для редактирования | ⬜ |
-| C14 | low | admin/catalog-attributes | Значение характеристики нельзя удалить из словаря | ⬜ |
-| C15 | low | admin/promo | Столбец 'Мин. количество' отсутствует в списке промокодов | ⬜ |
-| C16 | low | admin/promo | Информация о конкретных таргетах скрыта в списке scoped-промокодов | ⬜ |
-| C17 | low | admin/cdek | Missing delivery destination columns in CDEK shipments list | ⬜ |
-| C18 | low | admin/cms/page-form/seo | Мертвые поля ogTitle/ogDescription в форме CMS-страницы: форма показывает, но не сохраняет | ⬜ |
-| C19 | low | admin/users | Дата последнего входа не отображается в списке пользователей | ⬜ |
-| C20 | low | admin/leads | Source field fetched but not displayed in leads table | ⬜ |
-| C21 | low | storefront/footer | Instagram ссылка ведет на якорь вместо аккаунта | ⬜ |
-| C22 | low | storefront/catalog-plp | Фильтры sale/new через URL не управляются в UI фильтров | ⬜ |
-| C23 | low | storefront/catalog-plp | Бренд товара не отображается в UI витрины | ⬜ |
-| C24 | low | storefront/cart | На странице корзины кнопка увеличения количества не заблокирована при достижении лимита | ⬜ |
-| C25 | low | storefront/checkout | На checkout не показываются конкретные причины и номера недоступных позиций | ⬜ |
-| C26 | low | admin/promo | Отсутствует подсказка/описание на поле 'Мин. количество единиц' | ⬜ |
-| C27 | low | admin/settings | Reset Setting action отсутствует в UI | ⬜ |
-| C28 | low | storefront/pdp | На PDP отключенные размеры не имеют подсказки о причине недоступности | ⬜ |
+| C0 | medium | admin/audit | Orphan поля audit_log (before_data/after_data) не видны в журнале аудита | ✅ |
+| C1 | medium | admin/audit | Отсутствие фильтров в журнале аудита (по дате, действию, инициатору) | ✅ |
+| C2 | medium | admin/catalog-products/VariantsSection | Невозможно отредактировать вариант после создания | ✅ |
+| C3 | medium | admin/catalog-products/VariantsSection | Отсутствует поле compareAtPrice (цена «было») для варианта | ✅ |
+| C4 | medium | admin/catalog-categories | Скрытую категорию нельзя активировать через UI | ✅ |
+| C5 | medium | admin/promo | Варианты не загружаются в picker для таргетов промокода | ✅ |
+| C6 | medium | admin/settings/navigation | Orphan navigation settings: schema есть, но нет UI-формы для редактирования | ✅ |
+| C7 | medium | admin/leads | Missing truncation notice for leads list | ✅ |
+| C8 | medium | admin/leads | No export/bulk operations for leads | ✅ |
+| C9 | medium | storefront/header-nav | Выпадающее меню не открывается при клавиатурной навигации | ✅ |
+| C10 | medium | storefront/footer | Instagram ссылка неработающая в футере без настроек социальных сетей | ✅ |
+| C11 | low | admin/audit | Orphan поле ip в audit_log не видно для отслеживания подозрительного доступа | ✅ |
+| C12 | low | admin/catalog-products/VariantsSection | Нет интерфейса для переупорядочения вариантов (sort) | ✅ |
+| C13 | low | admin/catalog-categories | SEO-поля категории (OG-метатеги, canonical, noindex) недоступны для редактирования | ✅ |
+| C14 | low | admin/catalog-attributes | Значение характеристики нельзя удалить из словаря | ✅ |
+| C15 | low | admin/promo | Столбец 'Мин. количество' отсутствует в списке промокодов | ✅ |
+| C16 | low | admin/promo | Информация о конкретных таргетах скрыта в списке scoped-промокодов | ✅ |
+| C17 | low | admin/cdek | Missing delivery destination columns in CDEK shipments list | ✅ |
+| C18 | low | admin/cms/page-form/seo | Мертвые поля ogTitle/ogDescription в форме CMS-страницы: форма показывает, но не сохраняет | ✅ |
+| C19 | low | admin/users | Дата последнего входа не отображается в списке пользователей | ✅ |
+| C20 | low | admin/leads | Source field fetched but not displayed in leads table | ✅ |
+| C21 | low | storefront/footer | Instagram ссылка ведет на якорь вместо аккаунта | ✅ |
+| C22 | low | storefront/catalog-plp | Фильтры sale/new через URL не управляются в UI фильтров | ✅ |
+| C23 | low | storefront/catalog-plp | Бренд товара не отображается в UI витрины | ✅ |
+| C24 | low | storefront/cart | На странице корзины кнопка увеличения количества не заблокирована при достижении лимита | ✅ |
+| C25 | low | storefront/checkout | На checkout не показываются конкретные причины и номера недоступных позиций | ✅ |
+| C26 | low | admin/promo | Отсутствует подсказка/описание на поле 'Мин. количество единиц' | ✅ |
+| C27 | low | admin/settings | Reset Setting action отсутствует в UI | ✅ |
+| C28 | low | storefront/pdp | На PDP отключенные размеры не имеют подсказки о причине недоступности | ✅ |
 
 **Легенда:** ⬜ открыт · 🔧 в работе · ✅ закрыт (две проверки) · ⚠️ оспорен.
 
