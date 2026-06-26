@@ -3,10 +3,12 @@ import { can } from '@/lib/auth/rbac';
 
 import { Forbidden } from '../_components/Forbidden';
 import { PageHeader } from '../_components/PageHeader';
-import { listSubscribers } from '@/lib/newsletter/repository';
+import { listSubscribers, countSubscribers } from '@/lib/newsletter/repository';
 import { formatDateTime } from '@/lib/admin/order-format';
+import { listTruncationNotice } from '@/lib/admin/list-truncation';
 import { ExportToolbar } from './_components/ExportToolbar';
 import { SubscriberRowActions } from './_components/SubscriberRowActions';
+import { SubscriberStatusBadge } from './_components/SubscriberStatusBadge';
 
 /**
  * Раздел «Подписчики» (G-12): email-подписчики рассылки из футера витрины.
@@ -14,13 +16,23 @@ import { SubscriberRowActions } from './_components/SubscriberRowActions';
  */
 export const dynamic = 'force-dynamic';
 
+/** Сколько подписчиков показываем (без пагинации). При превышении — плашка усечения. */
+const LIST_LIMIT = 500;
+
 export default async function SubscribersPage() {
   const user = await requireUser();
   if (!can(user, 'orders.read')) {
     return <Forbidden permission="orders.read" />;
   }
 
-  const subscribers = await listSubscribers(500);
+  // Список + общее число читаем параллельно: total нужен для счётчика в шапке и
+  // для плашки усечения, чтобы владелец не считал, что подписчиков ровно столько,
+  // сколько влезло в лимит (находка #9).
+  const [subscribers, total] = await Promise.all([
+    listSubscribers(LIST_LIMIT),
+    countSubscribers(),
+  ]);
+  const truncation = listTruncationNotice(subscribers.length, total, LIST_LIMIT);
   // Может ли владелец выполнять действия (отписка) — отдельное право записи.
   const canWrite = can(user, 'orders.write');
 
@@ -36,10 +48,19 @@ export default async function SubscribersPage() {
     <div className="max-w-3xl">
       <PageHeader
         title="Подписчики"
-        subtitle="Email-подписчики рассылки (форма в футере витрины)."
+        subtitle={`Email-подписчики рассылки (форма в футере витрины). Всего: ${total}.`}
         breadcrumbs={[{ label: 'Подписчики' }]}
         action={<ExportToolbar rows={exportRows} />}
       />
+
+      {truncation ? (
+        <p
+          role="status"
+          className="mt-4 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
+        >
+          {truncation}. Используйте экспорт, чтобы получить полный список.
+        </p>
+      ) : null}
 
       {subscribers.length === 0 ? (
         <p className="mt-6 text-sm text-gray-600">Пока нет подписчиков.</p>
@@ -59,7 +80,9 @@ export default async function SubscribersPage() {
                 <tr key={s.id} className="border-t border-gray-100">
                   <td className="whitespace-nowrap px-4 py-2 text-gray-600">{formatDateTime(s.created_at)}</td>
                   <td className="px-4 py-2">{s.email}</td>
-                  <td className="px-4 py-2 text-gray-500">{s.status}</td>
+                  <td className="px-4 py-2">
+                    <SubscriberStatusBadge status={s.status} />
+                  </td>
                   {canWrite ? (
                     <td className="px-4 py-2 text-right">
                       <SubscriberRowActions id={s.id} email={s.email} status={s.status} />

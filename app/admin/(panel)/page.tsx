@@ -5,6 +5,7 @@ import { can } from '@/lib/auth/rbac';
 import { sql } from '@/lib/db/client';
 import { getDashboardSeries } from '@/lib/analytics/repository';
 import { isModuleEffectivelyEnabled } from '@/lib/config/settings';
+import { countNewLeads } from '@/lib/leads/repository';
 import { MiniBarChart } from './_components/MiniBarChart';
 
 /**
@@ -36,6 +37,33 @@ function MetricCard({ title, value }: { title: string; value: number }) {
   );
 }
 
+/**
+ * Кликабельная карточка «Новые заявки» (находка #7): сигнал о необработанных
+ * сообщениях с витрины. При наличии новых — подсвечивается янтарным и ведёт в
+ * раздел «Заявки», чтобы владелец не пропустил обращения.
+ */
+function LeadsCard({ value }: { value: number }) {
+  const active = value > 0;
+  return (
+    <Link
+      href="/admin/leads"
+      aria-label={`Новые заявки: ${value}. Перейти к заявкам`}
+      className={`block rounded-lg border p-5 transition hover:shadow-sm ${
+        active
+          ? 'border-amber-300 bg-amber-50 hover:bg-amber-100'
+          : 'border-gray-200 bg-gray-50 hover:bg-gray-100'
+      }`}
+    >
+      <h2 className={`text-sm font-medium ${active ? 'text-amber-800' : 'text-gray-500'}`}>
+        Новые заявки
+      </h2>
+      <p className={`mt-2 text-3xl font-semibold ${active ? 'text-amber-900' : 'text-gray-900'}`}>
+        {value}
+      </p>
+    </Link>
+  );
+}
+
 export default async function DashboardPage() {
   const user = await requireUser();
 
@@ -55,7 +83,11 @@ export default async function DashboardPage() {
     isModuleEffectivelyEnabled('cdek'),
   ]);
 
-  const [products, categories, ordersTotal, ordersToday, series] = await Promise.all([
+  // «Заявки» — раздел ядра (без модуля), доступ по orders.read (см. nav.ts).
+  // Сигнал о новых заявках показываем только носителю этого права.
+  const canReadLeads = can(user, 'orders.read');
+
+  const [products, categories, ordersTotal, ordersToday, newLeads, series] = await Promise.all([
     catalogOn
       ? safeCount(sql<{ n: string }[]>`SELECT count(*)::text AS n FROM products`)
       : Promise.resolve(null),
@@ -70,6 +102,8 @@ export default async function DashboardPage() {
           sql<{ n: string }[]>`SELECT count(*)::text AS n FROM orders WHERE created_at >= current_date`,
         )
       : Promise.resolve(null),
+    // Новые (необработанные) заявки — мягко (ошибка/нет таблицы → null, карточка скрыта).
+    canReadLeads ? countNewLeads().catch(() => null) : Promise.resolve(null),
     // Ряды для графиков (заказы/посещения за 14 дней); null при отсутствии БД.
     getDashboardSeries(14).catch(() => null),
   ]);
@@ -99,6 +133,7 @@ export default async function DashboardPage() {
         {categories !== null ? <MetricCard title="Категорий" value={categories} /> : null}
         {ordersToday !== null ? <MetricCard title="Заказов сегодня" value={ordersToday} /> : null}
         {ordersTotal !== null ? <MetricCard title="Заказов всего" value={ordersTotal} /> : null}
+        {newLeads !== null ? <LeadsCard value={newLeads} /> : null}
       </section>
 
       {series ? (

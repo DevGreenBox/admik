@@ -46,3 +46,4 @@ backups/
 
 # Витрина THE CASE поглощена монорепо подкаталогом «THE CASE/» (см. c343785).
 # Её собственный node_modules/.next/.env игнорируются вложенным THE CASE/.gitignore.
+.playwright-mcp/

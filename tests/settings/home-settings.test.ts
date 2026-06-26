@@ -7,7 +7,7 @@ import {
   createSettingsActions,
   type SettingsActionDeps,
 } from '@/lib/settings/action-factory';
-import { homeSchema } from '@/lib/settings/schemas';
+import { homeSchema, navigationSchema } from '@/lib/settings/schemas';
 import { mergeSettings } from '@/lib/config/settings';
 import { toPublicSettingsDto } from '@/lib/storefront/settings-dto';
 import { getEnv } from '@/lib/config/env';
@@ -110,6 +110,51 @@ describe('settings/schemas — homeSchema', () => {
 
   it('delivery.items требует title и text у каждого пункта', () => {
     expect(homeSchema.safeParse({ delivery: { items: [{ title: 'X' }] } }).success).toBe(false);
+  });
+});
+
+// =============================================================================
+// (а2) Находка 21 аудита (broken-link, витрина/главная): ссылка hero-CTA
+// (обложка главной) — это href всей обложки. Свободная строка пропускала опечатки
+// («catolog», «www.site.ru»), и главный баннер вёл на 404. Схема обязана принимать
+// только относительный путь от «/» (вкл. «/#anchor») или полный http(s)-URL
+// (а также mailto:/tel: для контактных ссылок навигации).
+// =============================================================================
+describe('settings/schemas — валидация ссылки hero-CTA (homeSchema.hero.ctaHref)', () => {
+  const accept = ['/catalog', '/#delivery', '/product/some-slug', 'https://shop.ru', 'http://x.ru/p?a=1'];
+  const reject = ['catolog', 'www.site.ru', ' ', 'javascript:alert(1)'];
+
+  it('принимает относительный путь от «/» и полный http(s)-URL', () => {
+    for (const ctaHref of accept) {
+      expect(homeSchema.safeParse({ hero: { ctaHref } }).success).toBe(true);
+    }
+  });
+
+  it('отклоняет опечатки без «/» и URL без протокола', () => {
+    for (const ctaHref of reject) {
+      expect(homeSchema.safeParse({ hero: { ctaHref } }).success).toBe(false);
+    }
+  });
+
+  it('пустой/отсутствующий ctaHref допустим (опционально → фолбэк витрины)', () => {
+    expect(homeSchema.safeParse({ hero: { title: 'X' } }).success).toBe(true);
+  });
+});
+
+describe('settings/schemas — навигация переиспользует ту же проверку href', () => {
+  it('header/footer принимают валидные маршруты и контактные ссылки', () => {
+    expect(
+      navigationSchema.safeParse({
+        header: [{ label: 'Каталог', href: '/catalog' }],
+        footer: [{ title: 'Связь', links: [{ label: 'Почта', href: 'mailto:a@b.ru' }] }],
+      }).success,
+    ).toBe(true);
+  });
+
+  it('отклоняет битый href в навигации (опечатка без слэша)', () => {
+    expect(
+      navigationSchema.safeParse({ header: [{ label: 'X', href: 'catolog' }] }).success,
+    ).toBe(false);
   });
 });
 

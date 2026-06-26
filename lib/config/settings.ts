@@ -117,11 +117,17 @@ export interface EffectiveSettings {
  * Очищает URL логотипа: пустое/невалидное/плейсхолдер `example.com` (из
  * `.env.example`) → null, чтобы в шапке админки не висела «битая картинка».
  * Реальный битый URL дополнительно гасится onError в ShopLogo (клиент).
+ *
+ * Относительный путь от «/» (так отдаёт локальное хранилище: '/media/…') —
+ * валидная same-origin ссылка на картинку, пропускаем как есть (фикс ревью
+ * Batch 6: иначе `new URL()` бросал и логотип, загруженный в local-режиме,
+ * никогда не рендерился).
  */
-function cleanLogoUrl(url: string | null | undefined): string | null {
+export function cleanLogoUrl(url: string | null | undefined): string | null {
   if (!url) return null;
   const trimmed = url.trim();
   if (!trimmed) return null;
+  if (trimmed.startsWith('/')) return trimmed;
   try {
     const host = new URL(trimmed).hostname.toLowerCase();
     if (host === 'example.com' || host === 'www.example.com' || host === 'example.org') {

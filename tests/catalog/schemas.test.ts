@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   slugSchema,
   moneySchema,
+  normalizeMoney,
   ProductCreateSchema,
   ProductUpdateSchema,
   CategoryCreateSchema,
@@ -48,6 +49,35 @@ describe('moneySchema — цена NUMERIC ≥ 0', () => {
   it('отклоняет >2 знаков после точки и нечисловое', () => {
     expect(moneySchema.safeParse('1.999').success).toBe(false);
     expect(moneySchema.safeParse('abc').success).toBe(false);
+  });
+
+  // Находка 2 аудита (ux, каталог): русский ввод «1500,50» с запятой-разделителем
+  // должен приниматься и нормализоваться к точке на сервере (любой клиент: форма,
+  // импорт, будущие магазины), а не падать «не более 2 знаков после точки».
+  it('принимает запятую как десятичный разделитель и нормализует к точке', () => {
+    const res = moneySchema.safeParse('1500,50');
+    expect(res.success).toBe(true);
+    if (res.success) expect(res.data).toBe('1500.50');
+  });
+
+  it('тримит пробелы вокруг значения с запятой', () => {
+    const res = moneySchema.safeParse('  1500,50  ');
+    expect(res.success).toBe(true);
+    if (res.success) expect(res.data).toBe('1500.50');
+  });
+
+  it('точка по-прежнему валидна (запятая не ломает прежний контракт)', () => {
+    const res = moneySchema.safeParse('99.99');
+    expect(res.success).toBe(true);
+    if (res.success) expect(res.data).toBe('99.99');
+  });
+});
+
+describe('normalizeMoney — хелпер нормализации денежного ввода', () => {
+  it('trim + запятая → точка', () => {
+    expect(normalizeMoney('1500,50')).toBe('1500.50');
+    expect(normalizeMoney('  100  ')).toBe('100');
+    expect(normalizeMoney('99.99')).toBe('99.99');
   });
 });
 

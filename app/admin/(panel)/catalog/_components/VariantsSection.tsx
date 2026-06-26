@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
 import type { ProductDetail } from '@/lib/catalog/types';
+import { normalizeMoney } from '@/lib/catalog/schemas';
 
 import {
   createVariantAction,
@@ -50,8 +51,11 @@ export function VariantsSection({ product }: { product: ProductDetail }) {
       // Пустой артикул → undefined: сервер сгенерирует уникальный из названия.
       sku: newSku.trim() || undefined,
       name: newName.trim(),
-      priceOverride: newOverride.trim() ? newOverride.trim() : null,
-      priceDelta: newDelta.trim() || '0',
+      // Нормализуем деньги (trim + запятая→точка) перед отправкой — RU-ввод
+      // «1500,50» доходит корректным (находка 2 аудита); серверная схема тоже
+      // нормализует.
+      priceOverride: normalizeMoney(newOverride) || null,
+      priceDelta: normalizeMoney(newDelta) || '0',
       weightG: strToNum(newWeight),
       lengthCm: strToNum(newLength),
       widthCm: strToNum(newWidth),

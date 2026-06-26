@@ -49,7 +49,7 @@ export const dynamic = 'force-dynamic';
 
 const PAGE_SIZE = 25;
 
-interface OrdersFilter {
+export interface OrdersFilter {
   q?: string;
   status?: OrderStatus;
   paymentStatus?: PaymentStatus;
@@ -58,6 +58,23 @@ interface OrdersFilter {
   dateFrom?: string;
   dateTo?: string;
   page: number;
+}
+
+/**
+ * Заданы ли хоть какие-то фильтры (кроме страницы). Баг #3 аудита тупиков:
+ * пустое состояние таблицы должно различать «ничего не найдено по фильтрам» и
+ * «заказов ещё нет» (новый магазин) — иначе совет «измените фильтры» бессмыслен.
+ */
+export function hasActiveOrderFilters(filter: OrdersFilter): boolean {
+  return Boolean(
+    filter.q ||
+      filter.status ||
+      filter.paymentStatus ||
+      filter.deliveryType ||
+      filter.promoCode ||
+      filter.dateFrom ||
+      filter.dateTo,
+  );
 }
 
 function parseFilter(sp: Record<string, string | string[] | undefined>): OrdersFilter {
@@ -220,7 +237,21 @@ export default async function OrdersPage({
             {rows.length === 0 ? (
               <tr>
                 <td colSpan={8} className="px-4 py-6 text-center text-gray-400">
-                  Заказы не найдены. Измените фильтры.
+                  {hasActiveOrderFilters(filter) ? (
+                    'По заданным фильтрам ничего не найдено. Сбросьте фильтры.'
+                  ) : (
+                    <span>
+                      Заказов пока нет.{' '}
+                      {canWrite ? (
+                        <Link
+                          href="/admin/orders/new"
+                          className="font-medium text-blue-700 hover:underline"
+                        >
+                          Создать заказ
+                        </Link>
+                      ) : null}
+                    </span>
+                  )}
                 </td>
               </tr>
             ) : (

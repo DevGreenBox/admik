@@ -248,14 +248,26 @@ export default async function CdekPage({
                   <td className="px-4 py-2 text-gray-500">{formatDateTime(row.updated_at)}</td>
                   <td className="px-4 py-2">
                     {row.print_url ? (
-                      <a
-                        href={row.print_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-blue-700 hover:underline"
-                      >
-                        Накладная
-                      </a>
+                      row.is_mock ? (
+                        // MOCK: print_url ведёт на example.invalid (RFC 2606) и
+                        // никогда не откроется — вместо мёртвой ссылки показываем
+                        // некликабельный бейдж-пояснение (находка #12).
+                        <span
+                          className="rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-700"
+                          title="MOCK: реальная накладная появится в боевом режиме (с боевыми ключами СДЭК)"
+                        >
+                          mock
+                        </span>
+                      ) : (
+                        <a
+                          href={row.print_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-700 hover:underline"
+                        >
+                          Накладная
+                        </a>
+                      )
                     ) : (
                       <span className="text-gray-300">—</span>
                     )}

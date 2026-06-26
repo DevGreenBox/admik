@@ -25,6 +25,47 @@ const nonEmpty = z.string().trim().min(1);
 /** Опциональный URL (пустая строка не допускается — поле либо есть, либо нет). */
 const urlField = z.string().trim().url();
 
+/**
+ * Ссылка на изображение настроек (логотип/favicon). Допускает:
+ *  - абсолютный http(s)-URL (внешний хостинг или S3 с заданным S3_PUBLIC_URL);
+ *  - относительный путь от «/» — так отдаёт ЛОКАЛЬНОЕ хранилище по умолчанию
+ *    (LocalStorage publicBase='/media' → '/media/settings/logo/<uuid>.webp').
+ *
+ * Фикс ревью Batch 6: раньше logoUrl/faviconUrl требовали .url() (абсолютный URL),
+ * поэтому загрузка логотипа в дефолтном (local) режиме хранилища писала относительный
+ * '/media/…', а последующее сохранение формы брендинга падало валидацией → форма
+ * становилась несохраняемой. Относительный путь — валидная same-origin ссылка на
+ * картинку. Опасный 'javascript:' и пустая строка отсекаются.
+ */
+const imageRefSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .refine(
+    (v) => v.startsWith('/') || /^https?:\/\/\S+$/i.test(v),
+    'Укажите URL картинки (https://…) или путь от «/» (например /media/…)',
+  );
+
+/**
+ * Ссылка-маршрут для CTA/навигации (находка 21 аудита). Допускает:
+ *  - относительный путь от «/» (включая «/#anchor»): /catalog, /product/x, /#delivery;
+ *  - полный http(s)-URL: https://shop.ru;
+ *  - контактные схемы mailto:/tel: (для ссылок футера/навигации).
+ * Отсекает частые опечатки, ведущие на 404: «catolog» (без «/»), «www.site.ru»
+ * (без протокола), пустую строку, опасный «javascript:».
+ */
+const hrefSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .refine(
+    (v) =>
+      v.startsWith('/') ||
+      /^https?:\/\/\S+$/i.test(v) ||
+      /^(?:mailto:|tel:)\S+$/i.test(v),
+    'Укажите путь от «/» (например /catalog или /#delivery) либо полный URL https://…',
+  );
+
 /** HEX-цвет вида #rgb / #rrggbb (для темы брендинга). */
 const hexColor = z
   .string()
@@ -55,8 +96,10 @@ const minorMoney = z.number().int().min(0);
 export const brandingSchema = z
   .object({
     shopName: nonEmpty.optional(),
-    logoUrl: urlField.optional(),
-    faviconUrl: urlField.optional(),
+    // logo/favicon — абсолютный URL ИЛИ относительный путь от «/» (так отдаёт
+    // локальное хранилище по умолчанию). См. imageRefSchema (фикс ревью Batch 6).
+    logoUrl: imageRefSchema.optional(),
+    faviconUrl: imageRefSchema.optional(),
     theme: z
       .object({
         primaryColor: hexColor.optional(),
@@ -194,7 +237,9 @@ export const homeSchema = z
         subtitle: z.string().trim().min(1).optional(),
         imageKey: z.string().trim().min(1).optional(),
         ctaLabel: z.string().trim().min(1).optional(),
-        ctaHref: z.string().trim().min(1).optional(),
+        // Ссылка всей обложки (главный CTA) — валидируем маршрут, чтобы опечатка
+        // не делала баннер битым (находка 21 аудита).
+        ctaHref: hrefSchema.optional(),
       })
       .strip()
       .optional(),
@@ -238,7 +283,7 @@ export const homeSchema = z
  * опциональны; пусто → витрина показывает навигацию по умолчанию. Позволяет
  * переименовать/добавить пункты меню и ссылки футера без правки кода (мультитенант).
  */
-const navLinkSchema = z.object({ label: nonEmpty, href: nonEmpty }).strip();
+const navLinkSchema = z.object({ label: nonEmpty, href: hrefSchema }).strip();
 
 export const navigationSchema = z
   .object({
