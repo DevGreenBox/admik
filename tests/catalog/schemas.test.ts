@@ -9,7 +9,9 @@ import {
   CategoryCreateSchema,
   CategoryMoveSchema,
   VariantCreateSchema,
+  VariantReorderSchema,
   AttributeCreateSchema,
+  AttributeValueDeleteSchema,
   ProductAttributeItemSchema,
   StockSetSchema,
   StockAdjustSchema,
@@ -335,6 +337,37 @@ describe('VariantCreateSchema', () => {
     expect(
       VariantCreateSchema.safeParse({ productId: UUID, name: '48' }).success,
     ).toBe(true);
+  });
+});
+
+describe('VariantReorderSchema (C12)', () => {
+  it('валидный порядок (массив uuid) принимается', () => {
+    expect(
+      VariantReorderSchema.safeParse({ productId: UUID, order: [UUID2] }).success,
+    ).toBe(true);
+  });
+  it('пустой order отклонён (min 1)', () => {
+    expect(
+      VariantReorderSchema.safeParse({ productId: UUID, order: [] }).success,
+    ).toBe(false);
+  });
+  it('не-uuid в order отклонён', () => {
+    expect(
+      VariantReorderSchema.safeParse({ productId: UUID, order: ['x'] }).success,
+    ).toBe(false);
+  });
+  it('без productId отклонён', () => {
+    expect(VariantReorderSchema.safeParse({ order: [UUID2] }).success).toBe(false);
+  });
+});
+
+describe('AttributeValueDeleteSchema (C14)', () => {
+  it('валидный uuid принимается', () => {
+    expect(AttributeValueDeleteSchema.safeParse({ id: UUID }).success).toBe(true);
+  });
+  it('не-uuid / без id отклонён', () => {
+    expect(AttributeValueDeleteSchema.safeParse({ id: 'nope' }).success).toBe(false);
+    expect(AttributeValueDeleteSchema.safeParse({}).success).toBe(false);
   });
 });
 

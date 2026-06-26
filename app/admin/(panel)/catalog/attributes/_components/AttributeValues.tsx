@@ -5,7 +5,7 @@ import { useState } from 'react';
 
 import type { AttributeValue } from '@/lib/catalog/types';
 
-import { addAttributeValueAction } from './form-actions';
+import { addAttributeValueAction, deleteAttributeValueAction } from './form-actions';
 import { buildAttributeValuePayload } from './payload';
 import { errorMessage, fieldError } from '../../_components/action-result';
 import type { ActionResult } from '@/lib/server/action';
@@ -58,6 +58,14 @@ export function AttributeValues({
     }
   }
 
+  async function remove(v: AttributeValue) {
+    if (!window.confirm(`Удалить значение «${v.value}» из словаря?`)) return;
+    setError(null);
+    const result = await deleteAttributeValueAction({ id: v.id });
+    if (result.ok) router.refresh();
+    else setError(result);
+  }
+
   function fe(f: string) {
     return fieldError(error, f);
   }
@@ -89,12 +97,13 @@ export function AttributeValues({
                   <th scope="col" className="px-4 py-2 font-medium">Значение</th>
                   <th scope="col" className="px-4 py-2 font-medium">ЧПУ (slug)</th>
                   <th scope="col" className="px-4 py-2 font-medium">Порядок</th>
+                  <th scope="col" className="px-4 py-2 font-medium">Действия</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {values.length === 0 ? (
                   <tr>
-                    <td colSpan={3} className="px-4 py-6 text-center text-gray-400">
+                    <td colSpan={4} className="px-4 py-6 text-center text-gray-400">
                       Значений пока нет.
                     </td>
                   </tr>
@@ -106,6 +115,12 @@ export function AttributeValues({
                         {v.slug ? <code className="text-xs">{v.slug}</code> : <span className="text-gray-300" aria-hidden="true">—</span>}
                       </td>
                       <td className="px-4 py-2 text-gray-600">{v.sort}</td>
+                      <td className="px-4 py-2">
+                        <button type="button" onClick={() => void remove(v)}
+                          className="text-xs text-red-600 hover:underline">
+                          Удалить
+                        </button>
+                      </td>
                     </tr>
                   ))
                 )}

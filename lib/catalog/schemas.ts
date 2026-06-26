@@ -281,6 +281,17 @@ export type VariantUpdateInput = z.infer<typeof VariantUpdateSchema>;
 
 export const VariantIdSchema = z.object({ id: uuidSchema });
 
+/**
+ * Переупорядочивание вариантов товара (зеркало MediaReorderSchema, но без
+ * primaryId — у вариантов нет «главного»). Индекс id в массиве `order` → значение
+ * sort (нормализует существующие sort=0 в 0..n-1). Минимум один id.
+ */
+export const VariantReorderSchema = z.object({
+  productId: uuidSchema,
+  order: z.array(uuidSchema).min(1),
+});
+export type VariantReorderInput = z.infer<typeof VariantReorderSchema>;
+
 // -----------------------------------------------------------------------------
 // Бренды (docs/06 §3.3, §4.3).
 // -----------------------------------------------------------------------------
@@ -357,6 +368,10 @@ export const AttributeValueSchema = z.object({
   sort: z.number().int().min(0).optional().default(0),
 });
 export type AttributeValueInput = z.infer<typeof AttributeValueSchema>;
+
+/** Удаление значения из словаря характеристики (по id). */
+export const AttributeValueDeleteSchema = z.object({ id: uuidSchema });
+export type AttributeValueDeleteInput = z.infer<typeof AttributeValueDeleteSchema>;
 
 /** Одна привязка значения характеристики к товару/варианту. */
 export const ProductAttributeItemSchema = z
