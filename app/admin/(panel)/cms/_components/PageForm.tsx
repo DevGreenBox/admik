@@ -28,9 +28,9 @@ import { CmsImageUploadButton } from './CmsImageUploadButton';
  * В режиме редактирования снизу — SectionEditor (drag-and-drop секции).
  *
  * Все мутации — Server Actions CMS (cms.write + assertCmsEnabled на сервере).
- * SeoFieldset универсален; для CMS-страницы используем подмножество его полей:
- * seoTitle/seoDescription/canonicalUrl/noindex и поле «ключ OG» как ogImageUrl
- * (схема страницы хранит ogImageUrl text; ogTitle/ogDescription у страницы нет).
+ * SeoFieldset универсален; для CMS-страницы используем seoTitle/seoDescription/
+ * ogTitle/ogDescription/canonicalUrl/noindex и поле «ключ OG» как ogImageUrl
+ * (схема страницы хранит ogImageUrl text; OG-текст — в og_title/og_description, C18).
  */
 type Fail = Extract<ActionResult<unknown>, { ok: false }>;
 
@@ -86,12 +86,12 @@ export function PageForm({
   );
 
   // SeoFieldset: для страницы маппим ogImageKey ↔ ogImageUrl; ogTitle/ogDescription
-  // у страницы нет (не входят в схему) — поля скрыты ниже не будут, но не отправляются.
+  // хранятся в og_title/og_description (C18) — инициализируем из страницы и шлём в payload.
   const [seo, setSeo] = useState<SeoFieldsetValue>({
     seoTitle: page?.seoTitle ?? '',
     seoDescription: page?.seoDescription ?? '',
-    ogTitle: '',
-    ogDescription: '',
+    ogTitle: page?.ogTitle ?? '',
+    ogDescription: page?.ogDescription ?? '',
     ogImageKey: page?.ogImageUrl ?? '',
     canonicalUrl: page?.canonicalUrl ?? '',
     noindex: page?.noindex ?? false,
@@ -106,6 +106,8 @@ export function PageForm({
     return {
       seoTitle: seo.seoTitle.trim() || undefined,
       seoDescription: seo.seoDescription.trim() || undefined,
+      ogTitle: seo.ogTitle.trim() || undefined,
+      ogDescription: seo.ogDescription.trim() || undefined,
       ogImageUrl: seo.ogImageKey.trim() || undefined,
       canonicalUrl: seo.canonicalUrl.trim() || undefined,
       noindex: seo.noindex,
@@ -353,6 +355,8 @@ export function PageForm({
             fieldErrors={{
               seoTitle: fe('seoTitle'),
               seoDescription: fe('seoDescription'),
+              ogTitle: fe('ogTitle'),
+              ogDescription: fe('ogDescription'),
               ogImageKey: fe('ogImageUrl'),
               canonicalUrl: fe('canonicalUrl'),
             }}
