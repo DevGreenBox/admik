@@ -45,6 +45,16 @@ export async function countNewLeads(): Promise<number> {
   return Number(rows[0]?.count ?? 0);
 }
 
+/**
+ * Общее число заявок (все статусы) — для «Всего: N» и плашки усечения списка
+ * (C7), зеркало countSubscribers: listLeads отдаёт усечённый по LIMIT список,
+ * поэтому для тотала нужен отдельный count.
+ */
+export async function countLeads(): Promise<number> {
+  const rows = await sql<{ count: string }[]>`SELECT count(*)::text AS count FROM leads`;
+  return Number(rows[0]?.count ?? 0);
+}
+
 /** Текущий статус заявки (null — заявка не найдена). Для before-снимка/гварда перехода. */
 export async function getLeadStatus(id: string): Promise<string | null> {
   const rows = await sql<{ status: string }[]>`SELECT status FROM leads WHERE id = ${id} LIMIT 1`;

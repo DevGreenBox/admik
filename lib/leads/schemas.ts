@@ -32,3 +32,18 @@ export const LeadIdInputSchema = z.object({
 });
 
 export type LeadIdInput = z.infer<typeof LeadIdInputSchema>;
+
+/**
+ * Человекочитаемые подписи источника заявки (C20). Образец — leadStatusLabel /
+ * auditActionLabel: маппинг известных значений + passthrough неизвестных, чтобы
+ * не падать на будущих источниках (telegram_bot, whatsapp и т.п.). Источник
+ * пишется в leads.source (DEFAULT 'contact_form').
+ */
+export const LEAD_SOURCE_LABELS: Readonly<Record<string, string>> = {
+  contact_form: 'Форма контактов',
+};
+
+/** Подпись источника заявки (фолбэк — сама строка, если источник неизвестен). */
+export function leadSourceLabel(source: string): string {
+  return LEAD_SOURCE_LABELS[source] ?? source;
+}
