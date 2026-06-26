@@ -4,7 +4,6 @@ import {
   listProducts,
   getCategories,
   fromListItem,
-  type StorefrontProduct,
   type AdmikCategoryDto,
 } from "@/lib/admik";
 
@@ -31,19 +30,19 @@ export default async function Catalog({
   const sale = sp.sale === "1" || sp.sale === "true" ? true : undefined;
   const isNew = sp.new === "1" || sp.new === "true" ? true : undefined;
 
-  let products: StorefrontProduct[] = [];
-  let categories: AdmikCategoryDto[] = [];
-  try {
-    const [items, cats] = await Promise.all([
-      listProducts({ category, q, sale, isNew, limit: 60 }),
-      getCategories(),
-    ]);
-    products = items.map(fromListItem);
-    categories = cats;
-  } catch {
-    products = [];
-    categories = [];
-  }
+  // Ошибку загрузки ТОВАРОВ НЕ глушим в пустой каталог: иначе при упавшем бэкенде
+  // (таймаут/сеть/500) витрина показывала бы ложное «Ничего не найдено / Измените
+  // фильтры». Пусть исключение всплывёт в error-границу (error.tsx: «Страница не
+  // загрузилась» + «Обновить») — как уже делает product/[slug]. Реально пустой
+  // каталог (успешный ответ []) по-прежнему даст корректное «Ничего не найдено».
+  // Категории второстепенны (только вкладки фильтра) → их сбой деградируем до [],
+  // не роняя весь каталог.
+  const [items, cats] = await Promise.all([
+    listProducts({ category, q, sale, isNew, limit: 60 }),
+    getCategories().catch(() => [] as AdmikCategoryDto[]),
+  ]);
+  const products = items.map(fromListItem);
+  const categories = cats;
 
   return (
     // key=категория → при смене категории CatalogPage перемонтируется и клиентские

@@ -1,12 +1,26 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { FadeIn } from "@/components/ui/Animations";
 import { getCmsPage } from "@/lib/cms";
 import { CmsPageView } from "@/components/cms/CmsPageView";
 
-export const metadata = {
+// CMS-overridable с фолбэком (G-13): SEO опубликованной страницы 'reviews' из
+// админки имеет приоритет; при её отсутствии/ошибке API — статический фолбэк ниже.
+export const dynamic = "force-dynamic";
+
+const FALLBACK_METADATA: Metadata = {
   title: "ВЫ + THE CASE — отзывы",
   description: "Фотоотзывы покупателей THE CASE — врачи и медперсонал в форме бренда.",
 };
+
+export async function generateMetadata(): Promise<Metadata> {
+  const page = await getCmsPage("reviews");
+  if (!page) return FALLBACK_METADATA;
+  return {
+    title: page.meta.title ?? page.title ?? FALLBACK_METADATA.title,
+    description: page.meta.description ?? FALLBACK_METADATA.description,
+  };
+}
 
 // TODO(контент клиента): заменить placeholders на реальные фотоотзывы
 // (фото + имя/город/специальность). Источник фото — клиент пришлёт отдельно.

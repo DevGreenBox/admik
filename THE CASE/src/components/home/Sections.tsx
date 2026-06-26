@@ -17,6 +17,13 @@ export function HomeBanner({ hero = HOME_FALLBACK.hero }: { hero?: ResolvedHome[
   // Заголовок/подзаголовок обложки — из настроек Admik (Находка-17, settings.home.hero);
   // показываем оверлеем над CTA только когда владелец их задал (иначе чистая обложка).
   const hasHeading = Boolean(hero.title) || Boolean(hero.subtitle);
+  // Находка #22: если удалённый фон обложки (S3/CDN) не загрузился (хост не в
+  // remotePatterns или файл недоступен) — мягко падаем на локальную обложку, чтобы
+  // главный экран не оставался пустым/битым.
+  const [bannerFailed, setBannerFailed] = useState(false);
+  const bannerSrc = bannerFailed
+    ? IMAGES.home.banner
+    : hero.imageUrl ?? IMAGES.home.banner;
   return (
     <section className={HEADER_OFFSET}>
       {/* Весь первый блок кликабелен → каталог; текст/заголовок и ссылка CTA — из
@@ -27,11 +34,12 @@ export function HomeBanner({ hero = HOME_FALLBACK.hero }: { hero?: ResolvedHome[
         className="group relative block w-full"
       >
         <Image
-          src={hero.imageUrl ?? IMAGES.home.banner}
+          src={bannerSrc}
           alt={hero.title ?? "THE CASE — Medical Uniform"}
           width={3620}
           height={1810}
           priority
+          onError={() => setBannerFailed(true)}
           className="block w-full h-auto object-contain"
           sizes="100vw"
         />
@@ -488,6 +496,9 @@ const ABOUT_SLIDES = [
  */
 function AboutGallery({ images }: { images: string[] }) {
   const [i, setI] = useState(0);
+  // Находка #22: удалённое фото «О бренде» (S3/CDN) может не загрузиться — на сбой
+  // конкретного кадра подменяем его локальным слайдом, чтобы плитка не была пустой.
+  const [failed, setFailed] = useState<Set<number>>(new Set());
   useEffect(() => {
     if (images.length < 2) return;
     const t = setInterval(() => setI((p) => (p + 1) % images.length), 5000);
@@ -507,9 +518,16 @@ function AboutGallery({ images }: { images: string[] }) {
             className="image-luxury relative aspect-[3/4] overflow-hidden bg-surface"
           >
             <Image
-              src={src}
+              src={failed.has(n) ? ABOUT_SLIDES[n % ABOUT_SLIDES.length] : src}
               alt="THE CASE — о бренде"
               fill
+              onError={() =>
+                setFailed((prev) => {
+                  const next = new Set(prev);
+                  next.add(n);
+                  return next;
+                })
+              }
               className={`object-cover object-center transition-all duration-700 ${
                 i === n ? "opacity-100" : "opacity-60"
               }`}

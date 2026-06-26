@@ -15,6 +15,7 @@ import {
   resolveFaviconUrl,
   resolveTheme,
   resolveCurrency,
+  resolveNavigation,
 } from "@/lib/store-settings";
 import { buildInfoLinks } from "@/lib/site-nav";
 import "./globals.css";
@@ -108,6 +109,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const logoUrl = resolveLogoUrl(settings);
   const theme = resolveTheme(settings);
   const currency = resolveCurrency(settings);
+  // Ручная навигация шапки/футера из настроек Admik (G-10/G-11, Находка #18):
+  // пустые массивы → Header/Footer показывают навигацию по умолчанию (+ авто-меню
+  // «Информация» из страниц Контента сохраняется в обоих случаях).
+  const nav = resolveNavigation(settings);
 
   // Цвета темы из брендинга (Находка-12) → рантайм-переопределение CSS-переменных
   // Tailwind (--color-accent / --color-graphite). Классы bg-accent/text-graphite
@@ -123,7 +128,13 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <Providers>
           <PageviewBeacon />
           <CurrencyProvider currency={currency}>
-            <Header categories={categories} shopName={shopName} logoUrl={logoUrl} infoItems={infoLinks} />
+            <Header
+              categories={categories}
+              shopName={shopName}
+              logoUrl={logoUrl}
+              headerItems={nav.header}
+              infoItems={infoLinks}
+            />
             <main className="flex-1">{children}</main>
             <Footer
               categories={categories}
@@ -131,6 +142,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
               logoUrl={logoUrl}
               contacts={contacts}
               infoLinks={infoLinks}
+              columns={nav.footer}
             />
           </CurrencyProvider>
         </Providers>

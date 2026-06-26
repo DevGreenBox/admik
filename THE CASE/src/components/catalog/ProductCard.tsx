@@ -36,21 +36,29 @@ export function ProductCard({ product, priority = false, size = "default" }: Pro
   const [quickView, setQuickView] = useState(false);
 
   const imageSizes = size === "large" ? "50vw" : "(max-width: 768px) 50vw, 25vw";
+  // Признак наличия из list-DTO (#25): распроданный товар на сетке не должен
+  // выглядеть как доступный — приглушаем фото и показываем явный бейдж.
+  const outOfStock = product.inStock === false;
 
   return (
     <>
       <FadeIn className="group">
         <div>
-          <Link href={`/product/${product.slug}`} className="block">
+          <Link href={`/product/${product.slug}`} className="relative block">
             <LuxuryImageSwap
               primary={product.images[0]}
               secondary={product.images[1]}
               alt={product.name}
               priority={priority}
               sizes={imageSizes}
-              imageClassName="object-contain object-center"
+              imageClassName={`object-contain object-center ${outOfStock ? "opacity-40 grayscale" : ""}`}
               className={`bg-surface ${size === "large" ? "aspect-[3/4]" : "aspect-[3/4]"}`}
             />
+            {outOfStock && (
+              <span className="absolute left-3 top-3 bg-white/90 px-3 py-1.5 text-[9px] uppercase tracking-[0.22em] text-graphite backdrop-blur-sm">
+                Нет в наличии
+              </span>
+            )}
           </Link>
 
           <div className="mt-6 md:mt-7 flex justify-between items-start gap-6">
@@ -60,9 +68,11 @@ export function ProductCard({ product, priority = false, size = "default" }: Pro
                   {product.name}
                 </h3>
               </Link>
-              {product.isNew && (
+              {outOfStock ? (
+                <p className="label-caps text-muted mt-2.5 text-[9px] tracking-[0.26em]">Нет в наличии</p>
+              ) : product.isNew ? (
                 <p className="label-caps text-muted mt-2.5 text-[9px] tracking-[0.26em]">New</p>
-              )}
+              ) : null}
             </div>
             <div className="shrink-0 text-right">
               <PriceDisplay product={product} className="text-[11px] tracking-[0.1em]" />

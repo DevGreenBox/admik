@@ -9,6 +9,8 @@ import { categoryLinks } from "@/lib/catalog-view";
 import { subscribeNewsletter } from "@/lib/admik";
 import type { AdmikCategoryDto } from "@/lib/admik";
 import type { ResolvedContacts } from "@/lib/store-settings";
+import { resolveFooterColumns, type FooterColumn } from "@/lib/site-nav";
+import { submitNewsletter } from "@/lib/newsletter-form";
 
 const FOOTER_LINKS = {
   service: [
@@ -18,6 +20,8 @@ const FOOTER_LINKS = {
     { href: "/care", label: "Уход за вещами" },
     { href: "/reviews", label: "ВЫ + THE CASE" },
     { href: "/account", label: "Личный кабинет" },
+    // «Избранное» (#27): дублируем в футер для обнаружимости (иначе только иконка).
+    { href: "/wishlist", label: "Избранное" },
   ],
   legal: [
     { href: "/privacy", label: "Обработка персональных данных" },
@@ -40,14 +44,13 @@ const CONTACTS_FALLBACK: ResolvedContacts = {
   socials: [],
 };
 
-type FooterColumn = { title: string; links: { label: string; href: string }[] };
-
 export function Footer({
   categories = [],
   shopName = "THE CASE",
   logoUrl,
   contacts,
   infoLinks,
+  columns,
 }: {
   categories?: AdmikCategoryDto[];
   /** Имя магазина из настроек Admik (G-01). */
@@ -59,38 +62,42 @@ export function Footer({
   /** Ссылки «Информация» — АВТО из опубликованных страниц Контента (любая страница
    *  становится кликабельной без ручной настройки); пусто → DEFAULT_COLUMNS. */
   infoLinks?: { href: string; label: string }[];
+  /** Колонки футера из настроек Admik (G-11, Находка #18); пусто → DEFAULT_COLUMNS. */
+  columns?: FooterColumn[];
 }) {
   const [email, setEmail] = useState("");
   const [subscribed, setSubscribed] = useState(false);
   const [subPending, setSubPending] = useState(false);
+  // Ошибка подписки (#10): раньше catch был пуст → покупатель думал, что подписался.
+  const [subError, setSubError] = useState<string | null>(null);
   const c = contacts ?? CONTACTS_FALLBACK;
 
   // Подписка на рассылку (G-12): шлёт email на Storefront API; идемпотентна.
+  // Логика — в чистой submitNewsletter (покрыта юнит-тестами): при сбое возвращает
+  // сообщение, а не молчит, чтобы покупатель мог повторить (#10).
   const handleSubscribe = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email.trim() || subPending) return;
     setSubPending(true);
-    try {
-      await subscribeNewsletter(email.trim());
+    setSubError(null);
+    const res = await submitNewsletter(email, subscribeNewsletter);
+    if (res.ok) {
       setSubscribed(true);
       setEmail("");
-    } catch {
-      // мягкая деградация: не ломаем футер, просто не подтверждаем
-    } finally {
-      setSubPending(false);
+    } else if (res.error) {
+      setSubError(res.error);
     }
+    setSubPending(false);
   };
-  // Базовые колонки (Сервис/Legal) показываем ВСЕГДА — юридические и сервисные
-  // ссылки не должны исчезать, даже если соответствующая страница не опубликована в
-  // Контенте. Дополнительно — колонка «Информация» с опубликованными страницами,
-  // которых ещё НЕТ в базовых колонках (без дублей). Так любая страница достижима
-  // кликом (нет «осиротевших»), и при этом юридические ссылки на месте.
-  const baseHrefs = new Set(DEFAULT_COLUMNS.flatMap((c) => c.links.map((l) => l.href)));
-  const extraPages = (infoLinks ?? []).filter((l) => !baseHrefs.has(l.href));
-  const cols: FooterColumn[] =
-    extraPages.length > 0
-      ? [...DEFAULT_COLUMNS, { title: "Информация", links: extraPages }]
-      : DEFAULT_COLUMNS;
+  // Колонки футера: из настроек Admik (G-11), иначе дефолтные (Сервис/Legal). Сверху
+  // — авто-колонка «Информация» с опубликованными страницами, которых ещё нет в
+  // выбранных колонках (без дублей), чтобы любая страница была достижима кликом
+  // (нет «осиротевших»). Логика — в чистой resolveFooterColumns (с юнит-тестами).
+  const cols: FooterColumn[] = resolveFooterColumns({
+    settingsColumns: columns,
+    defaultColumns: DEFAULT_COLUMNS,
+    infoLinks,
+  });
   const lastCol = cols.length - 1;
 
   // Ссылки «Shop» строятся из РЕАЛЬНЫХ категорий магазина. «Коллекция» — всегда.
@@ -187,19 +194,26 @@ export function Footer({
               {subscribed ? (
                 <p className="text-[11px] text-white/70">Спасибо! Вы подписаны на рассылку.</p>
               ) : (
-                <form onSubmit={handleSubscribe} className="flex border-b border-white/25 pb-2">
-                  <input
-                    type="email"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="Email"
-                    className="flex-1 bg-transparent text-[11px] text-white placeholder:text-white/35 outline-none tracking-wide"
-                  />
-                  <button type="submit" disabled={subPending} className="text-[10px] uppercase tracking-[0.2em] text-white/70 hover:text-white transition-colors ml-4 disabled:opacity-50">
-                    {subPending ? "…" : "Подписаться"}
-                  </button>
-                </form>
+                <>
+                  <form onSubmit={handleSubscribe} className="flex border-b border-white/25 pb-2">
+                    <input
+                      type="email"
+                      required
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="Email"
+                      className="flex-1 bg-transparent text-[11px] text-white placeholder:text-white/35 outline-none tracking-wide"
+                    />
+                    <button type="submit" disabled={subPending} className="text-[10px] uppercase tracking-[0.2em] text-white/70 hover:text-white transition-colors ml-4 disabled:opacity-50">
+                      {subPending ? "…" : "Подписаться"}
+                    </button>
+                  </form>
+                  {/* Ошибка подписки (#10): видимый сигнал, чтобы покупатель повторил,
+                      а не считал, что подписался. role=alert — для скринридеров. */}
+                  {subError ? (
+                    <p role="alert" className="mt-3 text-[11px] text-red-300">{subError}</p>
+                  ) : null}
+                </>
               )}
             </div>
           </div>

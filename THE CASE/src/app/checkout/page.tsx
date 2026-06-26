@@ -204,6 +204,29 @@ export default function CheckoutPage() {
     }
   };
 
+  // Снятие промокода (#26): очищаем поле и пересчитываем quote БЕЗ кода. Отдельный
+  // обработчик нужен, потому что setPromoCode("") применится асинхронно — здесь шлём
+  // promoCode: undefined явно, не полагаясь на устаревший стейт. Без этого снять
+  // применённую скидку было нельзя (кнопка «Применить» заблокирована на пустом поле).
+  const clearPromo = async () => {
+    if (!selectedCity || !selectedPickup) return;
+    setPromoCode("");
+    setError("");
+    setApplyingPromo(true);
+    try {
+      const q = await quoteCart({
+        items: cartToItems(cart),
+        promoCode: undefined,
+        delivery: { type: "pvz", city: selectedCity.name, cityCode: selectedCity.code, pvzCode: selectedPickup.code },
+      });
+      setQuote(q);
+    } catch (e) {
+      setError(e instanceof AdmikApiError ? e.message : "Не удалось обновить итог");
+    } finally {
+      setApplyingPromo(false);
+    }
+  };
+
   const handleSubmit = async () => {
     if (!selectedCity || !selectedPickup || !quote || !quote.fulfillable) return;
     // Нельзя оформлять, пока доставка не посчитана (явный available === false).
@@ -405,7 +428,9 @@ export default function CheckoutPage() {
                     autoCapitalize="characters"
                     className="flex-1 border border-border px-4 py-3 text-sm uppercase tracking-wide focus:border-graphite outline-none transition-colors"
                   />
-                  <Button variant="outline" size="md" disabled={applyingPromo || promoCode.trim() === ""} onClick={applyPromo}>
+                  {/* На пустом поле «Применить» разблокирован, ЕСЛИ промокод уже
+                      применён — это снятие кода (пересчёт без скидки), #26. */}
+                  <Button variant="outline" size="md" disabled={applyingPromo || (promoCode.trim() === "" && !quote?.promo?.applied)} onClick={applyPromo}>
                     {applyingPromo ? "Проверка..." : "Применить"}
                   </Button>
                 </div>
@@ -415,6 +440,18 @@ export default function CheckoutPage() {
                   <p className="text-[11px] text-muted mt-2">
                     Промокод {quote?.promo?.code} применён.
                   </p>
+                )}
+                {/* Снять применённый промокод одним кликом (#26). Показываем всегда,
+                    пока сервер считает код применённым — даже если поле уже изменили. */}
+                {quote?.promo?.applied && (
+                  <button
+                    type="button"
+                    onClick={clearPromo}
+                    disabled={applyingPromo}
+                    className="mt-2 text-[11px] text-muted underline hover:text-graphite transition-colors disabled:opacity-50"
+                  >
+                    Убрать промокод
+                  </button>
                 )}
                 {/* Поле правили после применения, не нажав «Применить» заново — итог
                     на экране посчитан по другому коду. Просим переприменить/очистить. */}

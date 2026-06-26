@@ -286,11 +286,12 @@ describe("sortProducts", () => {
     expect(sortProducts(products, "new")[0].slug).toBe("b");
   });
 
-  it("bestseller — только bestseller", () => {
-    expect(sortProducts(products, "bestseller").map((p) => p.slug)).toEqual([
-      "a",
-      "c",
-    ]);
+  it("bestseller — бестселлеры впереди, остальные сохранены (НЕ удаляются)", () => {
+    // Сортировка не должна вырезать товары из выдачи (это контрол СОРТИРОВКИ,
+    // а не фильтр): a и c — бестселлеры, идут первыми (стабильно), b — после.
+    const out = sortProducts(products, "bestseller");
+    expect(out.map((p) => p.slug)).toEqual(["a", "c", "b"]);
+    expect(out).toHaveLength(products.length);
   });
 
   it("не мутирует исходный массив", () => {

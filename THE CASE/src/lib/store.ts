@@ -22,6 +22,8 @@ interface StoreState {
 
   setUser: (user: User | null) => void;
   addOrder: (order: Order) => void;
+  /** Удаляет локально сохранённый заказ из ЛК по номеру (битый/протухший токен). */
+  removeOrder: (number: string) => void;
 
   cartTotal: () => number;
   cartCount: () => number;
@@ -103,6 +105,11 @@ export const useStore = create<StoreState>()(
       setUser: (user) => set({ user }),
 
       addOrder: (order) => set((state) => ({ orders: [order, ...state.orders] })),
+
+      removeOrder: (number) =>
+        set((state) => ({
+          orders: state.orders.filter((o) => o.number !== number),
+        })),
 
       cartTotal: () =>
         get().cart.reduce((sum, item) => sum + item.price * item.quantity, 0),

@@ -7,14 +7,8 @@ import { Search, ShoppingBag, Heart, User, Menu, X } from "lucide-react";
 import { Logo } from "@/components/ui/Logo";
 import { selectCartCount, selectWishlistCount, useStore } from "@/lib/store";
 import { flattenCategoryNav } from "@/lib/catalog-view";
+import { buildHeaderNav } from "@/lib/site-nav";
 import type { AdmikCategoryDto } from "@/lib/admik";
-
-type NavItem = { href: string; label: string; children?: { href: string; label: string }[] };
-
-const NAV_RIGHT: NavItem[] = [
-  { href: "/#delivery", label: "Доставка" },
-  { href: "/contacts", label: "Контакты" },
-];
 
 export function Header({
   categories = [],
@@ -38,34 +32,17 @@ export function Header({
   const cartCount = useStore(selectCartCount);
   const wishlistCount = useStore(selectWishlistCount);
 
-  // Подменю «Коллекция» — из РЕАЛЬНЫХ категорий магазина (не хардкод women/men,
-  // которых может не быть → пустой каталог). Если категорий нет — «Коллекция»
-  // деградирует до простой ссылки на /catalog.
-  const collectionChildren = flattenCategoryNav(categories);
-  // Кастомное меню из настроек (G-10) заменяет дефолтное (плоские пункты, без
-  // подменю); пусто → меню по умолчанию с динамическим подменю «Коллекция».
-  const customNav = (headerItems?.length ?? 0) > 0;
-  // «Информация» — выпадающее меню из опубликованных страниц Контента (авто). Любая
-  // страница сама становится кликабельной — устраняет недостижимые («осиротевшие»)
-  // страницы. Родитель ведёт на первую страницу, дети — все страницы.
-  const infoNav = (infoItems?.length ?? 0) > 0;
-  const NAV_LEFT: NavItem[] = customNav
-    ? headerItems!.map((i) => ({ href: i.href, label: i.label }))
-    : [
-        { href: "/catalog", label: "Каталог" },
-        collectionChildren.length > 0
-          ? { href: "/catalog", label: "Коллекция", children: collectionChildren }
-          : { href: "/catalog", label: "Коллекция" },
-        // Точки входа в серверные фасеты каталога (F18): без этих ссылок параметры
-        // ?sale=1 / ?new=1 недостижимы из UI. Фильтрацию делает сервер (catalog/page).
-        { href: "/catalog?sale=1", label: "Распродажа" },
-        { href: "/catalog?new=1", label: "Новинки" },
-        { href: "/#about", label: "О бренде" },
-        ...(infoNav
-          ? [{ href: infoItems![0].href, label: "Информация", children: infoItems! }]
-          : []),
-      ];
-  const navRight: NavItem[] = customNav ? [] : NAV_RIGHT;
+  // Навигация шапки (Находки S-nav #18/#30): кастомное меню владельца (G-10)
+  // СОВМЕЩАЕТСЯ с авто-навигацией платформы, не теряя её — выпадающая «Информация»
+  // (опубликованные страницы Контента) и правые «Доставка»/«Контакты» сохраняются
+  // даже при кастомном меню (раньше обнулялись). Подменю «Коллекция» строится из
+  // РЕАЛЬНЫХ категорий магазина (не хардкод slug); нет категорий → простая ссылка
+  // на /catalog. Логика — в чистой buildHeaderNav (покрыта юнит-тестами).
+  const { left: NAV_LEFT, right: navRight } = buildHeaderNav({
+    headerItems,
+    collectionChildren: flattenCategoryNav(categories),
+    infoItems,
+  });
 
   useEffect(() => {
     document.body.style.overflow = menuOpen ? "hidden" : "";
@@ -78,20 +55,23 @@ export function Header({
     <>
       <header className="fixed top-0 left-0 right-0 z-50 bg-white border-b border-border">
         <div className="container-brand">
-          <div className="grid grid-cols-[1fr_auto_1fr] items-center h-16 md:h-[72px]">
-            <div className="flex items-center gap-6 md:gap-10">
+          <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-x-4 md:gap-x-8 h-16 md:h-[72px]">
+            <div className="flex min-w-0 items-center gap-6 md:gap-10">
               <button
-                className="md:hidden p-1 -ml-1 text-graphite"
+                className="lg:hidden p-1 -ml-1 text-graphite"
                 onClick={() => setMenuOpen(true)}
                 aria-label="Меню"
               >
                 <Menu className="h-5 w-5" strokeWidth={1} />
               </button>
-              <nav className="hidden md:flex items-center gap-8 lg:gap-10">
+              {/* Горизонтальное меню — только с lg (≥1024): ниже четыре пункта +
+                  центрированный логотип не помещаются в центр-сетку и наезжают друг
+                  на друга, поэтому на планшетах/узких ноутах показываем бургер. */}
+              <nav className="hidden lg:flex items-center gap-6 lg:gap-8 xl:gap-10">
                 {NAV_LEFT.map((link) =>
                   link.children ? (
-                    <div key={link.label} className="relative group/nav flex items-center">
-                      <Link href={link.href} className="eyebrow leading-none text-graphite link-underline">
+                    <div key={`${link.href}-${link.label}`} className="relative group/nav flex items-center">
+                      <Link href={link.href} className="eyebrow leading-none whitespace-nowrap text-graphite link-underline">
                         {link.label}
                       </Link>
                       <div className="invisible absolute left-0 top-full pt-4 opacity-0 transition-opacity duration-300 group-hover/nav:visible group-hover/nav:opacity-100">
@@ -109,7 +89,7 @@ export function Header({
                       </div>
                     </div>
                   ) : (
-                    <Link key={link.label} href={link.href} className="eyebrow leading-none text-graphite link-underline">
+                    <Link key={`${link.href}-${link.label}`} href={link.href} className="eyebrow leading-none whitespace-nowrap text-graphite link-underline">
                       {link.label}
                     </Link>
                   ),
@@ -119,10 +99,10 @@ export function Header({
 
             <Logo size="md" shopName={shopName} logoUrl={logoUrl} />
 
-            <div className="flex items-center justify-end gap-5 md:gap-7">
-              <nav className="hidden md:flex items-center gap-8 lg:gap-10 mr-2">
+            <div className="flex min-w-0 items-center justify-end gap-5 md:gap-7">
+              <nav className="hidden lg:flex items-center gap-6 lg:gap-8 xl:gap-10 mr-2">
                 {navRight.map((link) => (
-                  <Link key={link.href} href={link.href} className="eyebrow leading-none text-graphite link-underline">
+                  <Link key={link.href} href={link.href} className="eyebrow leading-none whitespace-nowrap text-graphite link-underline">
                     {link.label}
                   </Link>
                 ))}
@@ -172,7 +152,7 @@ export function Header({
             >
               {[...NAV_LEFT, ...navRight].map((link, i) => (
                 <motion.div
-                  key={link.label}
+                  key={`${link.href}-${link.label}`}
                   initial={{ opacity: 0, y: 12 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.15 + i * 0.06 }}
@@ -199,6 +179,11 @@ export function Header({
               <div className="mt-8 pt-10 border-t border-border flex flex-col gap-5">
                 <Link href="/account" onClick={() => setMenuOpen(false)} className="link-editorial self-start">
                   Личный кабинет
+                </Link>
+                {/* «Избранное» (#27): раньше достижимо только иконкой-сердечком —
+                    в бургер-меню (особенно на телефоне) ссылки не было. */}
+                <Link href="/wishlist" onClick={() => setMenuOpen(false)} className="link-editorial self-start">
+                  Избранное{wishlistCount > 0 ? ` (${wishlistCount})` : ""}
                 </Link>
               </div>
             </motion.nav>

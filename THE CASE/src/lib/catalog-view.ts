@@ -189,7 +189,7 @@ export function categoryLinks(
     .map((c) => ({ slug: c.slug, name: c.name, href: catHref(c.slug) }));
 }
 
-/** Сортировка товаров (не мутирует вход). `bestseller` ещё и фильтрует. */
+/** Сортировка товаров (не мутирует вход). */
 export function sortProducts(
   products: StorefrontProduct[],
   sort: CatalogSort
@@ -204,7 +204,13 @@ export function sortProducts(
         (a, b) => (b.isNew ? 1 : 0) - (a.isNew ? 1 : 0)
       );
     case "bestseller":
-      return products.filter((p) => p.isBestseller);
+      // Сортировка, а НЕ фильтр: бестселлеры поднимаются наверх, остальные товары
+      // остаются в выдаче (стабильная сортировка сохраняет исходный порядок внутри
+      // групп). Раньше здесь был filter — он молча вырезал не-бестселлеры, и каталог
+      // внезапно «пустел» при выборе пункта «Bestsellers» в дропдауне сортировки.
+      return [...products].sort(
+        (a, b) => (b.isBestseller ? 1 : 0) - (a.isBestseller ? 1 : 0)
+      );
     default:
       return products;
   }

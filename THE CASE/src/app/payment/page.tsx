@@ -1,11 +1,26 @@
+import type { Metadata } from "next";
+
 import { FadeIn } from "@/components/ui/Animations";
 import { getCmsPage } from "@/lib/cms";
 import { CmsPageView } from "@/components/cms/CmsPageView";
 
-export const metadata = {
+// CMS-overridable с фолбэком (G-13): SEO опубликованной страницы 'payment' из
+// админки имеет приоритет; при её отсутствии/ошибке API — статический фолбэк ниже.
+export const dynamic = "force-dynamic";
+
+const FALLBACK_METADATA: Metadata = {
   title: "Оплата — THE CASE",
   description: "Способы оплаты заказов в интернет-магазине THE CASE.",
 };
+
+export async function generateMetadata(): Promise<Metadata> {
+  const page = await getCmsPage("payment");
+  if (!page) return FALLBACK_METADATA;
+  return {
+    title: page.meta.title ?? page.title ?? FALLBACK_METADATA.title,
+    description: page.meta.description ?? FALLBACK_METADATA.description,
+  };
+}
 
 export default async function PaymentPage() {
   const page = await getCmsPage("payment");

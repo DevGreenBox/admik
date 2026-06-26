@@ -121,30 +121,75 @@ function OrderCard({
 /** Локальный заказ store → подгружает статус через getOrder(number, {token}). */
 function StoredOrderCard({ number, token }: { number: string; token: string }) {
   const [order, setOrder] = useState<AdmikOrderPublicDto | null>(null);
-  const [failed, setFailed] = useState(false);
+  // 'notfound' — getOrder вернул null (токен протух/заказ удалён): можно скрыть;
+  // 'error' — сеть/сервер: предлагаем «Повторить». attempt перезапускает загрузку.
+  const [status, setStatus] = useState<"loading" | "notfound" | "error">("loading");
+  const [attempt, setAttempt] = useState(0);
+  const removeOrder = useStore((s) => s.removeOrder);
 
   useEffect(() => {
     let active = true;
+    setStatus("loading");
     getOrder(number, { token })
       .then((o) => {
-        if (active) {
-          if (o) setOrder(o);
-          else setFailed(true);
-        }
+        if (!active) return;
+        if (o) setOrder(o);
+        else setStatus("notfound");
       })
-      .catch(() => active && setFailed(true));
+      .catch(() => {
+        if (active) setStatus("error");
+      });
     return () => {
       active = false;
     };
-  }, [number, token]);
+  }, [number, token, attempt]);
 
   if (order) return <OrderCard order={order} payProof={{ token }} />;
+
+  if (status === "loading") {
+    return (
+      <div className="border border-border p-6">
+        <p className="text-[11px] uppercase tracking-[0.12em]">#{number}</p>
+        <p className="text-[10px] text-muted mt-1">Загрузка...</p>
+      </div>
+    );
+  }
+
+  // Отказ загрузки: вместо «вечно битой» карточки даём действия восстановления.
+  const message =
+    status === "notfound"
+      ? "Заказ не найден или ссылка устарела."
+      : "Не удалось загрузить статус заказа.";
+
   return (
     <div className="border border-border p-6">
-      <p className="text-[11px] uppercase tracking-[0.12em]">#{number}</p>
-      <p className="text-[10px] text-muted mt-1">
-        {failed ? "Не удалось загрузить статус" : "Загрузка..."}
-      </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-[11px] uppercase tracking-[0.12em]">#{number}</p>
+          <p className="text-[10px] text-accent mt-1">{message}</p>
+        </div>
+      </div>
+      <div className="mt-4 flex flex-wrap gap-3">
+        {/* Сетевой/серверный сбой — даём повтор. При notfound повтор бессмыслен
+            (заказа/токена нет), поэтому показываем только «Скрыть». */}
+        {status === "error" && (
+          <button
+            type="button"
+            onClick={() => setAttempt((a) => a + 1)}
+            className="text-[10px] uppercase tracking-[0.18em] text-graphite link-underline"
+          >
+            Повторить
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => removeOrder(number)}
+          className="text-[10px] uppercase tracking-[0.18em] text-muted hover:text-graphite transition-colors"
+          aria-label={`Скрыть заказ ${number}`}
+        >
+          Скрыть
+        </button>
+      </div>
     </div>
   );
 }
