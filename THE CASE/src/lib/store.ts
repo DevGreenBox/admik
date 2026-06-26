@@ -169,3 +169,12 @@ export function pruneWishlist(removeSlugs: string[]): void {
 export function selectCartTotal(state: StoreState) {
   return state.cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
 }
+
+/**
+ * Достигнут ли лимит остатка по позиции корзины (снимок `available`) — C24.
+ * Чистый предикат для аффорданса кнопки «+» на /cart и (по желанию) карточке
+ * товара. `available === undefined` → лимит неизвестен (старые записи) → false.
+ */
+export function isAtStockLimit(item: Pick<CartItem, "available" | "quantity">): boolean {
+  return item.available != null && item.quantity >= item.available;
+}

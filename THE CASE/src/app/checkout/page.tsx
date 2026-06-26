@@ -25,6 +25,7 @@ import {
   isContactStepValid,
   isDeliveryStepValid,
   formatDeliveryCost,
+  describeQuoteIssues,
 } from "@/lib/checkout";
 import { appliedPromoCode, isPromoInSync } from "@/lib/promo";
 import { Button } from "@/components/ui/Button";
@@ -482,11 +483,26 @@ export default function CheckoutPage() {
                   Стоимость доставки уточняется. Оформление будет доступно после расчёта.
                 </p>
               )}
-              {(!fulfillable || hasIssues) && (
-                <p className="text-sm text-accent">
-                  Некоторые позиции недоступны к заказу. Обновите корзину и попробуйте снова.
-                </p>
-              )}
+              {(!fulfillable || hasIssues) &&
+                (hasIssues ? (
+                  // C25: конкретные позиции + причины недоступности (вместо generic
+                  // строки) — покупатель видит, ЧТО именно убрать/обновить в корзине.
+                  <div className="text-sm text-accent">
+                    <p>Некоторые позиции недоступны к заказу:</p>
+                    <ul className="mt-2 list-disc space-y-1 pl-5">
+                      {describeQuoteIssues(quote?.issues ?? [], cart).map((it, i) => (
+                        <li key={i}>
+                          {it.name} — {it.reason}
+                        </li>
+                      ))}
+                    </ul>
+                    <p className="mt-2">Обновите корзину и попробуйте снова.</p>
+                  </div>
+                ) : (
+                  <p className="text-sm text-accent">
+                    Некоторые позиции недоступны к заказу. Обновите корзину и попробуйте снова.
+                  </p>
+                ))}
               {error && <p className="text-sm text-accent">{error}</p>}
               <div className="flex gap-4">
                 <Button variant="outline" size="md" onClick={() => setStep(2)}>Назад</Button>

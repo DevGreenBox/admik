@@ -3,7 +3,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { Minus, Plus, Trash2, ShoppingBag } from "lucide-react";
-import { useStore, useHydrated, selectCartTotal } from "@/lib/store";
+import { useStore, useHydrated, selectCartTotal, isAtStockLimit } from "@/lib/store";
 import { formatPrice } from "@/lib/format";
 import { Button } from "@/components/ui/Button";
 import { FadeIn } from "@/components/ui/Animations";
@@ -96,7 +96,8 @@ export default function CartPage() {
                           onClick={() =>
                             updateQuantity(item.variantId, item.quantity + 1)
                           }
-                          className="p-2 hover:bg-surface transition-colors"
+                          disabled={isAtStockLimit(item)}
+                          className="p-2 hover:bg-surface transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                           aria-label="Увеличить количество"
                         >
                           <Plus className="h-3 w-3" strokeWidth={1.5} />

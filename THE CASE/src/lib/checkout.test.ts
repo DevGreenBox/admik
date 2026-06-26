@@ -6,6 +6,8 @@ import {
   isDeliveryStepValid,
   fullName,
   formatDeliveryCost,
+  issueReasonLabel,
+  describeQuoteIssues,
 } from './checkout';
 import type { CartItem } from '@/types';
 
@@ -119,5 +121,50 @@ describe('formatDeliveryCost (m11)', () => {
   it('стоимость не известна (cost=null) → «Уточняется»', () => {
     expect(formatDeliveryCost(null, true, fmt)).toBe('Уточняется');
     expect(formatDeliveryCost(null, false, fmt)).toBe('Уточняется');
+  });
+});
+
+describe('issueReasonLabel (C25)', () => {
+  it('каждый код → RU-подпись', () => {
+    expect(issueReasonLabel('out_of_stock')).toBe('Нет в наличии');
+    expect(issueReasonLabel('inactive')).toBe('Снят с продажи');
+    expect(issueReasonLabel('product_not_found')).toBe('Товар недоступен');
+    expect(issueReasonLabel('variant_not_found')).toBe('Товар недоступен');
+  });
+  it('неизвестный код → fallback (forward-compat)', () => {
+    expect(issueReasonLabel('foo')).toBe('Недоступно к заказу');
+  });
+});
+
+describe('describeQuoteIssues (C25)', () => {
+  it('маппит issues в {name, reason} по индексу позиции корзины', () => {
+    const cart = [
+      item({ variantId: 'a', name: 'Халат' }),
+      item({ variantId: 'b', name: 'Костюм' }),
+      item({ variantId: 'c', name: 'Брюки' }),
+    ];
+    expect(
+      describeQuoteIssues(
+        [
+          { index: 0, code: 'out_of_stock' },
+          { index: 2, code: 'inactive' },
+        ],
+        cart,
+      ),
+    ).toEqual([
+      { name: 'Халат', reason: 'Нет в наличии' },
+      { name: 'Брюки', reason: 'Снят с продажи' },
+    ]);
+  });
+
+  it('индекс вне диапазона → «Позиция N» (N = index + 1)', () => {
+    const cart = [item({ name: 'Халат' })];
+    expect(describeQuoteIssues([{ index: 5, code: 'out_of_stock' }], cart)).toEqual([
+      { name: 'Позиция 6', reason: 'Нет в наличии' },
+    ]);
+  });
+
+  it('пустой список issues → []', () => {
+    expect(describeQuoteIssues([], [item()])).toEqual([]);
   });
 });

@@ -9,6 +9,8 @@
  * Чистые функции (без сети/React) — легко тестируются.
  */
 
+import type { ResolvedContacts } from '@/lib/store-settings';
+
 export interface SiteNavLink {
   href: string;
   label: string;
@@ -120,6 +122,36 @@ export function buildHeaderNav(opts: {
     ...(infoLink ? [infoLink] : []),
   ];
   return { left, right: [...DEFAULT_NAV_RIGHT] };
+}
+
+/**
+ * Классы панели выпадающего подменю шапки (C9). Вынесены из inline-строки
+ * Header.tsx, чтобы покрыть юнит-тестом доступность с клавиатуры: помимо hover
+ * добавлены `group-focus-within/nav` варианты — при фокусе на триггере внутри
+ * `group/nav` панель становится видимой, и её дочерние ссылки попадают в tab-order
+ * (иначе `invisible` выкидывает их из навигации клавиатурой, нарушая WCAG 2.1.1).
+ */
+export const NAV_DROPDOWN_PANEL_CLASS =
+  'invisible absolute left-0 top-full pt-4 opacity-0 transition-opacity duration-300 ' +
+  'group-hover/nav:visible group-hover/nav:opacity-100 ' +
+  'group-focus-within/nav:visible group-focus-within/nav:opacity-100';
+
+/**
+ * Соцссылки футера (C10/C21). Чистая, мультитенантная — без хардкода под магазин.
+ *  - заданы соцсети владельца → маппим `{type,url}` в `{label,href}` (порядок сохр.);
+ *  - иначе показываем ТОЛЬКО Telegram и лишь при валидном `telegramUrl` (никакого
+ *    Instagram-якоря "#": реального дефолтного URL для него нет);
+ *  - финальный фильтр отбрасывает любые пустые/`"#"` ссылки — на витрине никогда не
+ *    появляется мёртвый якорь, даже если соцсеть настроена с пустым URL.
+ */
+export function resolveSocialLinks(c: ResolvedContacts): SiteNavLink[] {
+  const links: SiteNavLink[] =
+    c.socials.length > 0
+      ? c.socials.map((s) => ({ label: s.type, href: s.url }))
+      : c.telegramUrl
+        ? [{ label: 'Telegram', href: c.telegramUrl }]
+        : [];
+  return links.filter((l) => l.href && l.href.trim() !== '' && l.href !== '#');
 }
 
 export interface FooterColumn {

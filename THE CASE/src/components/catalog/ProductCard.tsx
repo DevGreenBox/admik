@@ -6,6 +6,7 @@ import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
 import { X } from "lucide-react";
 import { BESTSELLER_HOVER } from "@/lib/images";
+import { brandLabel } from "@/lib/brand-label";
 import { useStore, useHydrated } from "@/lib/store";
 import {
   getProduct,
@@ -68,6 +69,12 @@ export function ProductCard({ product, priority = false, size = "default" }: Pro
                   {product.name}
                 </h3>
               </Link>
+              {/* Бренд товара (C23) — плейн-текст; показываем только когда задан. */}
+              {brandLabel(product) && (
+                <p className="label-caps text-muted mt-2 text-[9px] tracking-[0.26em] truncate">
+                  {brandLabel(product)}
+                </p>
+              )}
               {outOfStock ? (
                 <p className="label-caps text-muted mt-2.5 text-[9px] tracking-[0.26em]">Нет в наличии</p>
               ) : product.isNew ? (
@@ -218,6 +225,7 @@ function QuickViewModal({
               </div>
               <div className="flex flex-col justify-center py-2">
                 <p className="eyebrow mb-5">Quick view</p>
+                {brandLabel(view) && <p className="eyebrow text-muted mb-2">{brandLabel(view)}</p>}
                 <h3 className="heading-md mb-5">{view.name}</h3>
                 <div className="mb-10">
                   <PriceDisplay product={view} className="text-sm tracking-[0.08em]" />

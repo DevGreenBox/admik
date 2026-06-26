@@ -9,7 +9,7 @@ import { categoryLinks } from "@/lib/catalog-view";
 import { subscribeNewsletter } from "@/lib/admik";
 import type { AdmikCategoryDto } from "@/lib/admik";
 import type { ResolvedContacts } from "@/lib/store-settings";
-import { resolveFooterColumns, type FooterColumn } from "@/lib/site-nav";
+import { resolveFooterColumns, resolveSocialLinks, type FooterColumn } from "@/lib/site-nav";
 import { submitNewsletter } from "@/lib/newsletter-form";
 
 const FOOTER_LINKS = {
@@ -110,14 +110,9 @@ export function Footer({
     ...categoryLinks(categories, 4).map((cat) => ({ href: cat.href, label: cat.name })),
   ];
 
-  // Соцсети: из настроек (G-08), иначе дефолтные Instagram/Telegram витрины.
-  const socialLinks =
-    c.socials.length > 0
-      ? c.socials.map((s) => ({ label: s.type, href: s.url }))
-      : [
-          { label: "Instagram", href: "#" },
-          { label: "Telegram", href: c.telegramUrl ?? CONTACTS_FALLBACK.telegramUrl! },
-        ];
+  // Соцсети: из настроек (G-08), иначе только рабочий Telegram (никаких мёртвых
+  // якорей вроде Instagram "#") — логика в чистой resolveSocialLinks (C10/C21).
+  const socialLinks = resolveSocialLinks(c);
 
   return (
     <footer id="contacts" className="relative bg-graphite text-white mt-32 md:mt-40 lg:mt-48 overflow-hidden">

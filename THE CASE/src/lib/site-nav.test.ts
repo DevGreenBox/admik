@@ -3,9 +3,25 @@ import {
   buildInfoLinks,
   buildHeaderNav,
   resolveFooterColumns,
+  resolveSocialLinks,
+  NAV_DROPDOWN_PANEL_CLASS,
   DEFAULT_NAV_RIGHT,
   CATALOG_FACETS,
 } from './site-nav';
+import type { ResolvedContacts } from './store-settings';
+
+/** ResolvedContacts с переопределяемыми соцсетями/телеграмом (для resolveSocialLinks). */
+function contacts(over: Partial<ResolvedContacts> = {}): ResolvedContacts {
+  return {
+    phoneDisplay: '+7 (000) 000-00-00',
+    phoneTel: '+70000000000',
+    email: 'hello@shop.ru',
+    telegramHandle: '@shop',
+    telegramUrl: 'https://t.me/shop',
+    socials: [],
+    ...over,
+  };
+}
 
 describe('buildInfoLinks (авто-навигация из страниц Контента)', () => {
   it('каждая опубликованная страница становится кликабельной ссылкой /{slug}', () => {
@@ -142,5 +158,58 @@ describe('resolveFooterColumns — колонки футера (#18) с авто
   it('все страницы уже представлены в колонках → колонка «Информация» не добавляется', () => {
     const infoLinks = [{ href: '/payment', label: 'Оплата' }];
     expect(resolveFooterColumns({ defaultColumns, infoLinks })).toEqual(defaultColumns);
+  });
+});
+
+describe('NAV_DROPDOWN_PANEL_CLASS — выпадашка шапки открывается с клавиатуры (C9)', () => {
+  it('добавляет focus-within варианты (доступность с Tab), сохраняя hover', () => {
+    // Клавиатурная навигация: фокус на триггере внутри group/nav должен делать
+    // панель видимой (group-focus-within), иначе дети выпадают из tab-order.
+    expect(NAV_DROPDOWN_PANEL_CLASS).toContain('group-focus-within/nav:visible');
+    expect(NAV_DROPDOWN_PANEL_CLASS).toContain('group-focus-within/nav:opacity-100');
+    // Hover-поведение не теряем.
+    expect(NAV_DROPDOWN_PANEL_CLASS).toContain('group-hover/nav:visible');
+    expect(NAV_DROPDOWN_PANEL_CLASS).toContain('group-hover/nav:opacity-100');
+  });
+});
+
+describe('resolveSocialLinks — соцссылки футера без битых якорей (C10/C21)', () => {
+  it('пустые socials + telegram → один рабочий Telegram, без "#"/Instagram', () => {
+    const links = resolveSocialLinks(contacts({ socials: [], telegramUrl: 'https://t.me/acme' }));
+    expect(links).toEqual([{ label: 'Telegram', href: 'https://t.me/acme' }]);
+    expect(links.every((l) => l.href !== '#')).toBe(true);
+    expect(links.some((l) => l.label === 'Instagram')).toBe(false);
+  });
+
+  it('пустые socials без telegram → [] (никаких мёртвых ссылок)', () => {
+    expect(resolveSocialLinks(contacts({ socials: [], telegramUrl: null }))).toEqual([]);
+  });
+
+  it('заданные socials маппятся в {label,href} с сохранением порядка', () => {
+    const links = resolveSocialLinks(
+      contacts({
+        socials: [
+          { type: 'Instagram', url: 'https://instagram.com/acme' },
+          { type: 'Telegram', url: 'https://t.me/acme' },
+        ],
+      }),
+    );
+    expect(links).toEqual([
+      { label: 'Instagram', href: 'https://instagram.com/acme' },
+      { label: 'Telegram', href: 'https://t.me/acme' },
+    ]);
+  });
+
+  it('отбрасывает записи с пустым url и с "#"', () => {
+    const links = resolveSocialLinks(
+      contacts({
+        socials: [
+          { type: 'Instagram', url: 'https://instagram.com/acme' },
+          { type: 'X', url: '' },
+          { type: 'VK', url: '#' },
+        ],
+      }),
+    );
+    expect(links).toEqual([{ label: 'Instagram', href: 'https://instagram.com/acme' }]);
   });
 });

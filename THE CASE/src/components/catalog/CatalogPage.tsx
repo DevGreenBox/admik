@@ -9,8 +9,10 @@ import { FadeIn } from "@/components/ui/Animations";
 import type { StorefrontProduct, AdmikCategoryDto } from "@/lib/admik";
 import {
   applyCatalogView,
+  buildCatalogHref,
   categoryTabs,
   priceRange,
+  removeFacet,
   topLevelAncestorSlug,
   type CatalogSort,
 } from "@/lib/catalog-view";
@@ -28,14 +30,26 @@ interface CatalogPageProps {
   categories: AdmikCategoryDto[];
   /** Активная категория (slug из URL; "" = «Все»). */
   activeCategory: string;
+  /** Активен серверный фасет «Распродажа» (?sale=1). */
+  sale?: boolean;
+  /** Активен серверный фасет «Новинки» (?new=1). */
+  isNew?: boolean;
 }
 
 export function CatalogPage({
   products,
   categories,
   activeCategory,
+  sale = false,
+  isNew = false,
 }: CatalogPageProps) {
   const router = useRouter();
+
+  // Параметры активных серверных фасетов (для removable-чипов и сброса, C22).
+  // Сохраняем категорию при снятии фасета; q не прокидывается в компонент, поэтому
+  // здесь не участвует (фасеты приходят из шапки/футера, без поискового запроса).
+  const facetParams = { category: activeCategory || undefined, sale, isNew };
+  const hasFacets = sale || isNew;
 
   const tabs = useMemo(() => categoryTabs(categories), [categories]);
   // Если активна подкатегория — подсвечиваем её top-level предка (таб верхнего
@@ -76,6 +90,32 @@ export function CatalogPage({
           <p className="label-caps text-muted">
             {filtered.length} из {products.length}
           </p>
+          {/* Removable-чипы активных серверных фасетов (C22): и индикатор, и снятие
+              в один клик. Видны только когда фасет включён через URL (шапка/футер). */}
+          {hasFacets && (
+            <div className="flex flex-wrap gap-2 mt-5">
+              {sale && (
+                <button
+                  onClick={() => router.push(removeFacet(facetParams, "sale"))}
+                  className="inline-flex items-center gap-2 border border-border px-3 py-1.5 text-[10px] uppercase tracking-[0.18em] text-graphite hover:border-graphite transition-colors duration-500"
+                  aria-label="Снять фильтр «Распродажа»"
+                >
+                  Распродажа
+                  <X className="h-3 w-3" strokeWidth={1.5} />
+                </button>
+              )}
+              {isNew && (
+                <button
+                  onClick={() => router.push(removeFacet(facetParams, "isNew"))}
+                  className="inline-flex items-center gap-2 border border-border px-3 py-1.5 text-[10px] uppercase tracking-[0.18em] text-graphite hover:border-graphite transition-colors duration-500"
+                  aria-label="Снять фильтр «Новинки»"
+                >
+                  Новинки
+                  <X className="h-3 w-3" strokeWidth={1.5} />
+                </button>
+              )}
+            </div>
+          )}
         </FadeIn>
       </div>
 
@@ -163,7 +203,15 @@ export function CatalogPage({
             </FilterSection>
 
             <button
-              onClick={() => { setPriceMax(range.max); setOnlyNew(false); setOnlyBestseller(false); }}
+              onClick={() => {
+                setPriceMax(range.max);
+                setOnlyNew(false);
+                setOnlyBestseller(false);
+                // Консистентность (C22): если активны серверные фасеты — сбрасываем и
+                // их (URL), а не только клиентское состояние, иначе «Сбросить» вводит
+                // в заблуждение (фасет остаётся включённым).
+                if (hasFacets) router.push(buildCatalogHref({ category: activeCategory || undefined }));
+              }}
               className="w-full mt-8 py-4 text-[10px] uppercase tracking-[0.2em] border border-border hover:border-graphite transition-colors duration-500"
             >
               Сбросить

@@ -189,6 +189,36 @@ export function categoryLinks(
     .map((c) => ({ slug: c.slug, name: c.name, href: catHref(c.slug) }));
 }
 
+/**
+ * Серверные фасеты каталога (C22). Чистая сборка URL `/catalog?...` с сохранением
+ * категории/поиска и флагов `sale`/`new`. Используется для removable-чипов активных
+ * фасетов на витрине каталога: даёт И индикацию активного фасета, И снятие в один
+ * клик. Мультитенантно — никакой привязки к конкретному магазину.
+ */
+export interface CatalogFacetParams {
+  category?: string;
+  q?: string;
+  sale?: boolean;
+  isNew?: boolean;
+}
+
+export function buildCatalogHref(params: CatalogFacetParams): string {
+  const parts: string[] = [];
+  if (params.category) parts.push(`category=${encodeURIComponent(params.category)}`);
+  if (params.q) parts.push(`q=${encodeURIComponent(params.q)}`);
+  if (params.sale) parts.push('sale=1');
+  if (params.isNew) parts.push('new=1');
+  return parts.length > 0 ? `/catalog?${parts.join('&')}` : '/catalog';
+}
+
+/** Снимает один фасет (`sale`/`isNew`), сохраняя остальные параметры. */
+export function removeFacet(
+  params: CatalogFacetParams,
+  facet: 'sale' | 'isNew',
+): string {
+  return buildCatalogHref({ ...params, [facet]: false });
+}
+
 /** Сортировка товаров (не мутирует вход). */
 export function sortProducts(
   products: StorefrontProduct[],

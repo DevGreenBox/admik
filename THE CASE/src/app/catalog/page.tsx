@@ -54,6 +54,8 @@ export default async function Catalog({
       products={products}
       categories={categories}
       activeCategory={category ?? ""}
+      sale={sale ?? false}
+      isNew={isNew ?? false}
     />
   );
 }

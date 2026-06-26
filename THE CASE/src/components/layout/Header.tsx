@@ -7,7 +7,7 @@ import { Search, ShoppingBag, Heart, User, Menu, X } from "lucide-react";
 import { Logo } from "@/components/ui/Logo";
 import { selectCartCount, selectWishlistCount, useStore } from "@/lib/store";
 import { flattenCategoryNav } from "@/lib/catalog-view";
-import { buildHeaderNav } from "@/lib/site-nav";
+import { buildHeaderNav, NAV_DROPDOWN_PANEL_CLASS } from "@/lib/site-nav";
 import type { AdmikCategoryDto } from "@/lib/admik";
 
 export function Header({
@@ -71,10 +71,10 @@ export function Header({
                 {NAV_LEFT.map((link) =>
                   link.children ? (
                     <div key={`${link.href}-${link.label}`} className="relative group/nav flex items-center">
-                      <Link href={link.href} className="eyebrow leading-none whitespace-nowrap text-graphite link-underline">
+                      <Link href={link.href} aria-haspopup="menu" className="eyebrow leading-none whitespace-nowrap text-graphite link-underline">
                         {link.label}
                       </Link>
-                      <div className="invisible absolute left-0 top-full pt-4 opacity-0 transition-opacity duration-300 group-hover/nav:visible group-hover/nav:opacity-100">
+                      <div className={NAV_DROPDOWN_PANEL_CLASS}>
                         <div className="flex min-w-[170px] flex-col gap-3 border border-border bg-white px-5 py-4">
                           {link.children.map((child) => (
                             <Link

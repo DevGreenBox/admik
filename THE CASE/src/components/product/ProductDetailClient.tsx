@@ -5,6 +5,8 @@ import Link from "next/link";
 import { Heart, Minus, Plus } from "lucide-react";
 import { formatPrice } from "@/lib/format";
 import { productCtaLabel } from "@/lib/product-cta";
+import { brandLabel } from "@/lib/brand-label";
+import { variantUnavailableLabel } from "@/lib/variant-availability";
 import { useStore, useHydrated } from "@/lib/store";
 import type { StorefrontProduct, StorefrontVariant } from "@/lib/admik";
 import { Button } from "@/components/ui/Button";
@@ -46,6 +48,8 @@ export function ProductDetailClient({ product, related }: ProductDetailClientPro
   const isInWishlist = hydrated && isInWishlistRaw;
 
   const hasVariants = product.variants.length > 0;
+  // Бренд товара (C23) — плейн-текст над названием; null, если бренд не задан.
+  const brand = brandLabel(product);
   const selectedSize = selectedVariant?.size ?? null;
   // Есть ли хоть один размер в наличии (иначе кнопка должна честно сказать
   // «Нет в наличии», а не «Выберите размер» — выбирать нечего).
@@ -140,6 +144,7 @@ export function ProductDetailClient({ product, related }: ProductDetailClientPro
                 {product.isNew && (
                   <p className="eyebrow mb-4">New</p>
                 )}
+                {brand && <p className="eyebrow text-muted mb-2">{brand}</p>}
                 <h1 className="heading-lg heading-rule">{product.name}</h1>
               </div>
 
@@ -162,25 +167,33 @@ export function ProductDetailClient({ product, related }: ProductDetailClientPro
                     <SizeGuide gender={product.gender} />
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    {product.variants.map((variant) => (
-                      <button
-                        key={variant.id}
-                        disabled={!variant.inStock}
-                        onClick={() => {
-                          setSelectedVariant(variant);
-                          setAdded(false);
-                          // Не оставляем количество больше остатка нового размера.
-                          setQuantity((q) => Math.min(q, Math.max(1, variant.availableQty)));
-                        }}
-                        className={`min-w-[48px] px-4 py-3 text-[10px] uppercase tracking-[0.15em] border transition-all duration-500 disabled:opacity-30 disabled:cursor-not-allowed ${
-                          selectedVariant?.id === variant.id
-                            ? "border-graphite bg-graphite text-white"
-                            : "border-border hover:border-graphite"
-                        }`}
-                      >
-                        {variant.size}
-                      </button>
-                    ))}
+                    {product.variants.map((variant) => {
+                      // C28: причина недоступности размера → title + aria-label, чтобы
+                      // приглушённая кнопка озвучивалась скринридером не просто как
+                      // «dimmed», а с причиной (title один не закрывает touch-устройства).
+                      const reason = variantUnavailableLabel(variant);
+                      return (
+                        <button
+                          key={variant.id}
+                          disabled={!variant.inStock}
+                          title={reason ?? undefined}
+                          aria-label={reason ?? undefined}
+                          onClick={() => {
+                            setSelectedVariant(variant);
+                            setAdded(false);
+                            // Не оставляем количество больше остатка нового размера.
+                            setQuantity((q) => Math.min(q, Math.max(1, variant.availableQty)));
+                          }}
+                          className={`min-w-[48px] px-4 py-3 text-[10px] uppercase tracking-[0.15em] border transition-all duration-500 disabled:opacity-30 disabled:cursor-not-allowed disabled:line-through ${
+                            selectedVariant?.id === variant.id
+                              ? "border-graphite bg-graphite text-white"
+                              : "border-border hover:border-graphite"
+                          }`}
+                        >
+                          {variant.size}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               )}

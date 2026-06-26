@@ -102,3 +102,44 @@ export function formatDeliveryCost(
   if (!available || cost === null) return 'Уточняется';
   return cost === 0 ? 'Бесплатно' : format(cost);
 }
+
+/**
+ * RU-подпись причины недоступности позиции по коду `quote.issues[].code` (C25).
+ * Дженерик, без привязки к магазину. Неизвестный код → нейтральный fallback
+ * (forward-compat контракта: новый код бэкенда не уронит отображение).
+ */
+export function issueReasonLabel(code: string): string {
+  switch (code) {
+    case 'out_of_stock':
+      return 'Нет в наличии';
+    case 'inactive':
+      return 'Снят с продажи';
+    case 'product_not_found':
+    case 'variant_not_found':
+      return 'Товар недоступен';
+    default:
+      return 'Недоступно к заказу';
+  }
+}
+
+/** Описание недоступной позиции для показа на чекауте. */
+export interface QuoteIssueDescription {
+  name: string;
+  reason: string;
+}
+
+/**
+ * Сопоставляет `quote.issues[]` (index в `cart` + код) человекочитаемым именам и
+ * причинам (C25). `index` адресует `cart[index]` 1:1 (cartToItems сохраняет
+ * порядок). Пустое имя/индекс вне диапазона → fallback «Позиция N».
+ */
+export function describeQuoteIssues(
+  issues: Array<{ index: number; code: string }>,
+  cart: CartItem[],
+): QuoteIssueDescription[] {
+  return issues.map((issue) => {
+    const item = cart[issue.index];
+    const name = item?.name?.trim() ? item.name : `Позиция ${issue.index + 1}`;
+    return { name, reason: issueReasonLabel(issue.code) };
+  });
+}

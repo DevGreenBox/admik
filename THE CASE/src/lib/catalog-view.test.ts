@@ -8,6 +8,8 @@ import {
   topLevelAncestorSlug,
   resolveCategoryHref,
   categoryLinks,
+  buildCatalogHref,
+  removeFacet,
 } from "@/lib/catalog-view";
 import type { StorefrontProduct, AdmikCategoryDto } from "@/lib/admik";
 
@@ -298,6 +300,38 @@ describe("sortProducts", () => {
     const copy = [...products];
     sortProducts(products, "price-asc");
     expect(products).toEqual(copy);
+  });
+});
+
+describe("buildCatalogHref / removeFacet — управление фасетами URL (C22)", () => {
+  it("пустые параметры → /catalog", () => {
+    expect(buildCatalogHref({})).toBe("/catalog");
+  });
+
+  it("только распродажа → /catalog?sale=1", () => {
+    expect(buildCatalogHref({ sale: true })).toBe("/catalog?sale=1");
+  });
+
+  it("категория + оба фасета сохраняются (порядок зафиксирован)", () => {
+    expect(buildCatalogHref({ category: "women", sale: true, isNew: true })).toBe(
+      "/catalog?category=women&sale=1&new=1",
+    );
+  });
+
+  it("q пробрасывается с encodeURIComponent", () => {
+    expect(buildCatalogHref({ q: "белый халат" })).toBe(
+      "/catalog?q=%D0%B1%D0%B5%D0%BB%D1%8B%D0%B9%20%D1%85%D0%B0%D0%BB%D0%B0%D1%82",
+    );
+  });
+
+  it("removeFacet снимает один фасет, сохраняя остальные", () => {
+    expect(removeFacet({ category: "women", sale: true, isNew: true }, "sale")).toBe(
+      "/catalog?category=women&new=1",
+    );
+  });
+
+  it("снятие последнего фасета даёт чистый /catalog", () => {
+    expect(removeFacet({ sale: true }, "sale")).toBe("/catalog");
   });
 });
 
