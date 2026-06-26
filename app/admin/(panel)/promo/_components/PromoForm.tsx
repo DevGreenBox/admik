@@ -280,6 +280,9 @@ export function PromoForm({
             inputMode="decimal"
             className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" />
           {fe('minOrderTotal') ? <p className="mt-1 text-xs text-red-600">{fe('minOrderTotal')}</p> : null}
+          <p className="mt-1 text-xs text-gray-500">
+            Минимальная сумма заказа для срабатывания акции. Пусто — без порога.
+          </p>
         </div>
 
         <div>
@@ -447,6 +450,11 @@ export function PromoForm({
             inputMode="numeric" placeholder="без порога"
             className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm" />
           {fe('minQty') ? <p className="mt-1 text-xs text-red-600">{fe('minQty')}</p> : null}
+          <p className="mt-1 text-xs text-gray-500">
+            Скидка применится, только если в корзине набрано не меньше указанного числа
+            единиц товаров из «Области применения». Оставьте пусто — без ограничения по
+            количеству.
+          </p>
         </div>
 
         {SHOW_GIFT_BLOCK ? (
