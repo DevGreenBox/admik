@@ -530,3 +530,35 @@ describe('updateRole / deleteRole — однопользовательский �
     expect(ranDelete).toBe(false);
   });
 });
+
+// F1 security-review: блок применяется ко ВСЕМ 6 user/role-мутациям, не только к
+// create*. Тесты ниже инвентаризируют оставшиеся два (updateUser/resetUserPassword),
+// чтобы будущая правка не сняла guard незаметно.
+describe('updateUser / resetUserPassword — однопользовательский режим', () => {
+  it('updateUser при включённом режиме → отказ, UPDATE users НЕ выполняется', async () => {
+    h.currentUser.value = ownerUser();
+    h.singleUserMode.value = true;
+
+    const res = await updateUser({ id: TARGET, displayName: 'Hacked' });
+
+    expect(res.ok).toBe(false);
+    if (res.ok) throw new Error('ожидался отказ');
+    expect(res.message).toBe('Однопользовательский режим: управление пользователями отключено.');
+    const ranUpdate = h.state.sqlCalls.some((c) => /UPDATE\s+users\s+SET/i.test(c.text));
+    expect(ranUpdate).toBe(false);
+  });
+
+  it('resetUserPassword при включённом режиме → отказ, без хеша пароля и UPDATE', async () => {
+    h.currentUser.value = ownerUser();
+    h.singleUserMode.value = true;
+
+    const res = await resetUserPassword({ id: TARGET, password: 'newsecret1' });
+
+    expect(res.ok).toBe(false);
+    if (res.ok) throw new Error('ожидался отказ');
+    expect(res.message).toBe('Однопользовательский режим: управление пользователями отключено.');
+    expect(h.hashPassword).not.toHaveBeenCalled();
+    const ranUpdate = h.state.sqlCalls.some((c) => /UPDATE\s+users\s+SET/i.test(c.text));
+    expect(ranUpdate).toBe(false);
+  });
+});
