@@ -13,16 +13,6 @@ import { resolveFooterColumns, resolveSocialLinks, type FooterColumn } from "@/l
 import { submitNewsletter } from "@/lib/newsletter-form";
 
 const FOOTER_LINKS = {
-  service: [
-    { href: "/#delivery", label: "Доставка" },
-    { href: "/payment", label: "Оплата" },
-    { href: "/returns", label: "Обмен и возврат" },
-    { href: "/care", label: "Уход за вещами" },
-    { href: "/reviews", label: "ВЫ + THE CASE" },
-    { href: "/account", label: "Личный кабинет" },
-    // «Избранное» (#27): дублируем в футер для обнаружимости (иначе только иконка).
-    { href: "/wishlist", label: "Избранное" },
-  ],
   legal: [
     { href: "/privacy", label: "Обработка персональных данных" },
     { href: "/terms", label: "Пользовательское соглашение" },
@@ -30,9 +20,10 @@ const FOOTER_LINKS = {
 };
 
 // Колонки футера по умолчанию (если настройки навигации пусты).
+// Правка Саша/Аня: колонка «Service» убрана целиком (её сервисные ссылки
+// доступны из шапки и блока «Поддержка»); оставлена только правовая информация.
 const DEFAULT_COLUMNS = [
-  { title: "Service", links: FOOTER_LINKS.service },
-  { title: "Legal", links: FOOTER_LINKS.legal },
+  { title: "Правовая информация", links: FOOTER_LINKS.legal },
 ];
 
 const CONTACTS_FALLBACK: ResolvedContacts = {
@@ -89,7 +80,7 @@ export function Footer({
     }
     setSubPending(false);
   };
-  // Колонки футера: из настроек Admik (G-11), иначе дефолтные (Сервис/Legal). Сверху
+  // Колонки футера: из настроек Admik (G-11), иначе дефолтные (Правовая информация). Сверху
   // — авто-колонка «Информация» с опубликованными страницами, которых ещё нет в
   // выбранных колонках (без дублей), чтобы любая страница была достижима кликом
   // (нет «осиротевших»). Логика — в чистой resolveFooterColumns (с юнит-тестами).
@@ -129,7 +120,8 @@ export function Footer({
             </div>
 
             <div className="md:col-span-2">
-              <h4 className="eyebrow text-white/40 mb-6">Shop</h4>
+              {/* Правка Саша/Аня: надзаголовок «Shop» → «Магазин» (ссылки каталога). */}
+              <h4 className="eyebrow text-white/40 mb-6">Магазин</h4>
               <ul className="space-y-3">
                 {shopLinks.map((link) => (
                   <li key={link.href}>
@@ -141,8 +133,23 @@ export function Footer({
               </ul>
             </div>
 
-            {/* Колонки из настроек (G-11) или дефолтные. Под первой — «Поддержка»,
-                под последней — соцсети (как в исходном футере). */}
+            {/* «Поддержка» — отдельная колонка (раньше была пришита к колонке
+                «Service», которую убрали): контакты магазина из настроек (G-01/G-08). */}
+            <div className="md:col-span-2">
+              <h4 className="eyebrow text-white/40 mb-6">Поддержка</h4>
+              <div className="space-y-3 text-[11px] text-white/55">
+                {c.telegramUrl ? (
+                  <a href={c.telegramUrl} target="_blank" rel="noopener noreferrer" className="block hover:text-white transition-colors">
+                    Написать в Telegram
+                  </a>
+                ) : null}
+                <a href={`tel:${c.phoneTel}`} className="block hover:text-white transition-colors">Позвонить</a>
+                <a href={`mailto:${c.email}`} className="block hover:text-white transition-colors">{c.email}</a>
+              </div>
+            </div>
+
+            {/* Колонки из настроек (G-11) или дефолтные (Правовая информация +
+                авто-«Информация»). Под последней — соцсети (как в исходном футере). */}
             {cols.map((col, ci) => (
               <div key={ci} className="md:col-span-2">
                 <h4 className="eyebrow text-white/40 mb-6">{col.title}</h4>
@@ -155,19 +162,6 @@ export function Footer({
                     </li>
                   ))}
                 </ul>
-
-                {ci === 0 ? (
-                  <div className="mt-8 space-y-3 text-[11px] text-white/55">
-                    <p className="eyebrow text-white/40">Поддержка</p>
-                    {c.telegramUrl ? (
-                      <a href={c.telegramUrl} target="_blank" rel="noopener noreferrer" className="block hover:text-white transition-colors">
-                        Написать в Telegram
-                      </a>
-                    ) : null}
-                    <a href={`tel:${c.phoneTel}`} className="block hover:text-white transition-colors">Позвонить</a>
-                    <a href={`mailto:${c.email}`} className="block hover:text-white transition-colors">{c.email}</a>
-                  </div>
-                ) : null}
 
                 {ci === lastCol ? (
                   <div className="mt-8 flex gap-6">
@@ -182,7 +176,7 @@ export function Footer({
             ))}
 
             <div className="md:col-span-3">
-              <h4 className="eyebrow text-white/40 mb-6">Newsletter</h4>
+              <h4 className="eyebrow text-white/40 mb-6">Рассылка</h4>
               <p className="text-[11px] text-white/55 leading-relaxed mb-6">
                 Новости коллекций и эксклюзивные материалы бренда.
               </p>

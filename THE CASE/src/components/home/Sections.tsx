@@ -79,9 +79,9 @@ export function HomeBanner({ hero = HOME_FALLBACK.hero }: { hero?: ResolvedHome[
  */
 export function CoverSlides({ quality = HOME_FALLBACK.quality }: { quality?: ResolvedHome["quality"] }) {
   return (
-    // Правка 3: уменьшен нижний отступ — промежуток до блока «Коллекция» был
-    // слишком большим (стек section-space-sm + section-space).
-    <section className="pt-24 pb-12 md:pt-36 md:pb-16 lg:pt-44 lg:pb-20">
+    // Правка 3 + Саша-3/Аня-3: уменьшены отступы — промежуток до блока «Коллекция»
+    // был слишком большим; вертикальный ритм сокращён консистентно по всей главной.
+    <section className="pt-16 pb-10 md:pt-24 md:pb-12 lg:pt-28 lg:pb-16">
       <div className="container-brand">
         <FadeIn>
           <div className="grid grid-cols-1 items-center gap-10 bg-surface p-8 md:p-14 lg:grid-cols-2 lg:gap-16">
@@ -138,7 +138,7 @@ export function CoverSlides({ quality = HOME_FALLBACK.quality }: { quality?: Res
 /** Medical Fashion — text block */
 export function EditorialIntro() {
   return (
-    <section className="section-space-sm pb-20 md:pb-32 lg:pb-40">
+    <section className="section-space-sm pb-14 md:pb-20 lg:pb-28">
       <div className="container-brand">
         <FadeIn>
           <div className="max-w-xl mx-auto text-center py-8 md:py-12">
@@ -174,7 +174,7 @@ export function ValuesStrip({
   if (!values.enabled || items.length === 0) return null;
 
   return (
-    <section className="border-y border-border bg-surface py-16 md:py-20 lg:py-24">
+    <section className="border-y border-border bg-surface py-12 md:py-16 lg:py-20">
       <div className="container-brand">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-12 md:gap-8 lg:gap-12">
           {items.map((item, i) => (
@@ -237,8 +237,8 @@ export function EditorialPair({
     <section className="section-space-sm">
       <div className="container-brand">
         <FadeIn>
-          <p className="eyebrow mb-6">Silhouette</p>
-          <h2 className="heading-lg heading-rule mb-16 md:mb-20 lg:mb-24">Editorial</h2>
+          <p className="eyebrow mb-6">Силуэт</p>
+          <h2 className="heading-lg heading-rule mb-16 md:mb-20 lg:mb-24">Образы</h2>
         </FadeIn>
 
         <div className="grid grid-cols-1 md:grid-cols-12 gap-4 md:gap-6 lg:gap-8">
@@ -246,8 +246,8 @@ export function EditorialPair({
             <EditorialCard
               src={IMAGES.editorial.womenPortrait}
               hoverSrc={EDITORIAL_HOVER.women}
-              alt="Women"
-              label="Women"
+              alt="Женское"
+              label="Женское"
               href={resolveCategoryHref(categories, "women")}
               aspect="aspect-[3/4]"
               delay={0}
@@ -257,8 +257,8 @@ export function EditorialPair({
             <EditorialCard
               src={IMAGES.editorial.menPortrait}
               hoverSrc={EDITORIAL_HOVER.men}
-              alt="Men"
-              label="Men"
+              alt="Мужское"
+              label="Мужское"
               href={resolveCategoryHref(categories, "men")}
               aspect="aspect-[3/5] md:aspect-[4/5]"
               delay={0.1}
@@ -268,8 +268,8 @@ export function EditorialPair({
             <EditorialCard
               src={IMAGES.editorial.duo}
               hoverSrc={EDITORIAL_HOVER.duo}
-              alt="Duo"
-              label="Duo"
+              alt="Дуэт"
+              label="Дуэт"
               href="/catalog"
               aspect="aspect-[4/3] md:aspect-[21/9]"
               delay={0.18}
@@ -290,7 +290,7 @@ function CategoryViews({
   views: readonly string[];
   href: string;
 }) {
-  const viewLabels = ["Front", "Side", "Back"];
+  const viewLabels = ["Спереди", "Сбоку", "Сзади"];
 
   return (
     <div className="mx-auto grid max-w-3xl grid-cols-1 gap-4 md:grid-cols-3 md:gap-6 lg:gap-8">
@@ -337,9 +337,9 @@ export function Collection({
   const href = resolveCategoryHref(categories, current.hint);
 
   return (
-    // Правка 3: верхний отступ сокращён (до этого section-space сверху давал
-    // избыточный разрыв с блоком «Создано вместе с врачами»).
-    <section id="shop" className="pt-16 pb-32 md:pt-20 md:pb-44 lg:pt-24 lg:pb-52">
+    // Правка 3 + Саша-3/Аня-3: верхний и нижний отступы сокращены (единый ритм
+    // главной; прежние pb-32/44/52 давали избыточный разрыв с блоком ниже).
+    <section id="shop" className="pt-12 pb-20 md:pt-16 md:pb-28 lg:pt-20 lg:pb-32">
       <div className="container-brand">
         <FadeIn>
           <h2 className="heading-lg heading-rule mb-10 md:mb-12 max-w-2xl">
@@ -400,7 +400,7 @@ export function ShopCategories({
   categories?: AdmikCategoryDto[];
 }) {
   return (
-    <section className="section-space-sm pb-28 md:pb-36 lg:pb-44">
+    <section className="section-space-sm pb-20 md:pb-28 lg:pb-32">
       <div className="container-brand">
         <FadeIn>
           <p className="eyebrow mb-6 text-center md:text-left">Категории</p>
@@ -428,7 +428,7 @@ export function EditorialStatement({
   philosophy?: ResolvedHome["philosophy"];
 }) {
   return (
-    <section className="bg-graphite text-white py-16 md:py-20 lg:py-24">
+    <section className="bg-graphite text-white py-12 md:py-16 lg:py-20">
       <div className="container-brand">
         <FadeIn>
           <div className="grid grid-cols-1 gap-10 md:grid-cols-2 md:items-end md:gap-12 lg:gap-20">
@@ -473,8 +473,8 @@ export function DetailsSection() {
       <div className="container-brand">
         <FadeIn>
           <div className="max-w-xl mb-20 md:mb-28 lg:mb-32">
-            <p className="eyebrow mb-6">Craft</p>
-            <h2 className="heading-lg heading-rule mb-8">Details</h2>
+            <p className="eyebrow mb-6">Мастерство</p>
+            <h2 className="heading-lg heading-rule mb-8">Детали</h2>
             <p className="body-editorial">Ткани, посадка, функциональные элементы — каждая деталь продумана</p>
           </div>
         </FadeIn>
@@ -504,15 +504,15 @@ const ABOUT_SLIDES = [
 ];
 
 /**
- * Галерея «О бренде». Правка 7: фото уменьшены — раньше одно крупное вертикальное
- * (aspect-3/4) выходило за вьюпорт; теперь горизонтальный ряд из трёх компактных
- * кадров (aspect-3/4 в три колонки), целиком помещается на экран. Автосмена
- * акцентного кадра сохранена, точки-переключатели оставлены под рядом.
+ * Галерея «О бренде». Правка Саша-8/Аня-7: фото компактнее и переехало в правую
+ * колонку (см. About) — теперь это ОДИН вертикальный кадр (aspect-3/4) в рамке,
+ * с автосменой и точками-переключателями под ним. Узкая правая колонка делает
+ * фото визуально меньше текста (≈40% ширины), без распирания вьюпорта.
  */
 function AboutGallery({ images }: { images: string[] }) {
   const [i, setI] = useState(0);
   // Находка #22: удалённое фото «О бренде» (S3/CDN) может не загрузиться — на сбой
-  // конкретного кадра подменяем его локальным слайдом, чтобы плитка не была пустой.
+  // конкретного кадра подменяем его локальным слайдом, чтобы рамка не была пустой.
   const [failed, setFailed] = useState<Set<number>>(new Set());
   useEffect(() => {
     if (images.length < 2) return;
@@ -520,44 +520,35 @@ function AboutGallery({ images }: { images: string[] }) {
     return () => clearInterval(t);
   }, [images.length]);
 
+  const activeSrc = failed.has(i) ? ABOUT_SLIDES[i % ABOUT_SLIDES.length] : images[i];
+
   return (
     <div className="relative">
-      <div className="grid grid-cols-3 gap-3 md:gap-4">
-        {images.map((src, n) => (
-          <button
-            key={src}
-            type="button"
-            onClick={() => setI(n)}
-            aria-label={`Фото ${n + 1}`}
-            aria-current={i === n}
-            className="image-luxury relative aspect-[3/4] overflow-hidden bg-surface"
-          >
-            <Image
-              src={failed.has(n) ? ABOUT_SLIDES[n % ABOUT_SLIDES.length] : src}
-              alt="THE CASE — о бренде"
-              fill
-              onError={() =>
-                setFailed((prev) => {
-                  const next = new Set(prev);
-                  next.add(n);
-                  return next;
-                })
-              }
-              className={`object-cover object-center transition-all duration-700 ${
-                i === n ? "opacity-100" : "opacity-60"
-              }`}
-              sizes="(max-width: 1024px) 33vw, 20vw"
-            />
-          </button>
-        ))}
+      <div className="image-luxury relative aspect-[3/4] overflow-hidden bg-surface">
+        <Image
+          src={activeSrc}
+          alt="THE CASE — о бренде"
+          fill
+          onError={() =>
+            setFailed((prev) => {
+              const next = new Set(prev);
+              next.add(i);
+              return next;
+            })
+          }
+          className="object-cover object-center transition-opacity duration-700"
+          sizes="(max-width: 1024px) 90vw, 40vw"
+        />
       </div>
       {images.length > 1 && (
         <div className="mt-4 flex gap-2">
           {images.map((_, n) => (
             <button
               key={n}
+              type="button"
               onClick={() => setI(n)}
               aria-label={`Показать фото ${n + 1}`}
+              aria-current={i === n}
               className={`h-1.5 rounded-full transition-all duration-500 ${i === n ? "w-8 bg-graphite" : "w-2 bg-border"}`}
             />
           ))}
@@ -568,43 +559,44 @@ function AboutGallery({ images }: { images: string[] }) {
 }
 
 /**
- * «О бренде» (правки 6, 7). Текст растянут на всю ширину сверху — раньше он жил
- * в узкой правой колонке, из-за чего слева оставалась пустота. Фото уменьшены
- * (AboutGallery). Нижний отступ секции убран (pt-only), чтобы блок визуально
- * сливался со следующим («Доставка и оплата») без разрыва.
+ * «О бренде» (правки 6, 7 + Саша-8/Аня-7). Двухколоночная композиция: слева текст
+ * (надзаголовок «О бренде», заголовок, абзацы и список ценностей, ≈60% ширины),
+ * справа — компактное фото в рамке (AboutGallery, ≈40%). На мобильном/планшете
+ * (<lg) — естественный вертикальный стек (фото уходит вниз). Нижний отступ секции
+ * убран (pt-only), чтобы блок визуально сливался со следующим («Доставка и оплата»).
  */
 export function About({ about = HOME_FALLBACK.about }: { about?: ResolvedHome["about"] }) {
   return (
-    <section id="about" className="pt-32 md:pt-44 lg:pt-52">
+    <section id="about" className="pt-20 md:pt-28 lg:pt-32">
       <div className="container-brand">
-        <FadeIn>
-          <p className="eyebrow mb-6">About</p>
-          {/* Заголовок/абзацы/ценности — из настроек Admik (G-02, settings.home.about). */}
-          <h2 className="heading-lg heading-rule mb-10 md:mb-12">{about.title}</h2>
-          <div className="grid grid-cols-1 gap-8 body-editorial lg:grid-cols-2 [&>p]:max-w-none">
-            {about.paragraphs.map((p, i) => (
-              <p key={i}>{p}</p>
-            ))}
-          </div>
-        </FadeIn>
+        <div className="grid grid-cols-1 gap-10 lg:grid-cols-5 lg:items-start lg:gap-16">
+          {/* Текст слева (~60%). Заголовок/абзацы/ценности — из настроек Admik
+              (G-02, settings.home.about). */}
+          <FadeIn className="lg:col-span-3">
+            <p className="eyebrow mb-6">О бренде</p>
+            <h2 className="heading-lg heading-rule mb-10 md:mb-12">{about.title}</h2>
+            <div className="space-y-6 body-editorial [&>p]:max-w-none">
+              {about.paragraphs.map((p, i) => (
+                <p key={i}>{p}</p>
+              ))}
+            </div>
+            <ul className="mt-12 flex flex-wrap gap-x-10 gap-y-4">
+              {about.values.map((item) => (
+                <li key={item} className="text-[10px] uppercase tracking-[0.2em] text-graphite/80">
+                  {item}
+                </li>
+              ))}
+            </ul>
+          </FadeIn>
 
-        <FadeIn delay={0.12}>
-          <div className="mt-12 md:mt-16">
-            {/* Фото галереи — из настроек (G-05, settings.home.about.imageUrls),
-                иначе дефолтные ассеты витрины. */}
-            <AboutGallery images={about.imageUrls.length > 0 ? about.imageUrls : ABOUT_SLIDES} />
-          </div>
-        </FadeIn>
-
-        <FadeIn delay={0.18}>
-          <ul className="mt-12 flex flex-wrap gap-x-10 gap-y-4 md:mt-16">
-            {about.values.map((item) => (
-              <li key={item} className="text-[10px] uppercase tracking-[0.2em] text-graphite/80">
-                {item}
-              </li>
-            ))}
-          </ul>
-        </FadeIn>
+          {/* Фото справа (~40%), меньше и в рамке. Из настроек
+              (G-05, settings.home.about.imageUrls), иначе дефолтные ассеты витрины. */}
+          <FadeIn delay={0.12} className="lg:col-span-2">
+            <div className="mx-auto max-w-sm lg:max-w-none">
+              <AboutGallery images={about.imageUrls.length > 0 ? about.imageUrls : ABOUT_SLIDES} />
+            </div>
+          </FadeIn>
+        </div>
       </div>
     </section>
   );
@@ -615,9 +607,9 @@ export function Delivery({ delivery = HOME_FALLBACK.delivery }: { delivery?: Res
   const items = delivery.items;
 
   return (
-    // Правка 6: без верхней границы и с компактным верхним отступом — блок «О бренде»
-    // и «Доставка и оплата» читаются как единое целое, без разрыва.
-    <section id="delivery" className="bg-white pt-20 pb-24 md:pt-28 md:pb-36 lg:pt-32 lg:pb-44">
+    // Правка 6 + Саша-3/Аня-3: без верхней границы и с компактным верхним отступом —
+    // блок «О бренде» и «Доставка и оплата» читаются как единое целое; ритм сокращён.
+    <section id="delivery" className="bg-white pt-14 pb-16 md:pt-20 md:pb-24 lg:pt-24 lg:pb-28">
       <div className="container-brand">
         <FadeIn>
           <div className="max-w-xl mb-16 md:mb-24 lg:mb-28">
