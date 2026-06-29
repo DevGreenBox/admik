@@ -8,10 +8,17 @@
 --      (slug zhenskie/muzhskie — пол выводится из slug адаптером витрины
 --      resolveGender; заодно демонстрирует второй ряд подкатегорий на /catalog — B8);
 --   3) создаёт 6 demo-товаров (status active, is_featured=true) с привязкой к полу;
---   4) фото = обложка коллекции витрины: product_media.url = относительный путь
---      /images/categories/*.webp (THE CASE/public) — repository отдаёт primaryMediaUrl
---      из колонки url напрямую, поэтому относительный путь рендерится из public витрины
---      (без загрузки в MinIO);
+--   4) фото = обложка коллекции витрины, ЗАЛИТАЯ В MinIO (bucket admik-media,
+--      ключи products/demo/*.webp). ВАЖНО: относительный путь /images/... НЕЛЬЗЯ —
+--      он рендерится только на витрине (её public), а в АДМИНКЕ (другой домен) даёт
+--      битую картинку (404). Поэтому url = публичный S3-URL (admin-домен/media/...),
+--      который грузится И в админке (свой домен), И на витрине (хост в next/image
+--      remotePatterns). ПРЕДУСЛОВИЕ — загрузить файлы в MinIO один раз:
+--        # на стенде:
+--        docker compose cp storefront:/app/public/images/categories/<f>.webp /tmp/m/<f>.webp  # x6
+--        docker compose cp /tmp/m/. minio:/tmp/m/
+--        docker compose exec -T minio sh -c 'mc alias set local http://localhost:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; \
+--          for f in women-front women-side women-back men-front men-side men-back; do mc cp /tmp/m/$f.webp local/admik-media/products/demo/$f.webp; done'
 --   5) остатки 20 шт (в наличии).
 --
 -- Запуск на стенде:
@@ -55,18 +62,17 @@ SELECT p.id, c.id, true FROM products p
 JOIN categories c ON c.slug = CASE WHEN p.slug LIKE 'demo-zhenskiy%' THEN 'zhenskie' ELSE 'muzhskie' END
 WHERE p.slug LIKE 'demo-%';
 
--- (4) фото обложки (относит. путь → public витрины)
+-- (4) фото обложки из MinIO (грузится и в админке, и на витрине; см. предусловие выше).
+-- Базовый URL = S3_PUBLIC_URL инстанса (для стенда THE CASE — admin.erfgq.website/media/admik-media).
 INSERT INTO product_media (product_id, storage_key, url, type, mime, is_primary, sort)
-SELECT p.id, 'demo'||substr(p.slug,5)||'.webp', m.url, 'image','image/webp', true, 0
+SELECT p.id, 'products/demo/'||m.img||'.webp',
+       'https://admin.erfgq.website/media/admik-media/products/demo/'||m.img||'.webp',
+       'image','image/webp', true, 0
 FROM products p
 JOIN (VALUES
-  ('demo-zhenskiy-1','/images/categories/women-front.webp'),
-  ('demo-zhenskiy-2','/images/categories/women-side.webp'),
-  ('demo-zhenskiy-3','/images/categories/women-back.webp'),
-  ('demo-muzhskoy-1','/images/categories/men-front.webp'),
-  ('demo-muzhskoy-2','/images/categories/men-side.webp'),
-  ('demo-muzhskoy-3','/images/categories/men-back.webp')
-) AS m(slug,url) ON m.slug = p.slug;
+  ('demo-zhenskiy-1','women-front'), ('demo-zhenskiy-2','women-side'), ('demo-zhenskiy-3','women-back'),
+  ('demo-muzhskoy-1','men-front'),   ('demo-muzhskoy-2','men-side'),   ('demo-muzhskoy-3','men-back')
+) AS m(slug,img) ON m.slug = p.slug;
 
 -- (5) остатки в наличии
 INSERT INTO inventory (product_id, variant_id, warehouse_code, quantity, reserved)
