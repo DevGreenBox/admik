@@ -57,6 +57,8 @@ function dto(over: Partial<AdmikSettingsDto> = {}): AdmikSettingsDto {
       about: { title: 'О бренде', paragraphs: [], imageUrls: [], values: [] },
       quality: { title: 'Качество', items: [] },
       delivery: { items: [] },
+      valuesStrip: { enabled: false, items: [] },
+      philosophy: { eyebrow: '', title: '', text: '', linkLabel: '', linkHref: '' },
     },
     navigation: { header: [], footer: [] },
     ...over,
@@ -202,6 +204,7 @@ describe('resolveHome', () => {
   it('заполненные блоки переопределяют дефолт', () => {
     const s = dto({
       home: {
+        ...dto().home,
         hero: { title: 'Привет', subtitle: 'Саб', imageUrl: 'https://cdn/hero.webp', ctaLabel: 'В каталог', ctaHref: '/c' },
         about: { title: 'Наш бренд', paragraphs: ['p1', 'p2'], imageUrls: ['https://cdn/a.webp'], values: ['v1'] },
         quality: { title: 'Ткань', items: ['и1', 'и2'] },
@@ -215,6 +218,57 @@ describe('resolveHome', () => {
     expect(h.about.values).toEqual(['v1']);
     expect(h.quality).toEqual({ title: 'Ткань', items: ['и1', 'и2'] });
     expect(h.delivery.items).toEqual([{ title: 'Почта', text: 'быстро' }]);
+  });
+
+  // B1 — лента ценностей: по умолчанию скрыта; включается из настроек.
+  it('null → лента скрыта (HOME_FALLBACK.valuesStrip.enabled = false)', () => {
+    expect(resolveHome(null).valuesStrip.enabled).toBe(false);
+    expect(HOME_FALLBACK.valuesStrip.enabled).toBe(false);
+    expect(HOME_FALLBACK.valuesStrip.items.length).toBe(3);
+  });
+
+  it('valuesStrip enabled+items из настроек проброшены', () => {
+    const s = dto({
+      home: {
+        ...dto().home,
+        valuesStrip: { enabled: true, items: [{ title: 'Форма', text: 'описание' }] },
+      },
+    });
+    const h = resolveHome(s);
+    expect(h.valuesStrip.enabled).toBe(true);
+    expect(h.valuesStrip.items).toEqual([{ title: 'Форма', text: 'описание' }]);
+  });
+
+  it('valuesStrip enabled:true без items → дефолтные items (фолбэк по полю)', () => {
+    const s = dto({
+      home: { ...dto().home, valuesStrip: { enabled: true, items: [] } },
+    });
+    const h = resolveHome(s);
+    expect(h.valuesStrip.enabled).toBe(true);
+    expect(h.valuesStrip.items).toEqual(HOME_FALLBACK.valuesStrip.items);
+  });
+
+  // B3 — философия: фолбэк по полям + оверрайд.
+  it('пустая philosophy → фолбэк (eyebrow «Философия»)', () => {
+    const h = resolveHome(dto());
+    expect(h.philosophy).toEqual(HOME_FALLBACK.philosophy);
+    expect(h.philosophy.eyebrow).toBe('Философия');
+  });
+
+  it('philosophy из настроек переопределяет', () => {
+    const s = dto({
+      home: {
+        ...dto().home,
+        philosophy: { eyebrow: 'Манифест', title: 'T', text: 'X', linkLabel: 'L', linkHref: '/x' },
+      },
+    });
+    expect(resolveHome(s).philosophy).toEqual({
+      eyebrow: 'Манифест',
+      title: 'T',
+      text: 'X',
+      linkLabel: 'L',
+      linkHref: '/x',
+    });
   });
 });
 

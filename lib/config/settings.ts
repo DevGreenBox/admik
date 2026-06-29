@@ -174,6 +174,26 @@ function mergeHome(db: HomeSettings): HomeContent {
     delivery: db.delivery?.items
       ? { items: db.delivery.items.map((i) => ({ title: i.title, text: i.text })) }
       : HOME_DEFAULTS.delivery,
+    valuesStrip: db.valuesStrip
+      ? {
+          // enabled по умолчанию false (лента opt-in): отсутствие флага в оверрайде
+          // не включает ленту молча. items пусты/нет → дефолтные тезисы.
+          enabled: db.valuesStrip.enabled ?? HOME_DEFAULTS.valuesStrip.enabled,
+          items:
+            db.valuesStrip.items && db.valuesStrip.items.length > 0
+              ? db.valuesStrip.items.map((i) => ({ title: i.title, text: i.text }))
+              : HOME_DEFAULTS.valuesStrip.items,
+        }
+      : HOME_DEFAULTS.valuesStrip,
+    philosophy: db.philosophy
+      ? {
+          eyebrow: db.philosophy.eyebrow ?? HOME_DEFAULTS.philosophy.eyebrow,
+          title: db.philosophy.title ?? HOME_DEFAULTS.philosophy.title,
+          text: db.philosophy.text ?? HOME_DEFAULTS.philosophy.text,
+          linkLabel: db.philosophy.linkLabel ?? HOME_DEFAULTS.philosophy.linkLabel,
+          linkHref: db.philosophy.linkHref ?? HOME_DEFAULTS.philosophy.linkHref,
+        }
+      : HOME_DEFAULTS.philosophy,
   };
 }
 

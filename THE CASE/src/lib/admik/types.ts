@@ -289,6 +289,16 @@ export interface AdmikHomeDto {
   };
   quality: { title: string; items: string[] };
   delivery: { items: { title: string; text: string }[] };
+  /** B1 — лента ценностей: показ (enabled) + тезисы. По умолчанию скрыта. */
+  valuesStrip: { enabled: boolean; items: { title: string; text: string }[] };
+  /** B3 — философия: надзаголовок/заголовок/абзац + ссылка. */
+  philosophy: {
+    eyebrow: string;
+    title: string;
+    text: string;
+    linkLabel: string;
+    linkHref: string;
+  };
 }
 
 export interface AdmikSettingsDto {

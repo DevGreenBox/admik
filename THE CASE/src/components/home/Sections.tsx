@@ -159,22 +159,19 @@ export function EditorialIntro() {
   );
 }
 
-/** Форма / Функция / Дисциплина — text-only, связь с announcement bar */
-export function ValuesStrip() {
-  const items = [
-    {
-      title: "Форма",
-      text: "Структурные силуэты и чистые линии медицинской униформы нового поколения.",
-    },
-    {
-      title: "Функция",
-      text: "Продуманный крой, премиальные ткани и комфорт в длинных сменах.",
-    },
-    {
-      title: "Дисциплина",
-      text: "Уверенность, профессионализм и современная эстетика каждый день.",
-    },
-  ];
+/**
+ * Лента ценностей (B1) — text-only, связь с announcement bar. Контент и показ —
+ * из настроек Admik (settings.home.valuesStrip). По умолчанию лента СКРЫТА
+ * (enabled:false): магазин включает её в админке. Если выключена или нет тезисов —
+ * секция не рендерится (ранний null), чтобы не оставлять пустой блок на главной.
+ */
+export function ValuesStrip({
+  values = HOME_FALLBACK.valuesStrip,
+}: {
+  values?: ResolvedHome["valuesStrip"];
+}) {
+  const items = values.items;
+  if (!values.enabled || items.length === 0) return null;
 
   return (
     <section className="border-y border-border bg-surface py-16 md:py-20 lg:py-24">
@@ -414,22 +411,40 @@ export function ShopCategories({
   );
 }
 
-/** Philosophy — pivot before About */
-export function EditorialStatement() {
+/**
+ * Philosophy — pivot before About. Контент из настроек Admik
+ * (settings.home.philosophy) с фолбэком на дефолт витрины.
+ *
+ * Layout (фикс правки Саша-7/Аня-6/Мадина-10 «пустота справа»): на широком экране
+ * — двухколоночная композиция, выровненная по нижней базовой линии: слева
+ * надзаголовок + крупный заголовок, справа абзац + ссылка. Колонки делят ширину
+ * секции (md:grid-cols-2 + gap), поэтому правое поле больше не зияет пустым; на
+ * мобильном — естественный вертикальный стек. Премиум-минимализм сохранён
+ * (графит/белый, heading-lg/heading-rule/body-editorial/eyebrow/FadeIn).
+ */
+export function EditorialStatement({
+  philosophy = HOME_FALLBACK.philosophy,
+}: {
+  philosophy?: ResolvedHome["philosophy"];
+}) {
   return (
     <section className="bg-graphite text-white py-16 md:py-20 lg:py-24">
       <div className="container-brand">
         <FadeIn>
-          <div className="max-w-2xl">
-            <p className="eyebrow text-white/45 mb-8">Philosophy</p>
-            <h2 className="heading-lg heading-rule text-white mb-10 leading-[1.1]">Comforts + Medicine = THE CASE</h2>
-            <p className="body-editorial text-white/65 max-w-lg mb-12">
-              Премиальная медицинская форма для тех, кто ценит эстетику,
-              функциональность и уверенность в профессии.
-            </p>
-            <Link href="/#about" className="text-[10px] uppercase tracking-[0.22em] text-white border-b border-white/40 pb-1 hover:opacity-60 transition-opacity duration-700">
-              О бренде
-            </Link>
+          <div className="grid grid-cols-1 gap-10 md:grid-cols-2 md:items-end md:gap-12 lg:gap-20">
+            <div>
+              <p className="eyebrow text-white/45 mb-8">{philosophy.eyebrow}</p>
+              <h2 className="heading-lg heading-rule text-white leading-[1.1]">{philosophy.title}</h2>
+            </div>
+            <div className="md:pb-1">
+              <p className="body-editorial text-white/65 mb-10">{philosophy.text}</p>
+              <Link
+                href={philosophy.linkHref}
+                className="text-[10px] uppercase tracking-[0.22em] text-white border-b border-white/40 pb-1 hover:opacity-60 transition-opacity duration-700"
+              >
+                {philosophy.linkLabel}
+              </Link>
+            </div>
           </div>
         </FadeIn>
       </div>

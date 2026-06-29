@@ -111,6 +111,46 @@ describe('settings/schemas — homeSchema', () => {
   it('delivery.items требует title и text у каждого пункта', () => {
     expect(homeSchema.safeParse({ delivery: { items: [{ title: 'X' }] } }).success).toBe(false);
   });
+
+  // B1 — лента ценностей (valuesStrip): enabled + список пар title/text.
+  it('valuesStrip принимает enabled и items, strip режет лишнее', () => {
+    const parsed = homeSchema.parse({
+      valuesStrip: {
+        enabled: true,
+        items: [{ title: 'Форма', text: 'описание', bogus: 1 }],
+        evil: 2,
+      },
+    });
+    expect(parsed.valuesStrip?.enabled).toBe(true);
+    expect(parsed.valuesStrip?.items?.[0]).toEqual({ title: 'Форма', text: 'описание' });
+  });
+
+  it('valuesStrip.items требует title и text у каждого пункта', () => {
+    expect(
+      homeSchema.safeParse({ valuesStrip: { items: [{ title: 'Только заголовок' }] } }).success,
+    ).toBe(false);
+  });
+
+  // B3 — философия: eyebrow/title/text + ссылка (label/href), href валидируется.
+  it('philosophy принимает поля и валидный linkHref, strip режет лишнее', () => {
+    const parsed = homeSchema.parse({
+      philosophy: {
+        eyebrow: 'Философия',
+        title: 'Заголовок',
+        text: 'Абзац',
+        linkLabel: 'О бренде',
+        linkHref: '/#about',
+        bogus: 'x',
+      },
+    });
+    expect(parsed.philosophy?.title).toBe('Заголовок');
+    expect(parsed.philosophy?.linkHref).toBe('/#about');
+    expect('bogus' in (parsed.philosophy ?? {})).toBe(false);
+  });
+
+  it('philosophy.linkHref отклоняет опечатку без «/» и протокола', () => {
+    expect(homeSchema.safeParse({ philosophy: { linkHref: 'about' } }).success).toBe(false);
+  });
 });
 
 // =============================================================================
@@ -187,6 +227,51 @@ describe('config/settings — home merge', () => {
     ]);
     expect(eff.home).toEqual(HOME_DEFAULTS);
   });
+
+  it('пустая БД → valuesStrip скрыта по умолчанию (enabled:false), items-дефолты', () => {
+    const eff = mergeSettings(envWith(), []);
+    expect(eff.home.valuesStrip.enabled).toBe(false);
+    expect(eff.home.valuesStrip.items.length).toBe(3);
+    expect(eff.home.valuesStrip).toEqual(HOME_DEFAULTS.valuesStrip);
+  });
+
+  it('пустая БД → philosophy = дефолт (eyebrow на русском)', () => {
+    const eff = mergeSettings(envWith(), []);
+    expect(eff.home.philosophy).toEqual(HOME_DEFAULTS.philosophy);
+    expect(eff.home.philosophy.eyebrow).toBe('Философия');
+  });
+
+  it('оверрайд valuesStrip целиком (enabled:true + свои items)', () => {
+    const eff = mergeSettings(envWith(), [
+      {
+        setting_key: 'home',
+        value: { valuesStrip: { enabled: true, items: [{ title: 'A', text: 'b' }] } },
+      },
+    ]);
+    expect(eff.home.valuesStrip.enabled).toBe(true);
+    expect(eff.home.valuesStrip.items).toEqual([{ title: 'A', text: 'b' }]);
+    // остальные блоки не тронуты
+    expect(eff.home.philosophy).toEqual(HOME_DEFAULTS.philosophy);
+  });
+
+  it('оверрайд philosophy целиком', () => {
+    const eff = mergeSettings(envWith(), [
+      {
+        setting_key: 'home',
+        value: {
+          philosophy: { eyebrow: 'Манифест', title: 'T', text: 'X', linkLabel: 'L', linkHref: '/x' },
+        },
+      },
+    ]);
+    expect(eff.home.philosophy).toEqual({
+      eyebrow: 'Манифест',
+      title: 'T',
+      text: 'X',
+      linkLabel: 'L',
+      linkHref: '/x',
+    });
+    expect(eff.home.valuesStrip).toEqual(HOME_DEFAULTS.valuesStrip);
+  });
 });
 
 // =============================================================================
@@ -221,6 +306,27 @@ describe('storefront/settings-dto — home', () => {
     const json = JSON.stringify(dto.home);
     expect(json).not.toContain('imageKey');
     expect(json).not.toContain('"home/h.webp"');
+  });
+
+  it('DTO содержит valuesStrip (enabled+items) и philosophy', () => {
+    const eff = mergeSettings(envWith(), [
+      {
+        setting_key: 'home',
+        value: {
+          valuesStrip: { enabled: true, items: [{ title: 'A', text: 'b' }] },
+          philosophy: { title: 'Манифест' },
+        },
+      },
+    ]);
+    const dto = toPublicSettingsDto(eff);
+    expect(dto.home.valuesStrip.enabled).toBe(true);
+    expect(dto.home.valuesStrip.items).toEqual([{ title: 'A', text: 'b' }]);
+    expect(dto.home.philosophy.title).toBe('Манифест');
+    // незаданные поля philosophy добиты дефолтом
+    expect(dto.home.philosophy.eyebrow).toBe(HOME_DEFAULTS.philosophy.eyebrow);
+    // по умолчанию (пустая БД) лента скрыта
+    const dflt = toPublicSettingsDto(mergeSettings(envWith(), []));
+    expect(dflt.home.valuesStrip.enabled).toBe(false);
   });
 });
 

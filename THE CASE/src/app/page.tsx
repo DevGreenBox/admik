@@ -42,9 +42,9 @@ export default async function HomePage() {
       <HomeBanner hero={home.hero} />
       <CoverSlides quality={home.quality} />
       <Collection categories={categories} />
-      <ValuesStrip />
+      <ValuesStrip values={home.valuesStrip} />
       <ShopCategories categories={categories} />
-      <EditorialStatement />
+      <EditorialStatement philosophy={home.philosophy} />
       <About about={home.about} />
       <Delivery delivery={home.delivery} />
     </>

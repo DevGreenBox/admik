@@ -22,6 +22,10 @@ export interface ResolvedHome {
   about: { title: string; paragraphs: string[]; imageUrls: string[]; values: string[] };
   quality: { title: string; items: string[] };
   delivery: { items: { title: string; text: string }[] };
+  /** B1 — лента ценностей: показ (enabled) + тезисы. По умолчанию скрыта. */
+  valuesStrip: { enabled: boolean; items: { title: string; text: string }[] };
+  /** B3 — философия: надзаголовок/заголовок/абзац + ссылка. */
+  philosophy: { eyebrow: string; title: string; text: string; linkLabel: string; linkHref: string };
 }
 
 /**
@@ -55,6 +59,22 @@ export const HOME_FALLBACK: ResolvedHome = {
       { title: 'Сроки', text: 'Москва — 1–2 дня. Регионы — 3–5 дня. Отслеживание в личном кабинете.' },
       { title: 'Оплата', text: 'СДЭК PAY, банковские карты, СБП. Безопасная оплата и создание накладной.' },
     ],
+  },
+  // Лента ценностей по умолчанию СКРЫТА (opt-in): владелец включает её в админке.
+  valuesStrip: {
+    enabled: false,
+    items: [
+      { title: 'Форма', text: 'Структурные силуэты и чистые линии медицинской униформы нового поколения.' },
+      { title: 'Функция', text: 'Продуманный крой, премиальные ткани и комфорт в длинных сменах.' },
+      { title: 'Дисциплина', text: 'Уверенность, профессионализм и современная эстетика каждый день.' },
+    ],
+  },
+  philosophy: {
+    eyebrow: 'Философия',
+    title: 'Comforts + Medicine = THE CASE',
+    text: 'Премиальная медицинская форма для тех, кто ценит эстетику, функциональность и уверенность в профессии.',
+    linkLabel: 'О бренде',
+    linkHref: '/#about',
   },
 };
 
@@ -100,6 +120,22 @@ export function resolveHome(s: AdmikSettingsDto | null): ResolvedHome {
         h.delivery?.items && h.delivery.items.length > 0
           ? h.delivery.items.map((i) => ({ title: i.title, text: i.text }))
           : HOME_FALLBACK.delivery.items,
+    },
+    valuesStrip: {
+      // Показ управляется флагом из настроек (по умолчанию скрыто). Пустой список
+      // тезисов при включённой ленте → дефолтные слова витрины (фолбэк по полю).
+      enabled: h.valuesStrip?.enabled ?? HOME_FALLBACK.valuesStrip.enabled,
+      items:
+        h.valuesStrip?.items && h.valuesStrip.items.length > 0
+          ? h.valuesStrip.items.map((i) => ({ title: i.title, text: i.text }))
+          : HOME_FALLBACK.valuesStrip.items,
+    },
+    philosophy: {
+      eyebrow: clean(h.philosophy?.eyebrow) ?? HOME_FALLBACK.philosophy.eyebrow,
+      title: clean(h.philosophy?.title) ?? HOME_FALLBACK.philosophy.title,
+      text: clean(h.philosophy?.text) ?? HOME_FALLBACK.philosophy.text,
+      linkLabel: clean(h.philosophy?.linkLabel) ?? HOME_FALLBACK.philosophy.linkLabel,
+      linkHref: clean(h.philosophy?.linkHref) ?? HOME_FALLBACK.philosophy.linkHref,
     },
   };
 }

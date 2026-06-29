@@ -274,6 +274,29 @@ export const homeSchema = z
       })
       .strip()
       .optional(),
+    // B1 — лента ценностей: показ (enabled) + список пар title/text. По умолчанию
+    // (нет оверрайда) лента скрыта; opt-in включение из админки без правки кода.
+    valuesStrip: z
+      .object({
+        enabled: z.boolean().optional(),
+        items: z
+          .array(z.object({ title: nonEmpty, text: nonEmpty }).strip())
+          .optional(),
+      })
+      .strip()
+      .optional(),
+    // B3 — философия: надзаголовок/заголовок/абзац + ссылка (label/href).
+    // linkHref валидируется как маршрут (как hero.ctaHref), чтобы не вёл на 404.
+    philosophy: z
+      .object({
+        eyebrow: z.string().trim().min(1).optional(),
+        title: z.string().trim().min(1).optional(),
+        text: z.string().trim().min(1).optional(),
+        linkLabel: z.string().trim().min(1).optional(),
+        linkHref: hrefSchema.optional(),
+      })
+      .strip()
+      .optional(),
   })
   .strip();
 

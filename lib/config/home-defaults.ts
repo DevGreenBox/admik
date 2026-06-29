@@ -40,6 +40,23 @@ export interface HomeContent {
   delivery: {
     items: { title: string; text: string }[];
   };
+  /**
+   * Лента ценностей (B1): три коротких тезиса title+text. По умолчанию СКРЫТА
+   * (enabled:false) — это opt-in блок: магазин включает его и правит слова в
+   * админке без кода. Не путать с about.values (теги-чипы под галереей).
+   */
+  valuesStrip: {
+    enabled: boolean;
+    items: { title: string; text: string }[];
+  };
+  /** Блок «Философия» (B3): надзаголовок, заголовок, абзац и ссылка. */
+  philosophy: {
+    eyebrow: string;
+    title: string;
+    text: string;
+    linkLabel: string;
+    linkHref: string;
+  };
 }
 
 /**
@@ -87,5 +104,31 @@ export const HOME_DEFAULTS: HomeContent = {
         text: 'СДЭК PAY, банковские карты, СБП. Безопасная оплата и создание накладной.',
       },
     ],
+  },
+  // Лента ценностей по умолчанию СКРЫТА (opt-in). Слова — нейтральный дефолт,
+  // переопределяется в админке без кода. enabled включает показ на витрине.
+  valuesStrip: {
+    enabled: false,
+    items: [
+      {
+        title: 'Форма',
+        text: 'Структурные силуэты и чистые линии медицинской униформы нового поколения.',
+      },
+      {
+        title: 'Функция',
+        text: 'Продуманный крой, премиальные ткани и комфорт в длинных сменах.',
+      },
+      {
+        title: 'Дисциплина',
+        text: 'Уверенность, профессионализм и современная эстетика каждый день.',
+      },
+    ],
+  },
+  philosophy: {
+    eyebrow: 'Философия',
+    title: 'Comforts + Medicine = THE CASE',
+    text: 'Премиальная медицинская форма для тех, кто ценит эстетику, функциональность и уверенность в профессии.',
+    linkLabel: 'О бренде',
+    linkHref: '/#about',
   },
 };
