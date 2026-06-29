@@ -536,7 +536,7 @@ export function ProductForm({
                     checked={isFeatured}
                     onChange={(e) => setIsFeatured(e.target.checked)}
                   />
-                  Рекомендуемый (хит продаж) — бейдж на витрине
+                  Показать на главной (бейдж «хит продаж» + блок «Коллекция»)
                 </label>
                 <div className="flex items-center gap-2 text-sm text-gray-700">
                   <label htmlFor="p-isnew">Бейдж «Новинка»:</label>

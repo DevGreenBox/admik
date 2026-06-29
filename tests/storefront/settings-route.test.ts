@@ -19,6 +19,7 @@ function fakeEffective(): EffectiveSettings {
     modules: { overrides: {} },
     home: HOME_DEFAULTS,
     navigation: { header: [], footer: [] },
+    access: { singleUserMode: false },
     branding: {
       shopName: 'The Case',
       logoUrl: null,

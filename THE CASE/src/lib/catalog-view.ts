@@ -100,6 +100,38 @@ export function topLevelAncestorSlug(
   return "";
 }
 
+/** Featured-товары, разложенные по полу для вкладок «Коллекции» главной (B5). */
+export interface GenderedProducts {
+  women: StorefrontProduct[];
+  men: StorefrontProduct[];
+}
+
+/**
+ * Делит выбранные на главную (featured) товары на «женские»/«мужские» для вкладок
+ * «Коллекции» (B5, Саша-4/5). Пол берётся из `product.gender`, который адаптер
+ * витрины выводит из атрибута товара ИЛИ из slug категории (zhen→women, muzh→men,
+ * см. resolveGender) — отдельного поля «пол» в каталоге нет, признак = категория.
+ *
+ * Унисекс-товар попадает в ОБЕ вкладки, чтобы вкладка не пустовала из-за пола
+ * (если featured-товар не размечен по полу, он всё равно покажется). Порядок
+ * внутри корзины сохраняется (стабильно). Мультитенантно — никакой привязки к ИМ.
+ */
+export function splitByGender(products: StorefrontProduct[]): GenderedProducts {
+  const women: StorefrontProduct[] = [];
+  const men: StorefrontProduct[] = [];
+  for (const p of products) {
+    if (p.gender === "women") {
+      women.push(p);
+    } else if (p.gender === "men") {
+      men.push(p);
+    } else {
+      women.push(p);
+      men.push(p);
+    }
+  }
+  return { women, men };
+}
+
 /** Ссылка подменю навигации (одна категория любого уровня). */
 export interface CategoryNavItem {
   href: string;

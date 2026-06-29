@@ -8,7 +8,13 @@ import {
   About,
   Delivery,
 } from "@/components/home/Sections";
-import { getCategories, type AdmikCategoryDto } from "@/lib/admik";
+import {
+  getCategories,
+  listProducts,
+  fromListItem,
+  type AdmikCategoryDto,
+  type StorefrontProduct,
+} from "@/lib/admik";
 import { getStoreSettings, resolveHome } from "@/lib/store-settings";
 
 export const dynamic = "force-dynamic";
@@ -33,6 +39,22 @@ export default async function HomePage() {
     categories = [];
   }
 
+  // Товары, выбранные на главную (is_featured), — реальная «Коллекция» по табам
+  // жен/муж (B5, Саша-4/5). Тот же потолок ожидания (2.5с), что у категорий;
+  // сбой/таймаут → [] (Collection грациозно покажет статичные ракурсы).
+  let featured: StorefrontProduct[] = [];
+  try {
+    const items = await Promise.race([
+      listProducts({ featured: true, limit: 12 }),
+      new Promise<Awaited<ReturnType<typeof listProducts>>>((resolve) =>
+        setTimeout(() => resolve([]), 2500),
+      ),
+    ]);
+    featured = items.map(fromListItem);
+  } catch {
+    featured = [];
+  }
+
   // Контент главной из настроек Admik (G-02/G-03) с грациозным фолбэком на
   // дефолты витрины (getStoreSettings: таймаут+null → HOME_FALLBACK).
   const home = resolveHome(await getStoreSettings());
@@ -41,7 +63,7 @@ export default async function HomePage() {
     <>
       <HomeBanner hero={home.hero} />
       <CoverSlides quality={home.quality} />
-      <Collection categories={categories} />
+      <Collection categories={categories} featured={featured} />
       <ValuesStrip values={home.valuesStrip} />
       <ShopCategories categories={categories} />
       <EditorialStatement philosophy={home.philosophy} />

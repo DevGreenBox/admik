@@ -3,6 +3,7 @@ import {
   priceRange,
   categoryTabs,
   subcategoryTabs,
+  splitByGender,
   sortProducts,
   applyCatalogView,
   flattenCategoryNav,
@@ -106,6 +107,33 @@ describe("subcategoryTabs — второй ряд: подкатегории ак
 
   it("неизвестный slug → пустой массив", () => {
     expect(subcategoryTabs(REAL_CATS, "nope")).toEqual([]);
+  });
+});
+
+describe("splitByGender — деление featured-товаров на жен/муж для главной (B5)", () => {
+  const w = mk({ slug: "w", gender: "women" });
+  const m = mk({ slug: "m", gender: "men" });
+  const u = mk({ slug: "u", gender: "unisex" });
+
+  it("женские → women, мужские → men", () => {
+    const r = splitByGender([w, m]);
+    expect(r.women.map((p) => p.slug)).toEqual(["w"]);
+    expect(r.men.map((p) => p.slug)).toEqual(["m"]);
+  });
+
+  it("унисекс попадает в ОБЕ вкладки (ни одна не пустует из-за пола)", () => {
+    const r = splitByGender([u]);
+    expect(r.women.map((p) => p.slug)).toEqual(["u"]);
+    expect(r.men.map((p) => p.slug)).toEqual(["u"]);
+  });
+
+  it("сохраняет исходный порядок внутри корзины", () => {
+    const w2 = mk({ slug: "w2", gender: "women" });
+    expect(splitByGender([w, w2]).women.map((p) => p.slug)).toEqual(["w", "w2"]);
+  });
+
+  it("пустой вход → пустые корзины", () => {
+    expect(splitByGender([])).toEqual({ women: [], men: [] });
   });
 });
 

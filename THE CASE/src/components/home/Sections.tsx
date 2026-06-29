@@ -1,15 +1,16 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { FadeIn, TextReveal } from "@/components/ui/Animations";
 import { HEADER_OFFSET } from "@/components/layout/Header";
 import { CategoryInfographics } from "@/components/home/CategoryInfographic";
+import { ProductCard } from "@/components/catalog/ProductCard";
 import { IMAGES, EDITORIAL_HOVER, categoryViewHover } from "@/lib/images";
 import { LuxuryImageSwap } from "@/components/ui/LuxuryImageSwap";
-import { resolveCategoryHref } from "@/lib/catalog-view";
-import type { AdmikCategoryDto } from "@/lib/admik";
+import { resolveCategoryHref, splitByGender } from "@/lib/catalog-view";
+import type { AdmikCategoryDto, StorefrontProduct } from "@/lib/admik";
 import { HOME_FALLBACK, type ResolvedHome } from "@/lib/home-content";
 
 /** Full-width banner — первый блок под меню (+ заголовок/подзаголовок и CTA) */
@@ -315,26 +316,35 @@ function CategoryViews({
 }
 
 /**
- * «Коллекция» (правка 4): единая секция с вкладками «Для женщин»/«Для мужчин».
- * Раньше были две отдельные секции (CollectionWomen + CollectionMen) с
- * надзаголовком «Shop» и заголовками «Women»/«Men». Теперь надзаголовок «Shop»
- * убран, а клик по вкладке переключает соответствующий блок товаров (без двух
- * секций). Ссылка «Смотреть все» и блок фото резолвятся в РЕАЛЬНУЮ категорию
- * каталога (по теме women/men), иначе /catalog.
+ * «Коллекция» (правка 4 + Саша-4/5, B5): единая секция с вкладками «Для женщин»/
+ * «Для мужчин». По вкладке показываются РЕАЛЬНЫЕ товары каталога, выбранные на
+ * главную (featured = is_featured в админке), разложенные по полу (splitByGender).
+ * Если для пола ещё нет featured-товаров — грациозный фолбэк на статичные ракурсы
+ * (CategoryViews), чтобы блок не пустовал до наполнения каталога. Ссылка «Смотреть
+ * все» резолвится в РЕАЛЬНУЮ категорию каталога (по теме women/men), иначе /catalog.
  */
 const COLLECTION_TABS = [
   { key: "women", label: "Для женщин", hint: "women", views: IMAGES.categories.womenViews },
   { key: "men", label: "Для мужчин", hint: "men", views: IMAGES.categories.menViews },
 ] as const;
 
+/** Сколько товаров показывать в коллекции на главной на одну вкладку. */
+const COLLECTION_LIMIT = 4;
+
 export function Collection({
   categories = [],
+  featured = [],
 }: {
   categories?: AdmikCategoryDto[];
+  /** Товары, выбранные на главную (is_featured). Пусто → фолбэк на ракурсы. */
+  featured?: StorefrontProduct[];
 }) {
   const [active, setActive] = useState<(typeof COLLECTION_TABS)[number]["key"]>("women");
   const current = COLLECTION_TABS.find((t) => t.key === active) ?? COLLECTION_TABS[0];
   const href = resolveCategoryHref(categories, current.hint);
+
+  const gendered = useMemo(() => splitByGender(featured), [featured]);
+  const tabProducts = (active === "men" ? gendered.men : gendered.women).slice(0, COLLECTION_LIMIT);
 
   return (
     // Правка 3 + Саша-3/Аня-3: верхний и нижний отступы сокращены (единый ритм
@@ -386,7 +396,17 @@ export function Collection({
           id={`collection-panel-${current.key}`}
           aria-labelledby={`collection-tab-${current.key}`}
         >
-          <CategoryViews label={current.label} views={current.views} href={href} />
+          {tabProducts.length > 0 ? (
+            // Реальные товары каталога, выбранные на главную (B5).
+            <div className="grid grid-cols-2 gap-x-4 gap-y-12 md:gap-x-6 md:gap-y-16 lg:grid-cols-4 lg:gap-x-8">
+              {tabProducts.map((product, i) => (
+                <ProductCard key={product.slug} product={product} priority={i < 2} />
+              ))}
+            </div>
+          ) : (
+            // Фолбэк, пока на главную не выбрано ни одного товара этого пола.
+            <CategoryViews label={current.label} views={current.views} href={href} />
+          )}
         </div>
       </div>
     </section>
