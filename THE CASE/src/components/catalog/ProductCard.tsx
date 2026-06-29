@@ -78,7 +78,7 @@ export function ProductCard({ product, priority = false, size = "default" }: Pro
               {outOfStock ? (
                 <p className="label-caps text-muted mt-2.5 text-[9px] tracking-[0.26em]">Нет в наличии</p>
               ) : product.isNew ? (
-                <p className="label-caps text-muted mt-2.5 text-[9px] tracking-[0.26em]">New</p>
+                <p className="label-caps text-muted mt-2.5 text-[9px] tracking-[0.26em]">Новинка</p>
               ) : null}
             </div>
             <div className="shrink-0 text-right">
@@ -224,7 +224,7 @@ function QuickViewModal({
                 )}
               </div>
               <div className="flex flex-col justify-center py-2">
-                <p className="eyebrow mb-5">Quick view</p>
+                <p className="eyebrow mb-5">Быстрый просмотр</p>
                 {brandLabel(view) && <p className="eyebrow text-muted mb-2">{brandLabel(view)}</p>}
                 <h3 className="heading-md mb-5">{view.name}</h3>
                 <div className="mb-10">
@@ -303,8 +303,8 @@ export function Bestsellers({ products }: { products: StorefrontProduct[] }) {
       <div className="container-brand">
         <div className="flex flex-col md:flex-row md:items-end justify-between mb-20 md:mb-28 lg:mb-32 gap-10">
           <div>
-            <p className="eyebrow mb-8">Selection</p>
-            <h2 className="heading-lg heading-rule">Bestsellers</h2>
+            <p className="eyebrow mb-8">Подборка</p>
+            <h2 className="heading-lg heading-rule">Хиты продаж</h2>
           </div>
           <Link href="/catalog" className="eyebrow text-muted link-underline self-start md:self-auto">
             Вся коллекция

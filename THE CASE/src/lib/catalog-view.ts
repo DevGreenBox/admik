@@ -48,6 +48,27 @@ export function categoryTabs(categories: AdmikCategoryDto[]): CategoryTab[] {
 }
 
 /**
+ * Подкатегории активного таба верхнего уровня (B8) — второй ряд фильтров каталога.
+ *
+ * Когда активна категория верхнего уровня `activeTabSlug`, возвращает её ПРЯМЫХ
+ * детей как вкладки; если детей нет / активен «Все» / slug неизвестен — пустой
+ * массив (второй ряд не рендерится). Зачем: вкладки первого уровня (categoryTabs)
+ * строятся только из топ-уровня, поэтому у подкатегорий, которые владелец создаёт
+ * в админке («Внутри категории»), не было своих кнопок-фильтров на витрине —
+ * попасть в них можно было лишь из дропдауна шапки. Этот ряд делает подкатегории
+ * видимым фильтром каталога. Мультитенантно: работает на дереве любого магазина.
+ */
+export function subcategoryTabs(
+  categories: AdmikCategoryDto[],
+  activeTabSlug: string,
+): CategoryTab[] {
+  if (!activeTabSlug) return [];
+  const top = categories.find((c) => c.slug === activeTabSlug);
+  if (!top?.children?.length) return [];
+  return top.children.map((c) => ({ slug: c.slug, name: c.name }));
+}
+
+/**
  * По slug активной категории возвращает slug её ТОП-УРОВНЕВОГО предка в дереве.
  *
  * Зачем: вкладки каталога (`categoryTabs`) строятся только из верхнего уровня

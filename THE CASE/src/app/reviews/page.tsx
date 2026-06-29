@@ -37,7 +37,7 @@ export default async function ReviewsPage() {
       <div className="container-brand py-12 md:py-16">
         <FadeIn>
           <div className="max-w-2xl mb-12 md:mb-16">
-            <p className="eyebrow mb-6">Community</p>
+            <p className="eyebrow mb-6">Сообщество</p>
             <h1 className="heading-lg heading-rule mb-6">ВЫ + THE CASE</h1>
             <p className="body-editorial">
               Врачи и медперсонал в форме THE CASE. Поделитесь своим фото —

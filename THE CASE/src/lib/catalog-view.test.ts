@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   priceRange,
   categoryTabs,
+  subcategoryTabs,
   sortProducts,
   applyCatalogView,
   flattenCategoryNav,
@@ -84,6 +85,27 @@ describe("categoryTabs", () => {
 
   it("пустое дерево → только «Все»", () => {
     expect(categoryTabs([])).toEqual([{ slug: "", name: "Все" }]);
+  });
+});
+
+describe("subcategoryTabs — второй ряд: подкатегории активного таба (B8)", () => {
+  it("активен таб БЕЗ детей → пустой массив (второй ряд скрыт)", () => {
+    expect(subcategoryTabs(REAL_CATS, "meditsinskie-kostyumy")).toEqual([]);
+  });
+
+  it("активен таб С детьми → его прямые дети вкладками (slug+имя)", () => {
+    expect(subcategoryTabs(REAL_CATS, "hirurgicheskie-operatsionnye")).toEqual([
+      { slug: "hirurgicheskie-zhen", name: "Хирургические (жен)" },
+      { slug: "hirurgicheskie-muzh", name: "Хирургические (муж)" },
+    ]);
+  });
+
+  it("«Все» (пустой slug) → пустой массив", () => {
+    expect(subcategoryTabs(REAL_CATS, "")).toEqual([]);
+  });
+
+  it("неизвестный slug → пустой массив", () => {
+    expect(subcategoryTabs(REAL_CATS, "nope")).toEqual([]);
   });
 });
 

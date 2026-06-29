@@ -142,7 +142,7 @@ export function ProductDetailClient({ product, related }: ProductDetailClientPro
             <div className="lg:sticky lg:top-32 lg:self-start space-y-8 md:space-y-10">
               <div>
                 {product.isNew && (
-                  <p className="eyebrow mb-4">New</p>
+                  <p className="eyebrow mb-4">Новинка</p>
                 )}
                 {brand && <p className="eyebrow text-muted mb-2">{brand}</p>}
                 <h1 className="heading-lg heading-rule">{product.name}</h1>
@@ -263,7 +263,7 @@ export function ProductDetailClient({ product, related }: ProductDetailClientPro
         {related.length > 0 && (
           <section className="mt-32 md:mt-40 lg:mt-48">
             <FadeIn>
-              <p className="eyebrow mb-6">Selection</p>
+              <p className="eyebrow mb-6">Подборка</p>
               <h2 className="heading-md mb-14 md:mb-20">Рекомендуем</h2>
             </FadeIn>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-x-4 gap-y-12 md:gap-x-6 md:gap-y-16 lg:gap-x-8 lg:gap-y-20">

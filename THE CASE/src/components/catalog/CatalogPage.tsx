@@ -11,6 +11,7 @@ import {
   applyCatalogView,
   buildCatalogHref,
   categoryTabs,
+  subcategoryTabs,
   priceRange,
   removeFacet,
   topLevelAncestorSlug,
@@ -22,7 +23,7 @@ const SORT_OPTIONS: { value: CatalogSort; label: string }[] = [
   { value: "price-asc", label: "Цена ↑" },
   { value: "price-desc", label: "Цена ↓" },
   { value: "new", label: "Новинки" },
-  { value: "bestseller", label: "Bestsellers" },
+  { value: "bestseller", label: "Хиты продаж" },
 ];
 
 interface CatalogPageProps {
@@ -58,6 +59,12 @@ export function CatalogPage({
     () => topLevelAncestorSlug(categories, activeCategory),
     [categories, activeCategory]
   );
+  // Второй ряд фильтров (B8): подкатегории активного таба верхнего уровня. Пусто,
+  // если активен «Все» или у категории нет детей — тогда ряд не рендерится.
+  const subTabs = useMemo(
+    () => subcategoryTabs(categories, activeTabSlug),
+    [categories, activeTabSlug]
+  );
   const range = useMemo(() => priceRange(products), [products]);
 
   const [sort, setSort] = useState<CatalogSort>("default");
@@ -85,7 +92,7 @@ export function CatalogPage({
     <div className={`page-transition ${HEADER_OFFSET}`}>
       <div className="container-brand py-10 md:py-16 pb-12 md:pb-16">
         <FadeIn>
-          <p className="eyebrow mb-8">Shop</p>
+          <p className="eyebrow mb-8">Магазин</p>
           <h1 className="heading-lg heading-rule mb-6">Коллекция</h1>
           <p className="label-caps text-muted">
             {filtered.length} из {products.length}
@@ -136,6 +143,36 @@ export function CatalogPage({
               </button>
             ))}
           </div>
+
+          {/* Второй ряд (B8): подкатегории активного таба. Ведущая «Все» возвращает
+              к родительской категории целиком; дети — отдельными фильтрами. */}
+          {subTabs.length > 0 && (
+            <div className="flex items-center gap-5 md:gap-8 pb-4 -mt-1 overflow-x-auto scrollbar-hide">
+              <button
+                onClick={() => goToCategory(activeTabSlug)}
+                className={`text-[10px] uppercase tracking-[0.18em] whitespace-nowrap transition-colors duration-500 ${
+                  activeCategory === activeTabSlug
+                    ? "text-graphite"
+                    : "text-muted hover:text-graphite"
+                }`}
+              >
+                Все
+              </button>
+              {subTabs.map((sub) => (
+                <button
+                  key={sub.slug}
+                  onClick={() => goToCategory(sub.slug)}
+                  className={`text-[10px] uppercase tracking-[0.18em] whitespace-nowrap transition-colors duration-500 ${
+                    activeCategory === sub.slug
+                      ? "text-graphite"
+                      : "text-muted hover:text-graphite"
+                  }`}
+                >
+                  {sub.name}
+                </button>
+              ))}
+            </div>
+          )}
 
           <div className="flex items-center justify-between py-4 border-t border-border/60 gap-4">
             <select
@@ -198,7 +235,7 @@ export function CatalogPage({
               </label>
               <label className="flex items-center gap-3 py-2 text-sm cursor-pointer text-muted">
                 <input type="checkbox" checked={onlyBestseller} onChange={(e) => setOnlyBestseller(e.target.checked)} className="accent-graphite" />
-                Bestsellers
+                Хиты продаж
               </label>
             </FilterSection>
 
