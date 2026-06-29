@@ -13,6 +13,7 @@ import { LegalContactsForm } from './_components/LegalContactsForm';
 import { CatalogOrdersForm } from './_components/CatalogOrdersForm';
 import { ModulesForm } from './_components/ModulesForm';
 import { NavigationForm } from './_components/NavigationForm';
+import { AccessForm } from './_components/AccessForm';
 import { ResetSettingButton } from './_components/ResetSettingButton';
 import type { SettingKey } from '@/lib/settings/schemas';
 
@@ -51,6 +52,7 @@ export default async function SettingsPage() {
     { id: 'catalog', title: 'Каталог, доставка, заказы' },
     { id: 'modules', title: 'Модули' },
     { id: 'navigation', title: 'Навигация (меню и футер)' },
+    { id: 'access', title: 'Доступ' },
     { id: 'seo', title: 'SEO и поиск' },
   ];
 
@@ -129,6 +131,11 @@ export default async function SettingsPage() {
 
           <Section id="navigation" title="Навигация (меню и футер)">
             <NavigationForm navigation={eff.navigation} />
+          </Section>
+
+          <Section id="access" title="Доступ">
+            <AccessForm singleUserMode={eff.access.singleUserMode} />
+            <ResetRow keys={[{ key: 'access', label: 'Сбросить режим доступа' }]} />
           </Section>
 
           <Section id="seo" title="SEO и поиск">

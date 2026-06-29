@@ -324,6 +324,20 @@ export const navigationSchema = z
   })
   .strip();
 
+/**
+ * access — флаги доступа уровня магазина (B9). Сейчас единственный флаг —
+ * singleUserMode: «однопользовательский режим» инстанса. Когда включён, в админке
+ * скрывается и блокируется управление пользователями и ролями (двойная защита:
+ * меню + guard страниц + серверная блокировка мутаций). Поле опционально → дефолт
+ * OFF при мердже (мультитенантность: другие магазины не затронуты без явного
+ * включения). `.strip()` — анти-tamper JSONB, как у прочих ключей.
+ */
+export const accessSchema = z
+  .object({
+    singleUserMode: z.boolean().optional(),
+  })
+  .strip();
+
 // -----------------------------------------------------------------------------
 // Реестр ключ → схема. Единственный источник правды о наборе ключей настроек.
 // -----------------------------------------------------------------------------
@@ -342,6 +356,7 @@ export const SETTING_KEYS = [
   'seo',
   'home',
   'navigation',
+  'access',
 ] as const;
 
 export type SettingKey = (typeof SETTING_KEYS)[number];
@@ -360,6 +375,7 @@ export const SETTING_SCHEMAS = {
   seo: seoSettingsSchema,
   home: homeSchema,
   navigation: navigationSchema,
+  access: accessSchema,
 } as const satisfies Record<SettingKey, z.ZodTypeAny>;
 
 // Типы значений по ключам (выводятся из схем).
@@ -375,6 +391,7 @@ export type ModuleOverrides = z.infer<typeof moduleOverridesSchema>;
 export type SeoSettings = z.infer<typeof seoSettingsSchema>;
 export type HomeSettings = z.infer<typeof homeSchema>;
 export type NavigationSettings = z.infer<typeof navigationSchema>;
+export type AccessSettings = z.infer<typeof accessSchema>;
 
 /**
  * Безопасный парс значения по ключу. Возвращает провалидированный частичный

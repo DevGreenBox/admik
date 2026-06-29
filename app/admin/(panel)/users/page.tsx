@@ -4,8 +4,10 @@ import { requireUser } from '@/lib/auth/session';
 import { can } from '@/lib/auth/rbac';
 import { listUsersWithRoles } from '@/lib/auth/admin-repository';
 import { formatDateTime } from '@/lib/admin/order-format';
+import { isSingleUserModeEnabled } from '@/lib/config/settings';
 
 import { Forbidden } from '../_components/Forbidden';
+import { SingleUserModeNotice } from '../_components/SingleUserModeNotice';
 import { PageHeader } from '../_components/PageHeader';
 
 /**
@@ -28,6 +30,10 @@ export default async function UsersPage() {
   const user = await requireUser();
   if (!can(user, 'users.read')) {
     return <Forbidden permission="users.read" />;
+  }
+  // Однопользовательский режим (B9): прямой заход по URL → заглушка вместо списка.
+  if (await isSingleUserModeEnabled()) {
+    return <SingleUserModeNotice kind="users" />;
   }
   const canManage = can(user, 'users.manage');
 
