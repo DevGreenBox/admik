@@ -33,7 +33,7 @@ export function ProductGallery({ images, name }: ProductGalleryProps) {
   if (!images || images.length === 0) {
     return (
       <div
-        className="image-luxury relative flex-1 aspect-[3/4] max-h-[78vh] bg-surface flex items-center justify-center"
+        className="image-luxury relative flex-1 aspect-[3/4] max-h-[68vh] bg-surface flex items-center justify-center"
         role="img"
         aria-label={name}
       >
@@ -62,7 +62,7 @@ export function ProductGallery({ images, name }: ProductGalleryProps) {
         )}
 
         <div
-          className="image-luxury group relative flex-1 aspect-[3/4] max-h-[78vh] bg-surface cursor-zoom-in"
+          className="image-luxury group relative flex-1 aspect-[3/4] max-h-[68vh] bg-surface cursor-zoom-in"
           onClick={() => setLightbox(true)}
         >
           <Image

@@ -63,7 +63,7 @@ export function SizeGuide({ gender }: { gender: "women" | "men" | "unisex" }) {
               <div className="flex justify-between items-start mb-6">
                 <div>
                   <div className="accent-line-sm mb-3" />
-                  <h3 className="heading-md">Size Guide</h3>
+                  <h3 className="heading-md">Таблица размеров</h3>
                   <p className="text-[10px] text-muted mt-2 tracking-wide">Все измерения в см</p>
                 </div>
                 <button onClick={() => setOpen(false)} aria-label="Закрыть">
