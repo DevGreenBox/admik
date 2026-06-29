@@ -43,6 +43,7 @@ ON CONFLICT (slug) DO NOTHING;
 
 -- (3) idempotent снос прежних demo-*
 DELETE FROM inventory WHERE product_id IN (SELECT id FROM products WHERE slug LIKE 'demo-%');
+DELETE FROM product_variants WHERE product_id IN (SELECT id FROM products WHERE slug LIKE 'demo-%');
 DELETE FROM product_media WHERE product_id IN (SELECT id FROM products WHERE slug LIKE 'demo-%');
 DELETE FROM product_categories WHERE product_id IN (SELECT id FROM products WHERE slug LIKE 'demo-%');
 DELETE FROM products WHERE slug LIKE 'demo-%';
@@ -74,8 +75,17 @@ JOIN (VALUES
   ('demo-muzhskoy-1','men-front'),   ('demo-muzhskoy-2','men-side'),   ('demo-muzhskoy-3','men-back')
 ) AS m(slug,img) ON m.slug = p.slug;
 
--- (5) остатки в наличии
+-- (5) размеры S/M/L/XL (варианты): имя варианта = размер (адаптер витрины
+-- variantSize: attributes.size → имя → sku). Даёт селектор размера + кнопку
+-- «Таблица размеров» (B12) на странице товара.
+INSERT INTO product_variants (product_id, sku, name, is_active, sort, attributes_cache)
+SELECT p.id, upper(replace(p.slug,'demo-',''))||'-'||s.size, s.size, true, s.sort, '{}'::jsonb
+FROM products p CROSS JOIN (VALUES ('S',1),('M',2),('L',3),('XL',4)) AS s(size,sort)
+WHERE p.slug LIKE 'demo-%';
+
+-- (6) остатки по вариантам (когда есть варианты — сток считается по ним, не по товару)
 INSERT INTO inventory (product_id, variant_id, warehouse_code, quantity, reserved)
-SELECT p.id, NULL, 'main', 20, 0 FROM products p WHERE p.slug LIKE 'demo-%';
+SELECT pv.product_id, pv.id, 'main', 10, 0 FROM product_variants pv
+WHERE pv.product_id IN (SELECT id FROM products WHERE slug LIKE 'demo-%');
 
 COMMIT;
