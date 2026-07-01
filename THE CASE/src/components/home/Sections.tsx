@@ -109,7 +109,7 @@ export function CoverSlides({ quality = HOME_FALLBACK.quality }: { quality?: Res
         <FadeIn delay={0.1}>
           <div
             className="relative mt-6 flex min-h-[360px] items-center overflow-hidden md:min-h-[420px]"
-            style={{ background: "linear-gradient(135deg,#9a9da1,#7e8186 40%,#6f7277)" }}
+            style={{ background: "linear-gradient(135deg,#3a3a3d,#2b2b2b 45%,#202022)" }}
           >
             {/* TODO(контент клиента): заменить серый градиент на фото фактуры ткани.
                 Светлые диагональные линии (а не чёрные) дают видимую фактуру ткани
