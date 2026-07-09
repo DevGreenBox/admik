@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { CdekError } from '@/lib/cdek/errors';
+import { CdekError, isNetworkError } from '@/lib/cdek/errors';
 
 /** Юнит-тесты класса ошибки СДЭК (docs/08 §2). Без БД/сети. */
 describe('cdek/errors — CdekError', () => {
@@ -30,5 +30,25 @@ describe('cdek/errors — CdekError', () => {
       expect(e).toBeInstanceOf(CdekError);
       expect(e).toBeInstanceOf(Error);
     }
+  });
+});
+
+describe('cdek/errors — isNetworkError (общий предикат client/token-cache)', () => {
+  it('TypeError fetch («fetch failed») → true', () => {
+    expect(isNetworkError(new TypeError('fetch failed'))).toBe(true);
+  });
+
+  it('AbortError (таймаут через AbortController) → true', () => {
+    expect(isNetworkError(new DOMException('The operation was aborted', 'AbortError'))).toBe(true);
+    const err = new Error('aborted');
+    err.name = 'AbortError';
+    expect(isNetworkError(err)).toBe(true);
+  });
+
+  it('обычная Error / не-Error → false', () => {
+    expect(isNetworkError(new Error('boom'))).toBe(false);
+    expect(isNetworkError(new CdekError('x', 'y'))).toBe(false);
+    expect(isNetworkError('строка')).toBe(false);
+    expect(isNetworkError(null)).toBe(false);
   });
 });

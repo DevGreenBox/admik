@@ -221,6 +221,9 @@ export interface MockTrackStatus {
 /**
  * Mock-последовательность статусов отправления (docs/08 §11: Tracking →
  * mock-статусы из фикстур). Детерминированная цепочка happy-path.
+ * Коды — РЕАЛЬНЫЕ из «Приложения 1. Статусы заказов» apidoc.cdek.ru (ревизия
+ * боевого режима: легаси ON_THE_WAY/READY_FOR_PICKUP в Приложении 1 нет, и
+ * status-map их больше не маппит — mock обязан вести себя как боевой путь).
  */
 export function mockTrackStatuses(): MockTrackStatus[] {
   return [
@@ -230,10 +233,14 @@ export function mockTrackStatuses(): MockTrackStatus[] {
       name: 'Принят на склад отправителя',
       dateTime: '2026-06-15T12:00:00+0300',
     },
-    { code: 'ON_THE_WAY', name: 'В пути', dateTime: '2026-06-16T08:00:00+0300' },
     {
-      code: 'READY_FOR_PICKUP',
-      name: 'Готов к выдаче',
+      code: 'SENT_TO_RECIPIENT_CITY',
+      name: 'Отправлен в город-получатель',
+      dateTime: '2026-06-16T08:00:00+0300',
+    },
+    {
+      code: 'ACCEPTED_AT_PICK_UP_POINT',
+      name: 'Принят на склад до востребования',
       dateTime: '2026-06-17T09:00:00+0300',
     },
     { code: 'DELIVERED', name: 'Вручён', dateTime: '2026-06-18T15:00:00+0300' },

@@ -112,13 +112,19 @@ const envSchema = z.object({
     .transform((v) => v === 'true' || v === '1'),
   // Код города отправления (дефолт 44 = Москва). Взаимоисключим с CDEK_SHIPMENT_POINT.
   CDEK_FROM_LOCATION_CODE: z.coerce.number().int().min(0).default(44),
+  // Адрес отправления (from_location.address для заказов «от двери»). Опционален:
+  // при отправке со склада СДЭК используется CDEK_SHIPMENT_POINT.
+  CDEK_FROM_ADDRESS: z.string().optional(),
   // Код склада отправителя (если задан — используется вместо from_location).
   CDEK_SHIPMENT_POINT: z.string().optional(),
-  // Тариф по умолчанию для ПВЗ/постамата (склад-склад, дефолт 136).
+  // Тариф по умолчанию для ПВЗ (склад-склад, дефолт 136).
   CDEK_DEFAULT_TARIFF: z.coerce.number().int().min(0).default(136),
   // Тариф курьерской доставки «до двери» (склад-дверь, дефолт 137). Раньше
   // курьер тарифицировался ПВЗ-тарифом 136 (склад-склад) — недотариф/ошибка СДЭК.
   CDEK_DOOR_TARIFF: z.coerce.number().int().min(0).default(137),
+  // Тариф доставки в постамат (склад-постамат, дефолт 368 по Приложению 4).
+  // Раньше постамат тарифицировался ПВЗ-тарифом 136 — неверный код тарифа.
+  CDEK_POSTAMAT_TARIFF: z.coerce.number().int().min(0).default(368),
   // Белый список тарифов (csv); пусто = разрешены все. Парсится в config.ts.
   CDEK_ALLOWED_TARIFFS: z.string().optional(),
   // Отправитель (для buildPayload, пакет D).
@@ -147,6 +153,13 @@ const envSchema = z.object({
   CDEK_CREATE_ENABLED: z
     .enum(['true', 'false', '1', '0'])
     .default('true')
+    .transform((v) => v === 'true' || v === '1'),
+  // Создавать накладную СДЭК сразу ПРИ ОФОРМЛЕНИИ заказа, не дожидаясь оплаты
+  // (для магазинов без онлайн-кассы). Дефолт false — штатно накладная только
+  // после оплаты (isOrderPaidForShipment). Когда касса появится — выключить.
+  CDEK_CREATE_ON_ORDER: z
+    .enum(['true', 'false', '1', '0'])
+    .default('false')
     .transform((v) => v === 'true' || v === '1'),
 
   // ---------------------------------------------------------------------------

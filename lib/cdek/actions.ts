@@ -40,12 +40,26 @@ async function assertCdekEnabled(): Promise<void> {
  * (бизнес-правило сознательно отклонило действие — это НЕ внутренняя ошибка).
  * Главный кейс — `cdek_precondition_failed` при неоплаченном заказе (FF.md):
  * без этого defineAction свернул бы CdekError в безликий `internal`.
+ *
+ * Боевой аудит 2026-07-09: добавлены операторские ошибки конфигурации/данных
+ * заказа (что именно задать — CDEK_SHIPMENT_POINT / CDEK_FROM_ADDRESS /
+ * CDEK_SENDER_PHONE / адрес / город) и вердикты фоновой валидации СДЭК
+ * (cdek_create_invalid / cdek_refusal_invalid / cdek_cancel_invalid — тексты
+ * собираются из документированных errors[] ответа, безопасны для показа).
  */
 const USER_FACING_CDEK_CODES = new Set([
   'cdek_precondition_failed',
   'cdek_missing_pvz',
   'cdek_invalid_phone',
   'cdek_no_shipment',
+  'cdek_shipment_point_required',
+  'cdek_from_address_required',
+  'cdek_address_required',
+  'cdek_city_required',
+  'cdek_invalid_sender_phone',
+  'cdek_create_invalid',
+  'cdek_refusal_invalid',
+  'cdek_cancel_invalid',
 ]);
 
 /**

@@ -8,6 +8,13 @@
  * него зависит весь модуль: в mock-режиме клиент не ходит в сеть, расчёт идёт по
  * формуле, ПВЗ — из фикстур (см. docs/08 §11). Это позволяет demo-магазину и CI
  * работать без боевых ключей (ADR-002).
+ *
+ * КОНТУР ПО CDEK_TEST_MODE (аудит перехода в бой, 2026-07-09): при
+ * CDEK_TEST_MODE=true baseUrl ЖЁСТКО равен CDEK_EDU_BASE_URL (тестовый
+ * edu-контур), а CDEK_BASE_URL игнорируется. Раньше testMode читался, но не
+ * влиял на baseUrl — половинчатая конфигурация (testMode=true + боевой URL)
+ * била боевым трафиком по проду или наоборот. Теперь testMode — единственный
+ * переключатель контура; CDEK_BASE_URL используется только в боевом режиме.
  */
 
 import { getEnv, type Env } from '@/lib/config/env';
@@ -22,6 +29,9 @@ export interface CdekSenderConfig {
   inn: string | null;
 }
 
+/** Тестовый (edu) контур СДЭК API v2 — форсируется при CDEK_TEST_MODE=true. */
+export const CDEK_EDU_BASE_URL = 'https://api.edu.cdek.ru';
+
 /** Полная конфигурация модуля cdek (порт CdekConfig, docs/08 §2.1). */
 export interface CdekConfig {
   baseUrl: string;
@@ -30,12 +40,16 @@ export interface CdekConfig {
   testMode: boolean;
 
   fromLocationCode: number;
+  /** Адрес отправления (from_location.address заказов), null если не задан. */
+  fromAddress: string | null;
   shipmentPoint: string | null;
 
-  /** Тариф ПВЗ/постамата (склад-склад, дефолт 136). */
+  /** Тариф ПВЗ (склад-склад, дефолт 136). */
   defaultTariffCode: number;
   /** Тариф курьерской доставки «до двери» (склад-дверь, дефолт 137). */
   doorTariffCode: number;
+  /** Тариф доставки в постамат (склад-постамат, дефолт 368 по Приложению 4). */
+  postamatTariffCode: number;
   allowedTariffs: number[];
 
   sender: CdekSenderConfig;
@@ -48,6 +62,12 @@ export interface CdekConfig {
 
   cronSecret: string | null;
   createEnabled: boolean;
+  /**
+   * Создавать накладную СДЭК сразу при оформлении заказа, БЕЗ ожидания оплаты
+   * (магазины без онлайн-кассы). Дефолт false — штатно накладная только после
+   * оплаты. Когда касса появится — выключить (вернётся гейт по оплате).
+   */
+  createOnOrder: boolean;
 }
 
 /**
@@ -123,16 +143,19 @@ function buildDefaultDimensions(env: Env): PackageDims {
 export function getCdekConfig(source?: Record<string, string | undefined>): CdekConfig {
   const env = getEnv(source ?? process.env);
   return {
-    baseUrl: env.CDEK_BASE_URL,
+    // testMode форсирует edu-контур; CDEK_BASE_URL действует только в бою (см. шапку).
+    baseUrl: env.CDEK_TEST_MODE ? CDEK_EDU_BASE_URL : env.CDEK_BASE_URL,
     account: nonEmpty(env.CDEK_ACCOUNT),
     secret: nonEmpty(env.CDEK_SECRET),
     testMode: env.CDEK_TEST_MODE,
 
     fromLocationCode: env.CDEK_FROM_LOCATION_CODE,
+    fromAddress: nonEmpty(env.CDEK_FROM_ADDRESS),
     shipmentPoint: nonEmpty(env.CDEK_SHIPMENT_POINT),
 
     defaultTariffCode: env.CDEK_DEFAULT_TARIFF,
     doorTariffCode: env.CDEK_DOOR_TARIFF,
+    postamatTariffCode: env.CDEK_POSTAMAT_TARIFF,
     allowedTariffs: parseCsvInts(env.CDEK_ALLOWED_TARIFFS),
 
     sender: buildSender(env),
@@ -145,20 +168,25 @@ export function getCdekConfig(source?: Record<string, string | undefined>): Cdek
 
     cronSecret: nonEmpty(env.CDEK_CRON_SECRET),
     createEnabled: env.CDEK_CREATE_ENABLED,
+    createOnOrder: env.CDEK_CREATE_ON_ORDER,
   };
 }
 
 /**
- * Тариф СДЭК по режиму доставки (M4): курьер «до двери» (door) → doorTariffCode
- * (склад-дверь, 137); ПВЗ/постамат → defaultTariffCode (склад-склад, 136).
+ * Тариф СДЭК по режиму доставки (M4 + аудит 2026-07-09): курьер «до двери»
+ * (door) → doorTariffCode (склад-дверь, 137); постамат → postamatTariffCode
+ * (склад-постамат, 368 по Приложению 4); ПВЗ/не задан → defaultTariffCode
+ * (склад-склад, 136).
  *
- * Раньше тариф был mode-agnostic (всегда defaultTariffCode) → курьерская доставка
- * тарифицировалась ПВЗ-тарифом. Чистая и конфигурируемая (коды — из env, не зашиты
- * под конкретный магазин): мультитенантно переносится на любой ИМ.
+ * Раньше постамат тарифицировался ПВЗ-тарифом 136 — неверный код (постамату
+ * соответствует 368). Чистая и конфигурируемая (коды — из env, не зашиты под
+ * конкретный магазин): мультитенантно переносится на любой ИМ.
  */
 export function tariffForMode(
   cfg: CdekConfig,
   mode: CdekDeliveryMode | undefined,
 ): number {
-  return mode === 'door' ? cfg.doorTariffCode : cfg.defaultTariffCode;
+  if (mode === 'door') return cfg.doorTariffCode;
+  if (mode === 'postamat') return cfg.postamatTariffCode;
+  return cfg.defaultTariffCode;
 }

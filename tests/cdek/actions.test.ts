@@ -223,4 +223,47 @@ describe('cdek actions — валидация и module-gate', () => {
       expect((res as { message?: string }).message).toBeUndefined();
     }
   });
+
+  it('cdek_shipment_point_required → validation с текстом про CDEK_SHIPMENT_POINT (боевой аудит 2026-07-09)', async () => {
+    createShipmentMock.mockRejectedValueOnce(
+      new CdekError(
+        'cdek_shipment_point_required',
+        'Задайте CDEK_SHIPMENT_POINT — код ПВЗ, откуда сдаёте посылки (обязателен для тарифов от склада).',
+      ),
+    );
+    const res = await createCdekShipment({ orderId: ORDER_ID });
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error).toBe('validation');
+      expect(res.message).toMatch(/CDEK_SHIPMENT_POINT/);
+    }
+  });
+
+  it('cdek_create_invalid (СДЭК отклонил регистрацию) → validation с деталями для оператора', async () => {
+    createShipmentMock.mockRejectedValueOnce(
+      new CdekError('cdek_create_invalid', 'СДЭК отклонил регистрацию заказа: v2_field_is_empty: recipient'),
+    );
+    const res = await createCdekShipment({ orderId: ORDER_ID });
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error).toBe('validation');
+      expect(res.message).toMatch(/v2_field_is_empty/);
+    }
+  });
+
+  it('cdek_address_required / cdek_city_required → validation (оператор видит, чего не хватает заказу)', async () => {
+    createShipmentMock.mockRejectedValueOnce(
+      new CdekError('cdek_address_required', 'Для курьерской доставки обязателен адрес получателя.'),
+    );
+    const res1 = await createCdekShipment({ orderId: ORDER_ID });
+    expect(res1.ok).toBe(false);
+    if (!res1.ok) expect(res1.error).toBe('validation');
+
+    createShipmentMock.mockRejectedValueOnce(
+      new CdekError('cdek_city_required', 'Не удалось определить город получателя (code или city).'),
+    );
+    const res2 = await createCdekShipment({ orderId: ORDER_ID });
+    expect(res2.ok).toBe(false);
+    if (!res2.ok) expect(res2.error).toBe('validation');
+  });
 });

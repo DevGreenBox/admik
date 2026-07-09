@@ -42,7 +42,7 @@
 import { createHash } from 'node:crypto';
 import type { Redis } from 'ioredis';
 import { getEnv } from '@/lib/config/env';
-import { CdekError } from './errors';
+import { CdekError, isNetworkError } from './errors';
 
 /** Фейковый токен mock-режима (docs/08 §11: getToken() → 'mock-token'). */
 export const CDEK_MOCK_TOKEN = 'mock-token';
@@ -56,6 +56,22 @@ const TTL_SAFETY_MARGIN_SEC = 60;
 
 /** Таймаут добычи токена по умолчанию (мс). */
 const TOKEN_FETCH_TIMEOUT_MS = 15_000;
+
+/**
+ * Ретраи добычи токена (аудит перехода в бой, 2026-07-09): POST /v2/oauth/token
+ * идемпотентен (выдаёт новый токен, старые не портит), поэтому сетевой сбой и
+ * 5xx ретраятся до TOKEN_MAX_RETRIES с задержками TOKEN_RETRY_DELAYS_MS. Раньше
+ * ретраев не было — один сетевой чих на истечении TTL валил все конкурентные
+ * запросы (single-flight размножал одну ошибку на всех ожидающих).
+ * 400/401 НЕ ретраятся: это неверные креды (cdek_auth_failed), а не сбой.
+ */
+const TOKEN_MAX_RETRIES = 2;
+/** Задержки между ретраями добычи токена (мс), по индексу попытки. */
+const TOKEN_RETRY_DELAYS_MS = [250, 500] as const;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 // ---------------------------------------------------------------------------
 // Хранилище токена (TokenStore) — как RateBackend в rate-limit.ts.
@@ -203,7 +219,15 @@ export function createTokenCache(opts: TokenCacheOptions): TokenCache {
   /** Активная добыча токена (single-flight). */
   let inFlight: Promise<string> | null = null;
 
-  async function fetchToken(): Promise<OAuthTokenResponse> {
+  /**
+   * Один POST /v2/oauth/token под таймаутом (без ретраев — они уровнем выше).
+   * Тело ответа читаем ПОД ТЕМ ЖЕ таймером (до clearTimeout) и возвращаем как
+   * { status, text }: зависший body-стрim (half-open соединение после отдачи
+   * заголовков) иначе ждал бы без дедлайна и повесил бы single-flight — а с ним
+   * ВСЕ операции СДЭК в процессе (аудит 2026-07-09 #2). Зеркало client.ts
+   * performOnce, где чтение тела уже покрыто дедлайном.
+   */
+  async function fetchTokenOnce(): Promise<{ status: number; text: string }> {
     const url = `${baseUrl.replace(/\/$/, '')}/v2/oauth/token`;
     const body = new URLSearchParams({
       grant_type: 'client_credentials',
@@ -213,9 +237,8 @@ export function createTokenCache(opts: TokenCacheOptions): TokenCache {
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
-    let res: Response;
     try {
-      res = await fetchImpl(url, {
+      const res = await fetchImpl(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
@@ -224,38 +247,83 @@ export function createTokenCache(opts: TokenCacheOptions): TokenCache {
         body: body.toString(),
         signal: controller.signal,
       });
-    } catch (err) {
-      throw new CdekError(
-        'cdek_token_network_error',
-        `CDEK token fetch network error: ${(err as Error).message}`,
-      );
+      const text = await res.text();
+      return { status: res.status, text };
     } finally {
       clearTimeout(timer);
     }
+  }
 
-    let decoded: Partial<OAuthTokenResponse> & { errors?: unknown } = {};
-    const text = await res.text();
-    if (text) {
+  /**
+   * Добыча токена с ретраями (см. константы TOKEN_MAX_RETRIES выше):
+   *   • сетевая ошибка/таймаут и 5xx — ретрай (сам POST токена идемпотентен);
+   *   • 400/401 — cdek_auth_failed сразу (неверные CDEK_ACCOUNT/CDEK_SECRET);
+   *   • прочие ≥400 или ответ без access_token — cdek_token_fetch_failed.
+   */
+  async function fetchToken(): Promise<OAuthTokenResponse> {
+    for (let attempt = 0; ; attempt++) {
+      let res: { status: number; text: string };
       try {
-        decoded = JSON.parse(text) as typeof decoded;
-      } catch {
+        res = await fetchTokenOnce();
+      } catch (err) {
+        if (isNetworkError(err) && attempt < TOKEN_MAX_RETRIES) {
+          await sleep(TOKEN_RETRY_DELAYS_MS[Math.min(attempt, TOKEN_RETRY_DELAYS_MS.length - 1)]);
+          continue;
+        }
         throw new CdekError(
-          'cdek_token_invalid_json',
-          `CDEK token fetch invalid JSON: ${text.slice(0, 500)}`,
+          'cdek_token_network_error',
+          `CDEK token fetch network error: ${(err as Error).message}`,
+        );
+      }
+
+      // 5xx — транзиентный сбой СДЭК, ретраим как сетевую ошибку.
+      if (res.status >= 500 && attempt < TOKEN_MAX_RETRIES) {
+        await sleep(TOKEN_RETRY_DELAYS_MS[Math.min(attempt, TOKEN_RETRY_DELAYS_MS.length - 1)]);
+        continue;
+      }
+
+      // 400/401 — неверные креды: не ретраим, отдаём понятную подсказку.
+      if (res.status === 400 || res.status === 401) {
+        throw new CdekError(
+          'cdek_auth_failed',
+          `CDEK OAuth отверг учётные данные (HTTP ${res.status}): ` +
+            'проверьте CDEK_ACCOUNT/CDEK_SECRET (и контур: CDEK_TEST_MODE для edu-ключей).',
           { httpStatus: res.status },
         );
       }
-    }
 
-    if (res.status >= 400 || !decoded.access_token) {
-      throw new CdekError(
-        'cdek_token_fetch_failed',
-        `CDEK token fetch failed HTTP ${res.status}`,
-        { httpStatus: res.status },
-      );
-    }
+      if (res.status >= 400) {
+        throw new CdekError(
+          'cdek_token_fetch_failed',
+          `CDEK token fetch failed HTTP ${res.status}`,
+          { httpStatus: res.status },
+        );
+      }
 
-    return decoded as OAuthTokenResponse;
+      let decoded: Partial<OAuthTokenResponse> & { errors?: unknown } = {};
+      const text = res.text;
+      if (text) {
+        try {
+          decoded = JSON.parse(text) as typeof decoded;
+        } catch {
+          throw new CdekError(
+            'cdek_token_invalid_json',
+            `CDEK token fetch invalid JSON: ${text.slice(0, 500)}`,
+            { httpStatus: res.status },
+          );
+        }
+      }
+
+      if (!decoded.access_token) {
+        throw new CdekError(
+          'cdek_token_fetch_failed',
+          `CDEK token fetch failed HTTP ${res.status}`,
+          { httpStatus: res.status },
+        );
+      }
+
+      return decoded as OAuthTokenResponse;
+    }
   }
 
   async function obtain(): Promise<string> {

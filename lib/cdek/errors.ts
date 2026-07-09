@@ -18,6 +18,17 @@ export interface CdekApiError {
   message: string;
 }
 
+/**
+ * Признак сетевой ошибки fetch (включая abort по таймауту). Общий предикат
+ * транспортного слоя: используется client.ts (ретраи запросов и чтения тела) и
+ * token-cache.ts (ретраи добычи OAuth-токена). undici кидает TypeError («fetch
+ * failed») на сетевые сбои и DOMException с name='AbortError' на abort — в
+ * Node 18+ DOMException instanceof Error, поэтому одна проверка покрывает оба.
+ */
+export function isNetworkError(err: unknown): boolean {
+  return err instanceof TypeError || (err instanceof Error && err.name === 'AbortError');
+}
+
 /** Ошибка взаимодействия с СДЭК / домена cdek. */
 export class CdekError extends Error {
   readonly code: string;

@@ -6,6 +6,7 @@ import {
   parseCsvStrings,
   tariffForMode,
   CDEK_FALLBACK_DIMENSIONS,
+  CDEK_EDU_BASE_URL,
 } from '@/lib/cdek/config';
 
 /**
@@ -49,7 +50,14 @@ describe('cdek/config — getCdekConfig (чтение env)', () => {
     expect(cfg.doorTariffCode).toBe(137); // M4: курьер ≠ ПВЗ-тариф
     expect(cfg.allowedTariffs).toEqual([]);
     expect(cfg.createEnabled).toBe(true);
+    expect(cfg.createOnOrder).toBe(false);
     expect(cfg.webhookAllowedIps).toEqual([]);
+  });
+
+  it('CDEK_CREATE_ON_ORDER=true → createOnOrder=true (магазин без кассы)', () => {
+    expect(getCdekConfig({ NODE_ENV: 'test', CDEK_CREATE_ON_ORDER: 'true' }).createOnOrder).toBe(true);
+    expect(getCdekConfig({ NODE_ENV: 'test', CDEK_CREATE_ON_ORDER: '1' }).createOnOrder).toBe(true);
+    expect(getCdekConfig({ NODE_ENV: 'test' }).createOnOrder).toBe(false);
   });
 
   it('дефолтные габариты — 500/30/20/10 (аналог cdek-dimensions.php)', () => {
@@ -89,6 +97,27 @@ describe('cdek/config — getCdekConfig (чтение env)', () => {
     expect(getCdekConfig({ NODE_ENV: 'test', CDEK_TEST_MODE: '0' }).testMode).toBe(false);
   });
 
+  it('CDEK_TEST_MODE=true форсирует edu-контур: baseUrl = CDEK_EDU_BASE_URL, CDEK_BASE_URL игнорируется', () => {
+    // Половинчатая конфигурация (testMode=true + боевой CDEK_BASE_URL) раньше
+    // била боевым трафиком по проду — теперь testMode главнее.
+    const cfg = getCdekConfig({
+      NODE_ENV: 'test',
+      CDEK_TEST_MODE: 'true',
+      CDEK_BASE_URL: 'https://api.cdek.ru',
+    });
+    expect(CDEK_EDU_BASE_URL).toBe('https://api.edu.cdek.ru');
+    expect(cfg.baseUrl).toBe(CDEK_EDU_BASE_URL);
+  });
+
+  it('CDEK_TEST_MODE=false → baseUrl из CDEK_BASE_URL (боевой контур)', () => {
+    const cfg = getCdekConfig({
+      NODE_ENV: 'test',
+      CDEK_TEST_MODE: 'false',
+      CDEK_BASE_URL: 'https://api.cdek.ru',
+    });
+    expect(cfg.baseUrl).toBe('https://api.cdek.ru');
+  });
+
   it('CDEK_CREATE_ENABLED kill-switch', () => {
     expect(getCdekConfig({ NODE_ENV: 'test', CDEK_CREATE_ENABLED: 'false' }).createEnabled).toBe(
       false,
@@ -126,12 +155,27 @@ describe('cdek/config — getCdekConfig (чтение env)', () => {
     expect(cfg.doorTariffCode).toBe(139);
   });
 
-  it('M4: tariffForMode — door→doorTariffCode, pvz/postamat/undefined→defaultTariffCode', () => {
+  it('постаматный тариф: дефолт 368 (склад-постамат, Приложение 4), override из env', () => {
+    expect(getCdekConfig({ NODE_ENV: 'test' }).postamatTariffCode).toBe(368);
+    expect(
+      getCdekConfig({ NODE_ENV: 'test', CDEK_POSTAMAT_TARIFF: '378' }).postamatTariffCode,
+    ).toBe(378);
+  });
+
+  it('tariffForMode — door→doorTariffCode, postamat→postamatTariffCode, pvz/undefined→defaultTariffCode', () => {
     const cfg = getCdekConfig({ NODE_ENV: 'test' });
     expect(tariffForMode(cfg, 'door')).toBe(137);
     expect(tariffForMode(cfg, 'pvz')).toBe(136);
-    expect(tariffForMode(cfg, 'postamat')).toBe(136);
+    expect(tariffForMode(cfg, 'postamat')).toBe(368); // склад-постамат ≠ склад-склад
     expect(tariffForMode(cfg, undefined)).toBe(136);
+  });
+
+  it('fromAddress из CDEK_FROM_ADDRESS (для from_location.address заказов)', () => {
+    expect(getCdekConfig({ NODE_ENV: 'test' }).fromAddress).toBeNull();
+    expect(getCdekConfig({ NODE_ENV: 'test', CDEK_FROM_ADDRESS: '' }).fromAddress).toBeNull();
+    expect(
+      getCdekConfig({ NODE_ENV: 'test', CDEK_FROM_ADDRESS: 'г. Москва, ул. Ленина, 1' }).fromAddress,
+    ).toBe('г. Москва, ул. Ленина, 1');
   });
 
   it('IP-whitelist webhook парсится из csv', () => {

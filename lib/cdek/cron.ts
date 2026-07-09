@@ -25,7 +25,7 @@ import { sql } from '@/lib/db/client';
 import type { TransactionSql } from 'postgres';
 import { getCdekConfig, type CdekConfig } from './config';
 import { OrderService } from './services/order';
-import { TrackingService } from './services/tracking';
+import { TrackingService, TRACKING_NOT_FOUND_STATUS } from './services/tracking';
 
 /** Максимум попыток авто-создания (порт BOrder::CDEK_MAX_RETRIES). */
 export const CDEK_MAX_RETRIES = 3;
@@ -151,6 +151,14 @@ export async function findPendingOrders(
  * Активные (не финальные) отправления для pull-обновления статуса (порт
  * sync-stale): есть cdek_uuid, delivery_status ещё не финальный
  * (delivered/returned/cancelled). LIMIT для безопасности прогона.
+ *
+ * Дополнительно исключаются отправления с финальным status_code:
+ *   • NOT_FOUND (TRACKING_NOT_FOUND_STATUS) — заказ не существует/удалён/старше
+ *     1 года в СДЭК (v2_entity_not_found/forbidden): TrackingService пометил его
+ *     финально, дальнейший опрос — вечный бесполезный ретрай (голодание очереди);
+ *   • REMOVED — финальный «Удален» Приложения 1: обычно переход delivery_status
+ *     → cancelled уже исключает заказ, но если машина переход не пустила
+ *     (нестандартное состояние) — без этого фильтра опрос шёл бы вечно.
  */
 export async function findActiveShipments(
   limit: number = CREATE_PENDING_LIMIT,
@@ -161,6 +169,7 @@ export async function findActiveShipments(
       JOIN orders o ON o.id = s.order_id
      WHERE s.cdek_uuid IS NOT NULL
        AND o.delivery_status NOT IN ('delivered', 'returned', 'cancelled')
+       AND COALESCE(s.status_code, '') NOT IN (${TRACKING_NOT_FOUND_STATUS}, 'REMOVED')
      ORDER BY s.updated_at
      LIMIT ${limit}
   `;

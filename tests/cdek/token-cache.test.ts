@@ -154,19 +154,39 @@ describe('cdek/token-cache — реальный путь (замоканный f
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
-  it('ошибка авторизации (HTTP 400 без access_token) → CdekError', async () => {
+  it('ошибка авторизации (HTTP 400) → cdek_auth_failed БЕЗ ретраев, с подсказкой про креды', async () => {
     const fetchImpl = makeTokenFetch({ errors: [{ code: 'x', message: 'bad' }] } as never, 400);
     const { cache } = makeCache(fetchImpl);
     await expect(cache.getToken()).rejects.toMatchObject({
       name: 'CdekError',
+      code: 'cdek_auth_failed',
       httpStatus: 400,
     });
+    // Неверные креды НЕ ретраятся (это не сетевой сбой).
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    try {
+      await cache.getToken();
+    } catch (e) {
+      expect((e as Error).message).toMatch(/CDEK_ACCOUNT/);
+      expect((e as Error).message).toMatch(/CDEK_SECRET/);
+    }
+  });
+
+  it('HTTP 401 от oauth → cdek_auth_failed без ретраев', async () => {
+    const fetchImpl = makeTokenFetch({} as never, 401);
+    const { cache } = makeCache(fetchImpl);
+    await expect(cache.getToken()).rejects.toMatchObject({
+      code: 'cdek_auth_failed',
+      httpStatus: 401,
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   it('single-flight освобождается после ошибки (повтор добывает заново)', async () => {
+    // 400 — неретраибельная ошибка (авторизация), single-flight должен освободиться.
     const fetchImpl = vi
       .fn()
-      .mockResolvedValueOnce(new Response('boom', { status: 500 }))
+      .mockResolvedValueOnce(new Response('boom', { status: 400 }))
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ access_token: 'tok-B', expires_in: 3599 }), { status: 200 }),
       ) as unknown as typeof fetch;
@@ -176,5 +196,80 @@ describe('cdek/token-cache — реальный путь (замоканный f
     // in-flight сброшен → повтор делает новый запрос и получает токен.
     await expect(cache.getToken()).resolves.toBe('tok-B');
     expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('сетевая ошибка добычи токена → до 2 ретраев (250/500мс), затем успех', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ access_token: 'tok-R', expires_in: 3599 }), { status: 200 }),
+      ) as unknown as typeof fetch;
+    const { cache } = makeCache(fetchImpl);
+
+    await expect(cache.getToken()).resolves.toBe('tok-R');
+    expect(fetchImpl).toHaveBeenCalledTimes(3); // оригинал + 2 ретрая
+  });
+
+  it('оборванное тело ответа токена (res.text отклонён) → ретрай, затем успех (аудит #2)', async () => {
+    // Тело читается ПОД таймаутом внутри fetchTokenOnce; его отклонение (half-open
+    // соединение после заголовков) теперь попадает в цикл ретраев, а не всплывает
+    // мимо него сырым undici-объектом и не вешает single-flight.
+    const badBody = { status: 200, text: async () => { throw new TypeError('terminated'); } };
+    const goodBody = {
+      status: 200,
+      text: async () => JSON.stringify({ access_token: 'tok-BODY', expires_in: 3599 }),
+    };
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(badBody)
+      .mockResolvedValueOnce(goodBody) as unknown as typeof fetch;
+    const { cache } = makeCache(fetchImpl);
+
+    await expect(cache.getToken()).resolves.toBe('tok-BODY');
+    expect(fetchImpl).toHaveBeenCalledTimes(2); // оригинал + 1 ретрай на ошибке тела
+  });
+
+  it('5xx от oauth ретраится (transient), затем успех', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('oops', { status: 503 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ access_token: 'tok-S', expires_in: 3599 }), { status: 200 }),
+      ) as unknown as typeof fetch;
+    const { cache } = makeCache(fetchImpl);
+
+    await expect(cache.getToken()).resolves.toBe('tok-S');
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('сетевая ошибка после исчерпания ретраев → cdek_token_network_error (3 попытки)', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockRejectedValue(new TypeError('fetch failed')) as unknown as typeof fetch;
+    const { cache } = makeCache(fetchImpl);
+
+    await expect(cache.getToken()).rejects.toMatchObject({
+      name: 'CdekError',
+      code: 'cdek_token_network_error',
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(3); // оригинал + 2 ретрая
+  });
+
+  it('5xx после исчерпания ретраев → cdek_token_fetch_failed (3 попытки)', async () => {
+    // Свежий Response на КАЖДЫЙ вызов: тело читается однократно (fetchTokenOnce
+    // теперь читает body под таймаутом на каждой попытке, аудит #2).
+    const fetchImpl = vi
+      .fn()
+      .mockImplementation(async () => new Response('oops', { status: 500 })) as unknown as typeof fetch;
+    const { cache } = makeCache(fetchImpl);
+
+    await expect(cache.getToken()).rejects.toMatchObject({
+      name: 'CdekError',
+      code: 'cdek_token_fetch_failed',
+      httpStatus: 500,
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
   });
 });

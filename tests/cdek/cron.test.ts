@@ -185,6 +185,52 @@ describe('runNotifyStuck', () => {
 });
 
 // ---------------------------------------------------------------------------
+// findActiveShipments — исключение финальных отправлений (интеграция, нужна БД).
+// Боевой кейс: заказ удалён/не найден в СДЭК (NOT_FOUND) или получил финальный
+// REMOVED — иначе refresh-active опрашивает его ВЕЧНО (голодание очереди).
+// ---------------------------------------------------------------------------
+
+const INTEGRATION_DB_URL = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
+
+describe.skipIf(!INTEGRATION_DB_URL)(
+  'findActiveShipments — финальные статусы отправления исключены (интеграция)',
+  () => {
+    it('NOT_FOUND и REMOVED не попадают в выборку; активное отправление — попадает', async () => {
+      const { findActiveShipments } = await import('@/lib/cdek/cron');
+      const postgres = (await import('postgres')).default;
+      const sql = postgres(INTEGRATION_DB_URL!, { onnotice: () => {} });
+
+      async function makeShipment(statusCode: string | null): Promise<{ orderId: string; uuid: string }> {
+        const [order] = await sql`
+          INSERT INTO orders (number, items_total, grand_total, customer_name, customer_email, customer_phone, delivery_status)
+          VALUES (${'CDEK-CRON-' + Date.now() + '-' + Math.random()}, 100, 100, 'T', 'r@example.com', '+70000000000', 'in_transit')
+          RETURNING id`;
+        const uuid = 'uuid-cron-' + Date.now() + '-' + Math.random();
+        await sql`
+          INSERT INTO cdek_shipments (order_id, cdek_uuid, status_code, is_mock)
+          VALUES (${order!.id}, ${uuid}, ${statusCode}, true)`;
+        return { orderId: String(order!.id), uuid };
+      }
+
+      const active = await makeShipment(null);
+      const notFound = await makeShipment('NOT_FOUND');
+      const removed = await makeShipment('REMOVED');
+
+      try {
+        const rows = await findActiveShipments(10_000);
+        const uuids = rows.map((r) => r.cdekUuid);
+        expect(uuids).toContain(active.uuid);
+        expect(uuids).not.toContain(notFound.uuid);
+        expect(uuids).not.toContain(removed.uuid);
+      } finally {
+        await sql`DELETE FROM orders WHERE id IN ${sql([active.orderId, notFound.orderId, removed.orderId])}`;
+        await sql.end({ timeout: 5 });
+      }
+    });
+  },
+);
+
+// ---------------------------------------------------------------------------
 // Секрет-гейт роута /api/cron/cdek/[task]
 // ---------------------------------------------------------------------------
 
