@@ -9,13 +9,22 @@
  *
  * Чистые тестируемые функции (без сети/БД, всегда зелёные):
  *   • verifyWebhookIp — IP-whitelist (точные IP + CIDR), trust-proxy, mock-bypass;
- *   • parseEvent      — нормализация payload СДЭК в CdekEvent.
+ *   • parseEvent      — нормализация payload СДЭК в CdekEvent (в т.ч. флаги
+ *     is_return/is_client_return — события возвратных заказов, гэп №5).
  * БД-зависимый handleWebhookEvent — интеграционно (skipIf) либо с моком
  * repository.insertStatusLog в юнит-тесте.
+ *
+ * ПОДПИСКА НА ВЕБХУКИ (гэп №2, боевой аудит 2026-07-09): ensureWebhookSubscription
+ * (внизу файла) идемпотентно регистрирует POST /v2/webhooks — без неё в боевом
+ * режиме СДЭК не знает наш URL и вебхуки не приходят вовсе. Вызывается кнопкой
+ * в /admin/cdek (Server Action) и пригодна для периодического вызова из cron
+ * (СДЭК автоудаляет подписку при недоступном эндпоинте).
  */
 
 import type { CdekManager } from '../manager';
 import { getCdekManager } from '../manager';
+import { extractCdekErrors } from '../client';
+import { CdekError } from '../errors';
 import {
   getShipmentByCdekUuid,
   insertStatusLog,
@@ -120,6 +129,15 @@ export interface CdekEvent {
   statusDateTime: Date | null;
   cityCode: number | null;
   cityName: string | null;
+  /**
+   * Событие ВОЗВРАТНОГО заказа (attributes.is_return, webhooks.md): посылка
+   * едет обратно отправителю. attributes.number при этом несёт номер ИМ
+   * ИСХОДНОГО заказа — без флага событие возврата неверно двигало бы статус
+   * исходного заказа (боевой гэп №5 аудита 2026-07-09).
+   */
+  isReturn: boolean;
+  /** Клиентский возврат (attributes.is_client_return) — та же семантика. */
+  isClientReturn: boolean;
   raw: Record<string, unknown>;
 }
 
@@ -135,6 +153,10 @@ function dt(v: unknown): Date | null {
   if (!v) return null;
   const d = new Date(String(v));
   return Number.isNaN(d.getTime()) ? null : d;
+}
+/** Толерантный boolean: true / 'true' → true, всё прочее → false. */
+function bool(v: unknown): boolean {
+  return v === true || v === 'true';
 }
 
 /**
@@ -160,6 +182,8 @@ export function parseEvent(payload: unknown): CdekEvent {
     statusDateTime: dt(attrs.status_date_time),
     cityCode: int(attrs.city_code),
     cityName: str(attrs.city_name),
+    isReturn: bool(attrs.is_return),
+    isClientReturn: bool(attrs.is_client_return),
     raw: p,
   };
 }
@@ -248,9 +272,24 @@ export class WebhookService {
     // 3) Маппинг + докрутка delivery_status ПО ШАГАМ до актуального (C4-2): если СДЭК
     // прислал статус с прыжком (потерян in_transit), advanceDeliveryStatus пройдёт цепь
     // по шагам, а не дропнет переход молча. Повторный/уже-достигнутый — идемпотентный no-op.
+    //
+    // СОБЫТИЯ ВОЗВРАТНОГО ЗАКАЗА (is_return/is_client_return, боевой гэп №5):
+    // вебхук возвратного заказа несёт number ИМ ИСХОДНОГО заказа, поэтому без
+    // фильтра DELIVERED возврата («вручён ОТПРАВИТЕЛЮ») продвинул бы исходный
+    // заказ в delivered, а ON_THE_WAY возврата — в in_transit (ложь для
+    // покупателя). Правило: возвратные события применяются к исходному заказу
+    // ТОЛЬКО веткой 'returned' (терминальный возврат в статус-машине); прочие
+    // статусы возврата логируются в cdek_status_log (запись выше) без перехода.
     const next = mapCdekStatus(event.statusCode);
-    if (next) {
-      await advanceDeliveryStatus(orderId, next, `cdek-webhook:${event.statusCode}`);
+    const isReturnEvent = event.isReturn || event.isClientReturn;
+    if (next && isReturnEvent && next !== 'returned') {
+      console.warn(
+        `[cdek] webhook: событие ВОЗВРАТНОГО заказа (uuid=${event.cdekUuid}, ` +
+          `code=${event.statusCode}) — статус исходного заказа ${orderId} не меняем (только лог).`,
+      );
+    } else if (next) {
+      const source = isReturnEvent ? 'cdek-webhook-return' : 'cdek-webhook';
+      await advanceDeliveryStatus(orderId, next, `${source}:${event.statusCode}`);
     }
 
     // 4) Пометить лог обработанным (точка коммита идемпотентности).
@@ -260,4 +299,271 @@ export class WebhookService {
 
     return { processed: true, duplicate: false };
   }
+}
+
+// =============================================================================
+// ensureWebhookSubscription — регистрация подписки на вебхуки в СДЭК.
+//
+// Боевой гэп №2 аудита 2026-07-09: POST /v2/webhooks нигде не вызывался — в
+// боевом режиме СДЭК просто не знал наш URL, и вебхуки не приходили вообще
+// (статусы обновлялись только pull-кроном). Механизм (webhooks.md):
+//   • GET  /v2/webhooks            — список активных подписок [{uuid,type,url}];
+//   • POST /v2/webhooks {type,url} — добавить (дубль типа создаёт ЕЩЁ одну!);
+//   • DELETE /v2/webhooks/{uuid}   — удалить;
+//   • лимит — 2 подписки у клиента; подписка автоудаляется, если наш эндпоинт
+//     не отвечает 200 (24ч) или таймаутит (12 попыток/75 мин) → функция
+//     пригодна для периодического вызова из cron (мониторинг живости).
+// =============================================================================
+
+/** Путь вебхука СДЭК в нашем приложении (route: app/api/cdek/webhook). */
+export const CDEK_WEBHOOK_PATH = '/api/cdek/webhook';
+
+/**
+ * Типы событий, на которые платформа держит подписку.
+ *
+ * Только ORDER_STATUS: его обрабатывает handleWebhookEvent. PRINT_FORM
+ * СОЗНАТЕЛЬНО не подписываем — печать работает синхронным опросом
+ * (PrintService, print.md «Асинхронная модель»), обработчика PRINT_FORM в
+ * route нет, а лимит СДЭК — 2 подписки на клиента: тратить слот впустую нельзя.
+ */
+export const CDEK_WEBHOOK_TYPES: readonly string[] = ['ORDER_STATUS'];
+
+/** Одна подписка из GET /v2/webhooks. */
+export interface WebhookSubscriptionInfo {
+  uuid: string;
+  type: string;
+  url: string;
+}
+
+/** Строка отчёта по одной подписке (url — с замаскированным секретом). */
+export interface WebhookSubscriptionReportRow {
+  type: string;
+  uuid: string | null;
+  url: string;
+}
+
+/** Итог ensureWebhookSubscription (безопасен для UI/аудита: секрет маскирован). */
+export interface WebhookSubscriptionReport {
+  /** true — mock-режим (нет боевых ключей): подписка не требуется, no-op. */
+  mock: boolean;
+  /** Целевой URL подписки с маскированным ?key= (null, если не вычислен). */
+  targetUrl: string | null;
+  created: WebhookSubscriptionReportRow[];
+  kept: WebhookSubscriptionReportRow[];
+  /** Пересозданные НАШИ подписки с устаревшим доменом (удалённые старые). */
+  deleted: WebhookSubscriptionReportRow[];
+  errors: string[];
+}
+
+/** Маскирует секрет в query (?key=…) для отчёта/аудита/UI. */
+export function maskWebhookUrl(url: string): string {
+  return url.replace(/([?&]key=)[^&]*/g, '$1***');
+}
+
+/**
+ * Сравнивает URL подписки с целевым с нормализацией (СДЭК может вернуть URL в
+ * канонизированном виде — иначе каждая проверка пересоздавала бы подписку):
+ * совпадение origin + pathname (без хвостового «/») + значения query `key`.
+ */
+function urlsEquivalent(a: string, b: string): boolean {
+  try {
+    const ua = new URL(a);
+    const ub = new URL(b);
+    const norm = (p: string): string => p.replace(/\/+$/, '');
+    return (
+      ua.origin === ub.origin &&
+      norm(ua.pathname) === norm(ub.pathname) &&
+      (ua.searchParams.get('key') ?? '') === (ub.searchParams.get('key') ?? '')
+    );
+  } catch {
+    return a === b;
+  }
+}
+
+/** Наш ли это URL: path совпадает с CDEK_WEBHOOK_PATH (домен может устареть). */
+function isOurWebhookUrl(url: string): boolean {
+  try {
+    return new URL(url).pathname.replace(/\/+$/, '') === CDEK_WEBHOOK_PATH;
+  } catch {
+    return false;
+  }
+}
+
+/** Толерантный разбор GET /v2/webhooks (массив на верхнем уровне по докам). */
+function parseSubscriptionList(raw: unknown): WebhookSubscriptionInfo[] {
+  const arr = Array.isArray(raw)
+    ? raw
+    : raw && typeof raw === 'object' && Array.isArray((raw as Record<string, unknown>).entity)
+      ? ((raw as Record<string, unknown>).entity as unknown[])
+      : [];
+  const out: WebhookSubscriptionInfo[] = [];
+  for (const item of arr) {
+    if (!item || typeof item !== 'object') continue;
+    const rec = item as Record<string, unknown>;
+    const uuid = str(rec.uuid);
+    const type = str(rec.type);
+    const url = str(rec.url);
+    if (uuid && type && url) out.push({ uuid, type, url });
+  }
+  return out;
+}
+
+/** Человекочитаемая строка ошибки СДЭК для отчёта (код + детали errors[]). */
+function describeCdekFailure(prefix: string, err: unknown): string {
+  if (err instanceof CdekError) {
+    const details = err.cdekErrors.map((e) => `${e.code}: ${e.message}`).join('; ');
+    return `${prefix}: ${err.code}${details ? ` (${details})` : ''} — ${err.message}`;
+  }
+  return `${prefix}: ${err instanceof Error ? err.message : String(err)}`;
+}
+
+/** Опции ensureWebhookSubscription (инъекции для тестов/cron). */
+export interface EnsureWebhookSubscriptionOptions {
+  /** Менеджер СДЭК (по умолчанию процессный синглтон). */
+  manager?: CdekManager;
+  /**
+   * Источник публичного базового URL приложения. По умолчанию —
+   * shop_settings.seo.site_url (единственный существующий конфиг публичного
+   * домена: витрина и админка — одно Next-приложение, /api/cdek/webhook живёт
+   * на том же домене). Динамический импорт настроек — чтобы юнит-окружение без
+   * БД не тянуло слой настроек.
+   */
+  resolveBaseUrl?: () => Promise<string | null>;
+}
+
+/** Дефолтный источник базового URL: shop_settings.seo.site_url. */
+async function defaultResolveBaseUrl(): Promise<string | null> {
+  try {
+    const { getEffectiveSettings } = await import('@/lib/config/settings');
+    const eff = await getEffectiveSettings();
+    return eff.seo.site_url ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Идемпотентно приводит подписки СДЭК к целевому состоянию (вызывается кнопкой
+ * «Проверить подписку на вебхуки» в /admin/cdek и пригодна для cron):
+ *   1) mock-режим → no-op с mock:true (подписываться некуда и незачем);
+ *   2) целевой URL = base (site_url) + CDEK_WEBHOOK_PATH + ?key=CDEK_WEBHOOK_SECRET
+ *      (если секрет задан — совместимо с проверкой ?key= в route). Если не
+ *      настроены НИ секрет, НИ IP-whitelist — подписку НЕ создаём (роут отвечает
+ *      401, СДЭК удалит подписку через 24ч) → понятная ошибка в отчёте;
+ *   3) GET /v2/webhooks: для каждого типа из CDEK_WEBHOOK_TYPES
+ *      • есть подписка с нашим URL (нормализованное сравнение) → kept;
+ *      • подписка с НАШИМ path, но устаревшим доменом/секретом → DELETE + POST;
+ *      • ЧУЖИЕ url (другой path) НЕ трогаем — мультитенантная осторожность;
+ *      • нет ни одной → POST /v2/webhooks {type, url};
+ *   4) ответы POST разбираются на requests[].errors (state INVALID → errors[]).
+ *
+ * СЕКРЕТ НЕ УТЕКАЕТ: во всех строках отчёта url маскируется (key=***) — отчёт
+ * безопасен для UI и audit_log.
+ */
+export async function ensureWebhookSubscription(
+  opts: EnsureWebhookSubscriptionOptions = {},
+): Promise<WebhookSubscriptionReport> {
+  const manager = opts.manager ?? getCdekManager();
+  const report: WebhookSubscriptionReport = {
+    mock: manager.isMock,
+    targetUrl: null,
+    created: [],
+    kept: [],
+    deleted: [],
+    errors: [],
+  };
+
+  // Все строки ошибок отчёта проходят маскировку секрета вебхука (key=***):
+  // сообщения СДЭК могут отражать присланный url с ?key=<секрет> (аудит 2026-07-09
+  // #4), а report.errors пишется в audit_log и рендерится оператору в админке.
+  const pushError = (msg: string): number => report.errors.push(maskWebhookUrl(msg));
+
+  // (1) mock-режим — no-op (нет боевых ключей → нет и кабинета СДЭК).
+  if (manager.isMock) return report;
+
+  // (2) Публичный базовый URL приложения.
+  const resolveBaseUrl = opts.resolveBaseUrl ?? defaultResolveBaseUrl;
+  const base = await resolveBaseUrl();
+  if (!base) {
+    pushError(
+      'Не задан публичный домен приложения: заполните «Домен сайта (site_url)» в ' +
+        'Настройки → SEO — без него невозможно вычислить URL вебхука для СДЭК.',
+    );
+    return report;
+  }
+
+  const cfg = manager.config;
+  if (!cfg.webhookSecret && cfg.webhookAllowedIps.length === 0) {
+    pushError(
+      'Вебхук не защищён: задайте CDEK_WEBHOOK_SECRET (или CDEK_WEBHOOK_IPS + ' +
+        'CDEK_WEBHOOK_TRUST_PROXY). Роут отвечает 401 на незащищённые запросы, и ' +
+        'СДЭК автоматически удалит такую подписку через 24 часа — подписка не создана.',
+    );
+    return report;
+  }
+
+  let target: URL;
+  try {
+    target = new URL(CDEK_WEBHOOK_PATH, base);
+  } catch {
+    pushError(`Некорректный site_url («${base}») — не удалось построить URL вебхука.`);
+    return report;
+  }
+  if (cfg.webhookSecret) target.searchParams.set('key', cfg.webhookSecret);
+  const targetUrl = target.toString();
+  report.targetUrl = maskWebhookUrl(targetUrl);
+
+  // (3) Текущие подписки.
+  let existing: WebhookSubscriptionInfo[];
+  try {
+    const raw = await manager.client.request<unknown>('GET', '/v2/webhooks');
+    existing = parseSubscriptionList(raw);
+  } catch (err) {
+    pushError(describeCdekFailure('Не удалось получить список подписок (GET /v2/webhooks)', err));
+    return report;
+  }
+
+  for (const type of CDEK_WEBHOOK_TYPES) {
+    const ofType = existing.filter((s) => s.type === type);
+    const exact = ofType.find((s) => urlsEquivalent(s.url, targetUrl));
+    if (exact) {
+      report.kept.push({ type, uuid: exact.uuid, url: maskWebhookUrl(exact.url) });
+      continue;
+    }
+
+    // Наши устаревшие (path совпал, домен/секрет — нет) → пересоздаём. Чужие
+    // подписки (другой path) не трогаем: их держат другие системы клиента.
+    const stale = ofType.filter((s) => isOurWebhookUrl(s.url));
+    for (const s of stale) {
+      try {
+        await manager.client.request('DELETE', `/v2/webhooks/${s.uuid}`);
+        report.deleted.push({ type, uuid: s.uuid, url: maskWebhookUrl(s.url) });
+      } catch (err) {
+        pushError(describeCdekFailure(`Не удалось удалить устаревшую подписку ${s.uuid}`, err));
+      }
+    }
+
+    // POST сознательно БЕЗ idempotent:true: авто-повтор мог бы создать дубль
+    // подписки (СДЭК создаёт ещё одну при том же типе), а лимит — 2 на клиента.
+    try {
+      const res = await manager.client.request<Record<string, unknown>>('POST', '/v2/webhooks', {
+        json: { type, url: targetUrl },
+      });
+      const apiErrors = extractCdekErrors(res);
+      if (apiErrors.length > 0) {
+        pushError(
+          `Подписка ${type} отклонена СДЭК: ` +
+            apiErrors.map((e) => `${e.code}: ${e.message}`).join('; '),
+        );
+        continue;
+      }
+      const entity = (res?.entity ?? null) as Record<string, unknown> | null;
+      const uuid = entity && typeof entity.uuid === 'string' ? entity.uuid : null;
+      report.created.push({ type, uuid, url: maskWebhookUrl(targetUrl) });
+    } catch (err) {
+      pushError(describeCdekFailure(`Не удалось создать подписку ${type} (POST /v2/webhooks)`, err));
+    }
+  }
+
+  return report;
 }

@@ -2,38 +2,58 @@ import { describe, it, expect } from 'vitest';
 
 import {
   MOCK_LABEL_NOTICE,
-  resolveLabelOutcome,
+  labelProxyUrl,
+  resolvePrintClick,
 } from '@/lib/cdek/print-label';
 
 /**
- * Находка #12: в mock-режиме печать вела на мёртвый example.invalid. Чистая
- * функция исхода печати — UI открывает вкладку ТОЛЬКО в боевом режиме с URL,
- * а в mock показывает пояснение и НЕ открывает ничего.
+ * Чистая логика кнопок печати в UI (гэп №3 боевого аудита 2026-07-09).
+ *
+ * Раньше UI открывал ПРЯМОЙ URL СДЭК (api.cdek.ru/...pdf) — он требует
+ * Bearer-токен и живёт ~1 час, браузер получал 401. Теперь печать идёт через
+ * авторизованный серверный прокси /admin/cdek/label (скачивает PDF с токеном и
+ * отдаёт файл админу). В mock-режиме — прежнее пояснение без открытия вкладки
+ * (находка #12).
  */
-describe('resolveLabelOutcome (печать накладной/ШК)', () => {
-  it('mock → не открывать вкладку, показать пояснение про боевой режим', () => {
-    const out = resolveLabelOutcome('Печать накладной', {
-      isMock: true,
-      url: 'https://example.invalid/mock-waybill.pdf',
-    });
-    expect(out.open).toBe(false);
-    expect(out.message).toContain(MOCK_LABEL_NOTICE);
-    // Гарантия: дефект (открытие example.invalid) устранён — вкладку не открываем.
-    expect(out.open).not.toBe(true);
+describe('labelProxyUrl (адрес серверного PDF-прокси)', () => {
+  it('строит same-origin путь с orderId и kind (без api.cdek.ru)', () => {
+    const url = labelProxyUrl('11111111-1111-4111-8111-111111111111', 'waybill');
+    expect(url).toBe(
+      '/admin/cdek/label?orderId=11111111-1111-4111-8111-111111111111&kind=waybill',
+    );
+    expect(url).not.toContain('cdek.ru');
   });
 
-  it('боевой режим + готовый URL → открыть вкладку, «выполнено»', () => {
-    const out = resolveLabelOutcome('Печать ШК', {
+  it('kind=barcode попадает в query', () => {
+    expect(labelProxyUrl('ord-1', 'barcode')).toContain('kind=barcode');
+  });
+
+  it('orderId экранируется (URL-инъекция невозможна)', () => {
+    const url = labelProxyUrl('a&b=c', 'waybill');
+    expect(url).toContain('orderId=a%26b%3Dc');
+  });
+});
+
+describe('resolvePrintClick (исход клика по кнопке печати)', () => {
+  it('mock → не открывать, показать пояснение про боевой режим', () => {
+    const out = resolvePrintClick('Печать накладной', {
+      isMock: true,
+      orderId: 'ord-1',
+      kind: 'waybill',
+    });
+    expect(out.open).toBe(false);
+    expect(out.url).toBeNull();
+    expect(out.message).toContain(MOCK_LABEL_NOTICE);
+  });
+
+  it('боевой режим → открыть ПРОКСИ-URL (не прямой линк СДЭК)', () => {
+    const out = resolvePrintClick('Печать ШК', {
       isMock: false,
-      url: 'https://cdek.ru/print/abc.pdf',
+      orderId: 'ord-2',
+      kind: 'barcode',
     });
     expect(out.open).toBe(true);
-    expect(out.message).toBe('Печать ШК: выполнено.');
-  });
-
-  it('боевой режим без URL → не открывать, но «выполнено»', () => {
-    const out = resolveLabelOutcome('Печать накладной', { isMock: false, url: null });
-    expect(out.open).toBe(false);
-    expect(out.message).toBe('Печать накладной: выполнено.');
+    expect(out.url).toBe(labelProxyUrl('ord-2', 'barcode'));
+    expect(out.url).not.toContain('cdek.ru');
   });
 });

@@ -3,11 +3,13 @@ import Link from 'next/link';
 import { sql } from '@/lib/db/client';
 import { isCdekMock, getCdekConfig } from '@/lib/cdek/config';
 import { deliveryModeLabel, destinationLabel } from '@/lib/cdek/format';
+import { labelProxyUrl } from '@/lib/cdek/print-label';
 import { formatDateTime } from '@/lib/admin/order-format';
 
 import { Forbidden } from '../_components/Forbidden';
 import { PageHeader } from '../_components/PageHeader';
 import { guardCdek } from './_components/guard';
+import { WebhookSubscriptionCard } from './_components/WebhookSubscriptionCard';
 
 /**
  * Раздел «Доставка (СДЭК)» админки — сводка отправлений по всем заказам.
@@ -152,6 +154,9 @@ export default async function CdekPage({
         }
       />
 
+      {/* Подписка на вебхуки (гэп №2): проверка/регистрация POST /v2/webhooks. */}
+      <WebhookSubscriptionCard isMock={isCdekMock()} />
+
       <form method="get" className="mt-4 flex gap-2">
         <input
           type="search"
@@ -240,11 +245,10 @@ export default async function CdekPage({
                   </td>
                   <td className="px-4 py-2 text-gray-500">{formatDateTime(row.updated_at)}</td>
                   <td className="px-4 py-2">
-                    {row.print_url ? (
+                    {row.cdek_uuid ? (
                       row.is_mock ? (
-                        // MOCK: print_url ведёт на example.invalid (RFC 2606) и
-                        // никогда не откроется — вместо мёртвой ссылки показываем
-                        // некликабельный бейдж-пояснение (находка #12).
+                        // MOCK: реального PDF нет (print_url вёл на example.invalid,
+                        // RFC 2606) — вместо мёртвой ссылки некликабельный бейдж (находка #12).
                         <span
                           className="rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-700"
                           title="MOCK: реальная накладная появится в боевом режиме (с боевыми ключами СДЭК)"
@@ -252,8 +256,11 @@ export default async function CdekPage({
                           mock
                         </span>
                       ) : (
+                        // БОЕВОЙ: ссылка на НАШ серверный PDF-прокси (гэп №3 аудита
+                        // 2026-07-09) — прямой print_url СДЭК требует Bearer и живёт
+                        // ~1 час, в браузере он давал 401.
                         <a
-                          href={row.print_url}
+                          href={labelProxyUrl(row.order_id, 'waybill')}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="text-blue-700 hover:underline"
