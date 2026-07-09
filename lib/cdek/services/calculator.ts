@@ -7,19 +7,35 @@
  *   • иначе  → manager.client.request к /v2/calculator/{tariff,tarifflist} с
  *             маппингом snake_case ответа СДЭК в доменный CdekTariffResult.
  *
- * from_location — ВСЕГДА серверный (CdekConfig.fromLocationCode / shipmentPoint),
- * из входа не берётся (анти-tamper, docs/08 §6.1, ADR-010).
+ * from_location — ВСЕГДА серверный, из входа не берётся (анти-tamper, docs/08
+ * §6.1, ADR-010). При заданном CDEK_SHIPMENT_POINT real-ветка резолвит КОД
+ * ГОРОДА этого ПВЗ через GET /v2/deliverypoints?code=… (кеш в памяти модуля,
+ * TTL 1 час) — иначе котировка шла от CDEK_FROM_LOCATION_CODE (дефолт 44
+ * Москва) и расходилась с фактической накладной, создаваемой от ПВЗ отгрузки
+ * (аудит перехода в бой 2026-07-09). При сбое резолва — фоллбэк на
+ * fromLocationCode (один console.warn на ключ ПВЗ).
+ *
+ * БОЕВЫЕ БЮДЖЕТЫ ВИТРИННОГО ПУТИ: расчёт стоит на пути чекаута, поэтому real-
+ * запросы калькулятора идут с timeoutMs=10000, maxNetworkRetries=1 и
+ * idempotent=true (расчёт безопасен к авто-повтору; транспорт после волны 1 НЕ
+ * ретраит POST без этой пометки). Результат расчёта по тарифу кешируется на
+ * 300с (Redis при REDIS_URL через TokenStore-абстракцию token-cache, иначе
+ * память; фоллбэк на память при недоступности Redis) — без кеша каждый шаг
+ * чекаута бил живой POST /v2/calculator/tariff при общем лимите СДЭК 200 RPS.
+ * Кеш применяется ТОЛЬКО в real-ветке (mock мгновенный и без сети).
  *
  * Хелпер aggregatePackage — чистая агрегация веса/габаритов корзины в одну
  * упаковку (вес/высота — Σ(qty*x), Д/Ш — max), тестируется без сети.
  */
 
+import { createHash } from 'node:crypto';
 import type { CdekManager } from '../manager';
 import {
   CDEK_FALLBACK_DIMENSIONS,
   type CdekConfig,
 } from '../config';
 import { CdekError, type CdekApiError } from '../errors';
+import { getDefaultTokenStore } from '../token-cache';
 import type {
   CdekLocation,
   CdekPackage,
@@ -107,8 +123,120 @@ export interface CalculateAvailableInput {
   to: CdekLocation;
   packages?: CdekPackage[];
   lines?: readonly CartLineDims[];
-  /** type для tarifflist (2 = ИМ). */
+  /** type для tarifflist: 1 = интернет-магазин (default СДЭК), 2 = доставка. */
   type?: number;
+}
+
+// -----------------------------------------------------------------------------
+// Кеши real-ветки: бюджеты запросов, котировки (TTL 300с), город ПВЗ отгрузки
+// (TTL 1 час). Модульные — переживают инстансы Calculator в рамках процесса.
+// -----------------------------------------------------------------------------
+
+/** Таймаут real-запросов калькулятора (мс) — витринный путь, не дефолтные 30с. */
+const CALC_TIMEOUT_MS = 10_000;
+/** Сетевых ретраев на витринном пути (лимит СДЭК 200 RPS на всех клиентов). */
+const CALC_MAX_NETWORK_RETRIES = 1;
+
+/** TTL кеша котировок (с): цены СДЭК стабильны в пределах минут. */
+const QUOTE_CACHE_TTL_SEC = 300;
+/** TTL кеша «код города ПВЗ отгрузки» (мс): ПВЗ переезжает редко. */
+const SHIPMENT_POINT_CITY_TTL_MS = 3_600_000;
+
+/**
+ * In-memory фоллбэк кеша котировок: используется, когда Redis-хранилище
+ * (getDefaultTokenStore при REDIS_URL) недоступно/падает. Без REDIS_URL
+ * getDefaultTokenStore сам отдаёт MemoryTokenStore — фоллбэк не задействуется.
+ */
+const quoteMemFallback = new Map<string, { value: string; expiresAt: number }>();
+let quoteStoreWarned = false;
+
+/** Кеш кода города ПВЗ отгрузки (ключ — код ПВЗ, значение — city_code + дедлайн). */
+const shipmentPointCityCache = new Map<string, { cityCode: number; expiresAt: number }>();
+/** ПВЗ, по которым фоллбэк-warn уже выдан (ровно один console.warn на ключ). */
+const shipmentPointWarned = new Set<string>();
+
+/** Сбрасывает модульные кеши калькулятора (для тестов). */
+export function resetCalculatorRuntimeCaches(): void {
+  quoteMemFallback.clear();
+  quoteStoreWarned = false;
+  shipmentPointCityCache.clear();
+  shipmentPointWarned.clear();
+}
+
+/** Ключ кеша котировки: hash от контура (baseUrl) + полного тела запроса
+ *  (from/to/tariff/packages — режим доставки кодируется тарифом). */
+function quoteCacheKey(baseUrl: string, body: unknown): string {
+  const hash = createHash('sha256')
+    .update(baseUrl)
+    .update(' ')
+    .update(JSON.stringify(body))
+    .digest('hex');
+  return `cdek:calc:quote:${hash}`;
+}
+
+function warnQuoteStoreOnce(err: unknown): void {
+  if (quoteStoreWarned) return;
+  quoteStoreWarned = true;
+  console.warn(
+    `[cdek] кеш котировок: Redis недоступен (${(err as Error)?.message ?? err}) — ` +
+      'работаю через память процесса.',
+  );
+}
+
+/** Чтение котировки из кеша (Redis → память при сбое). null — промах. */
+async function quoteCacheGet(key: string): Promise<CdekTariffResult | null> {
+  let rawValue: string | null = null;
+  try {
+    const store = await getDefaultTokenStore();
+    rawValue = await store.get(key);
+  } catch (err) {
+    warnQuoteStoreOnce(err);
+    const hit = quoteMemFallback.get(key);
+    if (hit && hit.expiresAt > Date.now()) rawValue = hit.value;
+    else quoteMemFallback.delete(key);
+  }
+  if (!rawValue) return null;
+  try {
+    const parsed = JSON.parse(rawValue) as CdekTariffResult;
+    // Минимальная проверка формы: битые/чужие значения не отдаём как котировку.
+    if (typeof parsed?.deliverySum !== 'string' || typeof parsed?.tariffCode !== 'number') {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/** Запись котировки в кеш (Redis → память при сбое), TTL QUOTE_CACHE_TTL_SEC. */
+async function quoteCacheSet(key: string, result: CdekTariffResult): Promise<void> {
+  const value = JSON.stringify(result);
+  try {
+    const store = await getDefaultTokenStore();
+    await store.set(key, value, QUOTE_CACHE_TTL_SEC);
+  } catch (err) {
+    warnQuoteStoreOnce(err);
+    quoteMemFallback.set(key, {
+      value,
+      expiresAt: Date.now() + QUOTE_CACHE_TTL_SEC * 1000,
+    });
+  }
+}
+
+/** Достаёт location.city_code первого офиса из ответа GET /v2/deliverypoints. */
+function extractShipmentCityCode(raw: unknown): number | null {
+  if (!Array.isArray(raw)) return null;
+  for (const office of raw) {
+    if (!office || typeof office !== 'object') continue;
+    const location = (office as Record<string, unknown>).location;
+    if (!location || typeof location !== 'object') continue;
+    const cityCode = (location as Record<string, unknown>).city_code;
+    const n = Number(cityCode);
+    if (cityCode !== null && cityCode !== undefined && Number.isFinite(n)) {
+      return Math.trunc(n);
+    }
+  }
+  return null;
 }
 
 // -----------------------------------------------------------------------------
@@ -195,9 +323,48 @@ export class Calculator {
     return this.manager.config;
   }
 
-  /** Серверная локация отправления (анти-tamper). */
-  private fromLocation(): CdekLocation {
-    return { code: this.config.fromLocationCode };
+  /**
+   * Серверная локация отправления (анти-tamper). При заданном CDEK_SHIPMENT_POINT
+   * резолвит код ГОРОДА ПВЗ отгрузки через GET /v2/deliverypoints?code=…
+   * (идемпотентный GET; кеш модуля, TTL 1 час) — иначе котировка от
+   * fromLocationCode расходится с накладной, создаваемой от ПВЗ. При сбое
+   * резолва — фоллбэк на fromLocationCode + один console.warn на ключ.
+   * Вызывается ТОЛЬКО в real-ветке (в mock client недоступен).
+   */
+  private async resolveFromLocation(): Promise<CdekLocation> {
+    const cfg = this.config;
+    const point = cfg.shipmentPoint;
+    if (!point) return { code: cfg.fromLocationCode };
+
+    const hit = shipmentPointCityCache.get(point);
+    if (hit && hit.expiresAt > Date.now()) return { code: hit.cityCode };
+
+    try {
+      const raw = await this.manager.client.request<unknown>('GET', '/v2/deliverypoints', {
+        query: { code: point },
+        timeoutMs: CALC_TIMEOUT_MS,
+        maxNetworkRetries: CALC_MAX_NETWORK_RETRIES,
+      });
+      const cityCode = extractShipmentCityCode(raw);
+      if (cityCode !== null) {
+        shipmentPointCityCache.set(point, {
+          cityCode,
+          expiresAt: Date.now() + SHIPMENT_POINT_CITY_TTL_MS,
+        });
+        return { code: cityCode };
+      }
+    } catch {
+      // Сбой резолва не должен ронять расчёт — фоллбэк ниже.
+    }
+
+    if (!shipmentPointWarned.has(point)) {
+      shipmentPointWarned.add(point);
+      console.warn(
+        `[cdek] не удалось определить город ПВЗ отгрузки «${point}» ` +
+          `(GET /v2/deliverypoints) — котировка от CDEK_FROM_LOCATION_CODE=${cfg.fromLocationCode}.`,
+      );
+    }
+    return { code: cfg.fromLocationCode };
   }
 
   /** packages из входа: явные packages ИЛИ агрегация позиций корзины. */
@@ -209,7 +376,9 @@ export class Calculator {
 
   /**
    * Расчёт по конкретному тарифу (POST /v2/calculator/tariff).
-   * В mock — формула §5.3; в real — запрос + маппинг ответа.
+   * В mock — формула §5.3; в real — запрос с витринными бюджетами
+   * (10с/1 ретрай/idempotent) + кеш результата на 300с + маппинг ответа.
+   * «Тариф недоступен» (CdekError cdek_calc_no_price) НЕ кешируется.
    */
   async calculate(input: CalculateInput): Promise<CdekTariffResult> {
     const tariffCode = input.tariffCode ?? this.config.defaultTariffCode;
@@ -219,23 +388,36 @@ export class Calculator {
       return this.manager.mock.mockCalculateByTariff(tariffCode, packages);
     }
 
+    const body = {
+      tariff_code: tariffCode,
+      from_location: toApiLocation(await this.resolveFromLocation()),
+      to_location: toApiLocation(input.to),
+      packages,
+    };
+
+    const cacheKey = quoteCacheKey(this.config.baseUrl, body);
+    const cached = await quoteCacheGet(cacheKey);
+    if (cached) return cached;
+
     const raw = await this.manager.client.request<Record<string, unknown>>(
       'POST',
       '/v2/calculator/tariff',
       {
-        json: {
-          tariff_code: tariffCode,
-          from_location: this.fromLocation(),
-          to_location: toApiLocation(input.to),
-          packages,
-        },
+        json: body,
+        timeoutMs: CALC_TIMEOUT_MS,
+        maxNetworkRetries: CALC_MAX_NETWORK_RETRIES,
+        // Расчёт стоимости безопасен к авто-повтору (ничего не создаёт).
+        idempotent: true,
       },
     );
-    return mapTariffResult(raw ?? {}, tariffCode);
+    const result = mapTariffResult(raw ?? {}, tariffCode);
+    await quoteCacheSet(cacheKey, result);
+    return result;
   }
 
   /**
-   * Список доступных тарифов (POST /v2/calculator/tarifflist, type=2 ИМ).
+   * Список доступных тарифов (POST /v2/calculator/tarifflist; type=1 —
+   * «интернет-магазин», default СДЭК; 2 — «доставка»).
    * В mock — фикстурный набор; в real — запрос + маппинг tariff_codes[].
    */
   async calculateAvailable(input: CalculateAvailableInput): Promise<CdekTariffOption[]> {
@@ -250,11 +432,15 @@ export class Calculator {
       '/v2/calculator/tarifflist',
       {
         json: {
-          type: input.type ?? 2,
-          from_location: this.fromLocation(),
+          type: input.type ?? 1,
+          from_location: toApiLocation(await this.resolveFromLocation()),
           to_location: toApiLocation(input.to),
           packages,
         },
+        timeoutMs: CALC_TIMEOUT_MS,
+        maxNetworkRetries: CALC_MAX_NETWORK_RETRIES,
+        // Расчёт списка тарифов безопасен к авто-повтору.
+        idempotent: true,
       },
     );
     const list = Array.isArray(raw?.tariff_codes) ? (raw.tariff_codes as Record<string, unknown>[]) : [];

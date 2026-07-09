@@ -5,7 +5,12 @@ import { CityService } from '@/lib/cdek/services/city';
 
 /**
  * Тесты CityService (поиск городов СДЭК, docs/13 §2). Mock-путь — фикстуры.
- * Real-путь — замоканный manager.client (без сети): маппинг /v2/location/cities.
+ * Real-путь — замоканный manager.client (без сети): автокомплит идёт через
+ * GET /v2/location/suggest/cities (аудит apidoc.cdek.ru 2026-07-09): параметр
+ * `city` у /v2/location/cities — ТОЧНОЕ совпадение названия, подстрока вернёт
+ * пусто; для подсказок по неполному имени СДЭК даёт suggest/cities с ответом
+ * [{ city_uuid, code, full_name }]. DTO витрины сохраняется: { code, name,
+ * region } (name/region — из full_name «Город, Регион, Россия»).
  */
 
 const mockCfg = getCdekConfig({ NODE_ENV: 'test' });
@@ -46,7 +51,7 @@ describe('cdek/city — mock-путь (фикстуры)', () => {
   });
 });
 
-describe('cdek/city — real-путь (замоканный manager.client)', () => {
+describe('cdek/city — real-путь (замоканный manager.client, suggest/cities)', () => {
   function makeManager(responseBody: unknown) {
     const fetchImpl = vi.fn(async () =>
       new Response(JSON.stringify(responseBody), {
@@ -58,26 +63,65 @@ describe('cdek/city — real-путь (замоканный manager.client)', ()
     return { m: new CdekManager({ config: realCfg, fetchImpl, tokenCache }), fetchImpl };
   }
 
-  const rawCity = { code: 270, city: 'Новосибирск', region: 'Новосибирская область' };
+  const rawSuggest = {
+    city_uuid: '01581370-81f3-4322-9a28-3418adfabd97',
+    code: 270,
+    full_name: 'Новосибирск, Новосибирская область, Россия',
+  };
 
-  it('маппит ответ /v2/location/cities (массив)', async () => {
-    const { m } = makeManager([rawCity]);
-    const cities = await new CityService(m).searchCities('новос');
-    expect(cities).toEqual([{ code: 270, name: 'Новосибирск', region: 'Новосибирская область' }]);
-  });
-
-  it('передаёт city/country_codes в query', async () => {
-    const { m, fetchImpl } = makeManager([rawCity]);
+  it('идёт в GET /v2/location/suggest/cities с name и country_code=RU (НЕ в /v2/location/cities)', async () => {
+    const { m, fetchImpl } = makeManager([rawSuggest]);
     await new CityService(m).searchCities('новос');
     const [url] = (fetchImpl as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(String(url)).toContain('/v2/location/cities');
-    expect(String(url)).toContain('country_codes=RU');
+    const parsed = new URL(String(url));
+    // /v2/location/cities?city=… — ТОЧНОЕ совпадение имени: автокомплит по
+    // подстроке возвращал пусто (аудит 2026-07-09). Подсказки — suggest/cities.
+    expect(parsed.pathname).toBe('/v2/location/suggest/cities');
+    expect(parsed.searchParams.get('name')).toBe('новос');
+    expect(parsed.searchParams.get('country_code')).toBe('RU');
   });
 
-  it('отбрасывает записи без code', async () => {
-    const { m } = makeManager([{ city: 'Безкода' }, rawCity]);
+  it('маппит [{ city_uuid, code, full_name }] → DTO { code, name, region } витрины', async () => {
+    const { m } = makeManager([rawSuggest]);
+    const cities = await new CityService(m).searchCities('новос');
+    expect(cities).toEqual([
+      { code: 270, name: 'Новосибирск', region: 'Новосибирская область' },
+    ]);
+  });
+
+  it('full_name без региона («Город, Россия») → region пустой', async () => {
+    const { m } = makeManager([
+      { city_uuid: 'u-1', code: 44, full_name: 'Москва, Россия' },
+    ]);
+    const cities = await new CityService(m).searchCities('моск');
+    expect(cities).toEqual([{ code: 44, name: 'Москва', region: '' }]);
+  });
+
+  it('full_name без запятых → name как есть, region пустой', async () => {
+    const { m } = makeManager([{ city_uuid: 'u-2', code: 44, full_name: 'Москва' }]);
+    const cities = await new CityService(m).searchCities('моск');
+    expect(cities).toEqual([{ code: 44, name: 'Москва', region: '' }]);
+  });
+
+  it('отбрасывает записи без числового code', async () => {
+    const { m } = makeManager([
+      { city_uuid: 'u-3', full_name: 'Безкода, Россия' },
+      rawSuggest,
+    ]);
     const cities = await new CityService(m).searchCities('абвгд');
-    expect(cities).toEqual([{ code: 270, name: 'Новосибирск', region: 'Новосибирская область' }]);
+    expect(cities).toEqual([
+      { code: 270, name: 'Новосибирск', region: 'Новосибирская область' },
+    ]);
+  });
+
+  it('ограничивает результат limit (suggest не принимает size — режем сами)', async () => {
+    const { m } = makeManager([
+      { city_uuid: 'u-a', code: 1, full_name: 'А, Регион, Россия' },
+      { city_uuid: 'u-b', code: 2, full_name: 'Б, Регион, Россия' },
+      { city_uuid: 'u-c', code: 3, full_name: 'В, Регион, Россия' },
+    ]);
+    const cities = await new CityService(m).searchCities('абвгд', 2);
+    expect(cities.map((c) => c.code)).toEqual([1, 2]);
   });
 
   it('устойчив к не-массиву в ответе', async () => {

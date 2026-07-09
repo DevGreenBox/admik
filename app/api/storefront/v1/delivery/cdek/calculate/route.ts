@@ -15,10 +15,20 @@
  *
  * Body: { to:{ city_code?, postal_code? }, deliveryMode:'pvz'|'postamat'|'door',
  *         items:[{ variantId?, productId?, qty }], tariffCode? }.
- * Ответ: { data:{ tariffCode, cost, etaDays, periodMin, periodMax } }.
+ * Ответ: { data:{ available, tariffCode, cost, etaDays, periodMin, periodMax } }.
+ *
+ * ОБРАБОТКА ОШИБОК СДЭК (аудит перехода в бой 2026-07-09): раньше любой сбой
+ * сервиса превращался в неструктурированный 500 без JSON-конверта и CORS.
+ *   • «тариф недоступен» (СДЭК HTTP 200 + errors[] → CdekError
+ *     'cdek_calc_no_price') — ШТАТНЫЙ случай: 200 с { available:false } и
+ *     null-полями (форма как quote.delivery.available — витрина THE CASE
+ *     показывает «Уточняется» по явному available === false);
+ *   • прочие CdekError (429/сеть/5xx СДЭК) → 503 { error: { code, message } }
+ *     (envelope как у остальных storefront-ошибок) + CORS + Retry-After.
  */
 
 import { z } from 'zod';
+import { NextResponse } from 'next/server';
 import {
   runStorefront,
   jsonData,
@@ -29,10 +39,29 @@ import {
 import { STOREFRONT_WRITE_METHODS } from '@/lib/storefront/cors';
 import { getCdekManager } from '@/lib/cdek/manager';
 import { getCdekConfig, tariffForMode } from '@/lib/cdek/config';
-import type { CdekDeliveryMode } from '@/lib/cdek/types';
+import { CdekError } from '@/lib/cdek/errors';
+import type { CdekDeliveryMode, CdekTariffResult } from '@/lib/cdek/types';
 import { Calculator, type CartLineDims } from '@/lib/cdek/services/calculator';
 import { resolveCartLine } from '@/lib/orders/repository';
 import { MAX_CART_ITEMS } from '@/lib/orders/schemas';
+
+/**
+ * Локальный конверт 503 «служба доставки недоступна» (429/сеть/5xx СДЭК).
+ * В lib/storefront/response.ts нет 503-кода (jsonError маппит фиксированный
+ * набор), а общий файл в этой волне не редактируется — поэтому хелпер живёт в
+ * роуте. Формат — тот же envelope { error: { code, message } } + CORS.
+ */
+function jsonUpstreamUnavailable(cors: Record<string, string>): NextResponse {
+  return NextResponse.json(
+    {
+      error: {
+        code: 'service_unavailable',
+        message: 'Служба доставки временно недоступна. Повторите попытку позже.',
+      },
+    },
+    { status: 503, headers: { ...cors, 'Retry-After': '30' } },
+  );
+}
 
 /**
  * Нормализует клиентский tariffCode против белого списка (config.allowedTariffs)
@@ -150,14 +179,40 @@ export async function POST(req: Request): Promise<Response> {
 
       const calc = new Calculator(getCdekManager());
       // from_location — серверный (внутри Calculator), здесь только назначение.
-      const result = await calc.calculate({
-        to: { code: to.city_code, postalCode: to.postal_code },
-        lines,
-        tariffCode: effectiveTariff,
-      });
+      let result: CdekTariffResult;
+      try {
+        result = await calc.calculate({
+          to: { code: to.city_code, postalCode: to.postal_code },
+          lines,
+          tariffCode: effectiveTariff,
+        });
+      } catch (err) {
+        if (err instanceof CdekError) {
+          if (err.code === 'cdek_calc_no_price') {
+            // Штатное «тариф недоступен для направления» (СДЭК 200 + errors[]):
+            // не сбой — 200 с available:false, витрина показывает «Уточняется».
+            return jsonData(
+              {
+                available: false,
+                tariffCode: null,
+                cost: null,
+                etaDays: null,
+                periodMin: null,
+                periodMax: null,
+              },
+              {},
+              cors,
+            );
+          }
+          // 429/сеть/5xx СДЭК → структурированный 503 (CORS сохраняется).
+          return jsonUpstreamUnavailable(cors);
+        }
+        throw err;
+      }
 
       return jsonData(
         {
+          available: true,
           tariffCode: result.tariffCode,
           cost: result.deliverySum,
           etaDays: result.periodMin,

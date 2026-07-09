@@ -201,3 +201,106 @@ describe('storefront/delivery/cdek/calculate — лимит числа пози�
     expect(res.status).toBe(200);
   });
 });
+
+/**
+ * Обработка CdekError в роуте calculate (аудит перехода в бой 2026-07-09,
+ * medium). Раньше роут не перехватывал ошибки сервиса:
+ *   • штатное «тариф недоступен» (СДЭК HTTP 200 + errors[] →
+ *     CdekError 'cdek_calc_no_price') превращалось в неструктурированный 500;
+ *   • 429/таймауты СДЭК — тоже 500 без JSON-конверта и без CORS.
+ * Теперь:
+ *   • 'cdek_calc_no_price' → штатный 200 { data: { available:false, cost:null,… } }
+ *     (форма как quote.delivery.available — витрина THE CASE показывает
+ *     «Уточняется» по явному available === false);
+ *   • прочие CdekError → 503 { error: { code:'service_unavailable', message } }
+ *     (тот же envelope, что остальные storefront-ошибки) + CORS + Retry-After.
+ * Calculator мокается фабрикой с ДИНАМИЧЕСКИМ импортом реального CdekError —
+ * после vi.resetModules() роут и тест обязаны видеть ОДИН класс (instanceof).
+ */
+describe('storefront/delivery/cdek/calculate — обработка CdekError (переход в бой)', () => {
+  beforeEach(() => setEnv());
+  afterEach(() => {
+    process.env = { ...ORIGINAL };
+    vi.resetModules();
+    vi.doUnmock('@/lib/cdek/services/calculator');
+  });
+
+  function mockCalculatorThrow(code: string) {
+    vi.doMock('@/lib/cdek/services/calculator', async () => {
+      const { CdekError } = await import('@/lib/cdek/errors');
+      return {
+        Calculator: class {
+          async calculate(): Promise<never> {
+            throw new CdekError(code, `test ${code}`);
+          }
+        },
+      };
+    });
+  }
+
+  const body = { to: { city_code: 44 }, deliveryMode: 'pvz', items: [{ qty: 1 }] } as const;
+
+  it('успешный расчёт несёт available: true (контракт data не ломается)', async () => {
+    const { POST } = await loadCalc();
+    const res = await POST(authedPost('http://x/', body));
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as {
+      data: { available: boolean; cost: string; tariffCode: number };
+    };
+    expect(json.data.available).toBe(true);
+    expect(Number(json.data.cost)).toBeGreaterThan(0);
+    expect(typeof json.data.tariffCode).toBe('number');
+  });
+
+  it("'cdek_calc_no_price' (тариф недоступен) → штатный 200 с available:false и null-полями", async () => {
+    mockCalculatorThrow('cdek_calc_no_price');
+    const { POST } = await loadCalc();
+    const res = await POST(authedPost('http://x/', body));
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as {
+      data: {
+        available: boolean;
+        cost: unknown;
+        tariffCode: unknown;
+        etaDays: unknown;
+        periodMin: unknown;
+        periodMax: unknown;
+      };
+    };
+    expect(json.data.available).toBe(false);
+    expect(json.data.cost).toBeNull();
+    expect(json.data.tariffCode).toBeNull();
+    expect(json.data.periodMin).toBeNull();
+    expect(json.data.periodMax).toBeNull();
+    // CORS сохраняется и на «недоступном» ответе.
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBeTruthy();
+  });
+
+  it("'cdek_rate_limited' → 503 со структурированным конвертом + CORS + Retry-After", async () => {
+    mockCalculatorThrow('cdek_rate_limited');
+    const { POST } = await loadCalc();
+    const res = await POST(authedPost('http://x/', body));
+    expect(res.status).toBe(503);
+    const json = (await res.json()) as { error: { code: string; message: string } };
+    expect(json.error.code).toBe('service_unavailable');
+    expect(json.error.message).toBeTruthy();
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBeTruthy();
+    expect(res.headers.get('Retry-After')).toBeTruthy();
+  });
+
+  it("'cdek_network_error' (таймаут/сеть СДЭК) → 503 с конвертом, не голый 500", async () => {
+    mockCalculatorThrow('cdek_network_error');
+    const { POST } = await loadCalc();
+    const res = await POST(authedPost('http://x/', body));
+    expect(res.status).toBe(503);
+    const json = (await res.json()) as { error: { code: string } };
+    expect(json.error.code).toBe('service_unavailable');
+  });
+
+  it("'cdek_http_error' (5xx СДЭК) → 503 с конвертом", async () => {
+    mockCalculatorThrow('cdek_http_error');
+    const { POST } = await loadCalc();
+    const res = await POST(authedPost('http://x/', body));
+    expect(res.status).toBe(503);
+  });
+});

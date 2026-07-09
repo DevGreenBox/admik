@@ -1,18 +1,24 @@
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { CdekManager } from '@/lib/cdek/manager';
 import { getCdekConfig } from '@/lib/cdek/config';
 import {
   Calculator,
   aggregatePackage,
+  resetCalculatorRuntimeCaches,
   type CartLineDims,
 } from '@/lib/cdek/services/calculator';
 import { CDEK_FALLBACK_DIMENSIONS } from '@/lib/cdek/config';
 import { CdekError } from '@/lib/cdek/errors';
+import { resetDefaultTokenStore } from '@/lib/cdek/token-cache';
 
 /**
  * Тесты Calculator (docs/08 §5). Mock-путь — формула детерминирована. Real-путь —
  * замоканный manager.client (без сети): проверяем маппинг ответа СДЭК. Агрегация
  * веса корзины — чистая функция.
+ *
+ * Кеши real-ветки (котировки TTL 300с + город ПВЗ отгрузки TTL 1ч) — модульные,
+ * поэтому каждый тест начинается со сброса (resetCalculatorRuntimeCaches +
+ * resetDefaultTokenStore), иначе результат одного теста утекает в следующий.
  */
 
 const mockCfg = getCdekConfig({ NODE_ENV: 'test' });
@@ -24,6 +30,11 @@ const realCfg = getCdekConfig({
 });
 
 const defaults = mockCfg.defaultDimensions;
+
+beforeEach(() => {
+  resetCalculatorRuntimeCaches();
+  resetDefaultTokenStore();
+});
 
 describe('cdek/calculator — aggregatePackage (чистая агрегация корзины)', () => {
   it('суммирует вес × qty, габариты: Д/Ш = max, В = Σ', () => {
@@ -267,5 +278,255 @@ describe('cdek/calculator — real-путь: 200 без цены НЕ резол
       tariffCode: 136,
     });
     expect(res.deliverySum).toBe('450.00');
+  });
+});
+
+// -----------------------------------------------------------------------------
+// Фейковый manager с прямым vi.fn на client.request — позволяет проверять
+// RequestOptions (бюджеты/idempotent), число вызовов (кеши) и диспетчеризацию
+// по path (deliverypoints vs calculator) без прогона транспорта.
+// -----------------------------------------------------------------------------
+
+type RequestFn = (
+  method: string,
+  path: string,
+  opts?: {
+    query?: Record<string, unknown>;
+    json?: Record<string, unknown>;
+    timeoutMs?: number;
+    maxNetworkRetries?: number;
+    idempotent?: boolean;
+  },
+) => Promise<unknown>;
+
+function makeFakeManager(
+  cfg: ReturnType<typeof getCdekConfig>,
+  impl: RequestFn,
+): { manager: CdekManager; request: ReturnType<typeof vi.fn> } {
+  const request = vi.fn(impl);
+  const manager = {
+    config: cfg,
+    isMock: false,
+    client: { request },
+  } as unknown as CdekManager;
+  return { manager, request };
+}
+
+const TARIFF_OK = { delivery_sum: 450, period_min: 1, period_max: 3, tariff_code: 136 };
+
+/**
+ * Аудит apidoc.cdek.ru 2026-07-09: в POST /v2/calculator/tarifflist поле `type`
+ * означает 1 = «интернет-магазин» (default СДЭК), 2 = «доставка». Раньше дефолт
+ * был 2 с комментарием «2 = ИМ» — расчёт списка шёл по чужому режиму договора.
+ */
+describe('cdek/calculator — tarifflist: дефолт type=1 (интернет-магазин)', () => {
+  it('без input.type шлёт type: 1', async () => {
+    const { manager, request } = makeFakeManager(realCfg, async () => ({ tariff_codes: [] }));
+    await new Calculator(manager).calculateAvailable({ to: { code: 137 }, packages: [{ weight: 500 }] });
+    const opts = request.mock.calls[0][2] as { json: { type: number } };
+    expect(opts.json.type).toBe(1);
+  });
+
+  it('явный input.type=2 (доставка) проходит как есть', async () => {
+    const { manager, request } = makeFakeManager(realCfg, async () => ({ tariff_codes: [] }));
+    await new Calculator(manager).calculateAvailable({
+      to: { code: 137 },
+      packages: [{ weight: 500 }],
+      type: 2,
+    });
+    const opts = request.mock.calls[0][2] as { json: { type: number } };
+    expect(opts.json.type).toBe(2);
+  });
+});
+
+/**
+ * Расчёт от точки отгрузки (аудит 2026-07-09, medium): при заданном
+ * CDEK_SHIPMENT_POINT котировка раньше всё равно шла от CDEK_FROM_LOCATION_CODE
+ * (дефолт 44 Москва) — расхождение котировки и фактической накладной (создаётся
+ * от ПВЗ отгрузки). Теперь real-ветка резолвит город ПВЗ через
+ * GET /v2/deliverypoints?code=<point> (location.city_code), кеширует на 1 час и
+ * подставляет его в from_location; при сбое — фоллбэк на fromLocationCode с
+ * одним console.warn на ключ.
+ */
+describe('cdek/calculator — from_location от точки отгрузки (CDEK_SHIPMENT_POINT)', () => {
+  const spCfg = getCdekConfig({
+    NODE_ENV: 'test',
+    CDEK_ACCOUNT: 'acc-1',
+    CDEK_SECRET: 'sec-1',
+    CDEK_BASE_URL: 'https://api.edu.cdek.ru',
+    CDEK_SHIPMENT_POINT: 'NSK33',
+    CDEK_FROM_LOCATION_CODE: '44',
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('резолвит город ПВЗ через GET /v2/deliverypoints?code=… и шлёт его в from_location', async () => {
+    const { manager, request } = makeFakeManager(spCfg, async (_m, path) => {
+      if (path === '/v2/deliverypoints') {
+        return [{ code: 'NSK33', location: { city_code: 270 } }];
+      }
+      return TARIFF_OK;
+    });
+    await new Calculator(manager).calculate({ to: { code: 137 }, packages: [{ weight: 500 }], tariffCode: 136 });
+
+    const [dpMethod, dpPath, dpOpts] = request.mock.calls[0] as [string, string, { query: Record<string, unknown> }];
+    expect(dpMethod).toBe('GET');
+    expect(dpPath).toBe('/v2/deliverypoints');
+    expect(dpOpts.query.code).toBe('NSK33');
+
+    const calcOpts = request.mock.calls[1][2] as { json: { from_location: { code: number } } };
+    expect(calcOpts.json.from_location.code).toBe(270);
+  });
+
+  it('код города ПВЗ кешируется в памяти модуля: второй расчёт не дёргает deliverypoints', async () => {
+    const { manager, request } = makeFakeManager(spCfg, async (_m, path) => {
+      if (path === '/v2/deliverypoints') {
+        return [{ code: 'NSK33', location: { city_code: 270 } }];
+      }
+      return TARIFF_OK;
+    });
+    const calc = new Calculator(manager);
+    await calc.calculate({ to: { code: 137 }, packages: [{ weight: 500 }], tariffCode: 136 });
+    await calc.calculate({ to: { code: 137 }, packages: [{ weight: 900 }], tariffCode: 136 });
+
+    const dpCalls = request.mock.calls.filter(([, path]) => path === '/v2/deliverypoints');
+    expect(dpCalls).toHaveLength(1);
+  });
+
+  /** Warn'ы фоллбэка ПВЗ отгрузки (не считаем несвязанный warn token-store о памяти). */
+  function shipmentWarns(warn: ReturnType<typeof vi.spyOn>): unknown[][] {
+    return warn.mock.calls.filter((c: unknown[]) => String(c[0]).includes('ПВЗ отгрузки'));
+  }
+
+  it('сбой резолва ПВЗ → фоллбэк на fromLocationCode + ровно один console.warn на ключ', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { manager, request } = makeFakeManager(spCfg, async (_m, path) => {
+      if (path === '/v2/deliverypoints') {
+        throw new CdekError('cdek_http_error', 'HTTP 500');
+      }
+      return TARIFF_OK;
+    });
+    const calc = new Calculator(manager);
+    await calc.calculate({ to: { code: 137 }, packages: [{ weight: 500 }], tariffCode: 136 });
+    await calc.calculate({ to: { code: 137 }, packages: [{ weight: 900 }], tariffCode: 136 });
+
+    const calcCalls = request.mock.calls.filter(([, path]) => path === '/v2/calculator/tariff');
+    for (const call of calcCalls) {
+      const opts = call[2] as { json: { from_location: { code: number } } };
+      expect(opts.json.from_location.code).toBe(44); // фоллбэк, не падение расчёта
+    }
+    expect(shipmentWarns(warn)).toHaveLength(1); // один warn на ключ ПВЗ, без спама
+  });
+
+  it('ответ deliverypoints без location.city_code → фоллбэк на fromLocationCode', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { manager, request } = makeFakeManager(spCfg, async (_m, path) => {
+      if (path === '/v2/deliverypoints') return [{ code: 'NSK33' }];
+      return TARIFF_OK;
+    });
+    await new Calculator(manager).calculate({ to: { code: 137 }, packages: [{ weight: 500 }], tariffCode: 136 });
+    const opts = request.mock.calls[1][2] as { json: { from_location: { code: number } } };
+    expect(opts.json.from_location.code).toBe(44);
+    expect(shipmentWarns(warn)).toHaveLength(1);
+  });
+
+  it('CDEK_SHIPMENT_POINT не задан → deliverypoints не запрашивается, from = fromLocationCode', async () => {
+    const { manager, request } = makeFakeManager(realCfg, async () => TARIFF_OK);
+    await new Calculator(manager).calculate({ to: { code: 137 }, packages: [{ weight: 500 }], tariffCode: 136 });
+    expect(request).toHaveBeenCalledTimes(1);
+    const opts = request.mock.calls[0][2] as { json: { from_location: { code: number } } };
+    expect(opts.json.from_location.code).toBe(realCfg.fromLocationCode);
+  });
+});
+
+/**
+ * Кеш котировок + бюджеты витринного пути (переход в бой, low): каждый
+ * чекаут-запрос бил живой POST /v2/calculator/tariff с timeoutMs=30000 при
+ * лимите СДЭК 200 RPS на всех. Теперь real-ветка кеширует результат на 300с
+ * (ключ — hash от контура+from+to+tariff+packages) и шлёт запрос с бюджетами
+ * timeoutMs=10000, maxNetworkRetries=1, idempotent=true (расчёт безопасен к
+ * повтору). Mock-ветка мгновенная — кеш не применяется.
+ */
+describe('cdek/calculator — кеш котировок (real, TTL 300с) и бюджеты запроса', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('передаёт витринные бюджеты: timeoutMs=10000, maxNetworkRetries=1, idempotent=true (tariff)', async () => {
+    const { manager, request } = makeFakeManager(realCfg, async () => TARIFF_OK);
+    await new Calculator(manager).calculate({ to: { code: 137 }, packages: [{ weight: 500 }], tariffCode: 136 });
+    const opts = request.mock.calls[0][2] as {
+      timeoutMs: number;
+      maxNetworkRetries: number;
+      idempotent: boolean;
+    };
+    expect(opts.timeoutMs).toBe(10_000);
+    expect(opts.maxNetworkRetries).toBe(1);
+    expect(opts.idempotent).toBe(true);
+  });
+
+  it('tarifflist тоже идёт с бюджетами и idempotent=true', async () => {
+    const { manager, request } = makeFakeManager(realCfg, async () => ({ tariff_codes: [] }));
+    await new Calculator(manager).calculateAvailable({ to: { code: 137 }, packages: [{ weight: 500 }] });
+    const opts = request.mock.calls[0][2] as {
+      timeoutMs: number;
+      maxNetworkRetries: number;
+      idempotent: boolean;
+    };
+    expect(opts.timeoutMs).toBe(10_000);
+    expect(opts.maxNetworkRetries).toBe(1);
+    expect(opts.idempotent).toBe(true);
+  });
+
+  it('повторный расчёт с теми же входами берётся из кеша (один POST к СДЭК)', async () => {
+    const { manager, request } = makeFakeManager(realCfg, async () => TARIFF_OK);
+    const calc = new Calculator(manager);
+    const a = await calc.calculate({ to: { code: 137 }, packages: [{ weight: 500 }], tariffCode: 136 });
+    const b = await calc.calculate({ to: { code: 137 }, packages: [{ weight: 500 }], tariffCode: 136 });
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(b).toEqual(a); // тот же результат из кеша
+  });
+
+  it('другие входы (вес/город/тариф) → отдельный ключ кеша, новый запрос', async () => {
+    const { manager, request } = makeFakeManager(realCfg, async () => TARIFF_OK);
+    const calc = new Calculator(manager);
+    await calc.calculate({ to: { code: 137 }, packages: [{ weight: 500 }], tariffCode: 136 });
+    await calc.calculate({ to: { code: 137 }, packages: [{ weight: 900 }], tariffCode: 136 });
+    await calc.calculate({ to: { code: 44 }, packages: [{ weight: 500 }], tariffCode: 136 });
+    expect(request).toHaveBeenCalledTimes(3);
+  });
+
+  it('кеш истекает по TTL 300с — после истечения новый запрос к СДЭК', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-07-09T12:00:00Z'));
+    const { manager, request } = makeFakeManager(realCfg, async () => TARIFF_OK);
+    const calc = new Calculator(manager);
+
+    await calc.calculate({ to: { code: 137 }, packages: [{ weight: 500 }], tariffCode: 136 });
+    vi.setSystemTime(new Date('2026-07-09T12:04:00Z')); // 240с < 300с — ещё живой
+    await calc.calculate({ to: { code: 137 }, packages: [{ weight: 500 }], tariffCode: 136 });
+    expect(request).toHaveBeenCalledTimes(1);
+
+    vi.setSystemTime(new Date('2026-07-09T12:05:01Z')); // 301с > 300с — истёк
+    await calc.calculate({ to: { code: 137 }, packages: [{ weight: 500 }], tariffCode: 136 });
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+
+  it('«тариф недоступен» (cdek_calc_no_price) НЕ кешируется — следующий вызов снова спрашивает СДЭК', async () => {
+    let calls = 0;
+    const { manager, request } = makeFakeManager(realCfg, async () => {
+      calls += 1;
+      if (calls === 1) return { errors: [{ code: 'v2_no_tariff', message: 'нет тарифа' }] };
+      return TARIFF_OK;
+    });
+    const calc = new Calculator(manager);
+    await expect(
+      calc.calculate({ to: { code: 137 }, packages: [{ weight: 500 }], tariffCode: 136 }),
+    ).rejects.toMatchObject({ code: 'cdek_calc_no_price' });
+    const res = await calc.calculate({ to: { code: 137 }, packages: [{ weight: 500 }], tariffCode: 136 });
+    expect(res.deliverySum).toBe('450.00');
+    expect(request).toHaveBeenCalledTimes(2);
   });
 });
