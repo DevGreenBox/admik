@@ -96,13 +96,17 @@ lib/cdek/
 ```ts
 // lib/cdek/manager.ts
 export interface CdekConfig {
-  baseUrl: string;          // CDEK_BASE_URL (prod https://api.cdek.ru, test https://api.edu.cdek.ru)
+  baseUrl: string;          // testMode=true → ЖЁСТКО https://api.edu.cdek.ru (CDEK_EDU_BASE_URL,
+                            // CDEK_BASE_URL игнорируется); иначе CDEK_BASE_URL (prod https://api.cdek.ru)
   account: string | null;   // CDEK_ACCOUNT (client_id); null → mock
   secret: string | null;    // CDEK_SECRET (client_secret); null → mock
-  testMode: boolean;        // CDEK_TEST_MODE
+  testMode: boolean;        // CDEK_TEST_MODE — единственный переключатель контура (см. baseUrl)
   fromLocationCode: number; // CDEK_FROM_LOCATION_CODE (город отправления, дефолт 44 = Москва)
+  fromAddress: string | null; // CDEK_FROM_ADDRESS (адрес отправления для from_location.address)
   shipmentPoint?: string;   // CDEK_SHIPMENT_POINT (код склада отправителя, взаимоисключим с fromLocation)
-  defaultTariffCode: number;// CDEK_DEFAULT_TARIFF (дефолт 136)
+  defaultTariffCode: number;// CDEK_DEFAULT_TARIFF (ПВЗ склад-склад, дефолт 136)
+  doorTariffCode: number;   // CDEK_DOOR_TARIFF (курьер склад-дверь, дефолт 137)
+  postamatTariffCode: number;// CDEK_POSTAMAT_TARIFF (склад-постамат, дефолт 368 — Приложение 4)
   allowedTariffs?: number[];// CDEK_ALLOWED_TARIFFS
   sender: CdekSenderConfig; // имя/телефон/email/ИНН отправителя (env CDEK_SENDER_*)
   webhookSecret: string | null;   // CDEK_WEBHOOK_SECRET
@@ -141,20 +145,33 @@ export interface ICdekClient {
 interface RequestOptions {
   query?: Record<string, string | number | undefined>;
   json?: unknown;                 // тело JSON
-  timeoutMs?: number;             // дефолт 30000
-  connectTimeoutMs?: number;      // дефолт 10000
-  maxNetworkRetries?: number;     // дефолт 2 (задержки 250/500мс)
+  timeoutMs?: number;             // дефолт 30000 (покрывает fetch И чтение тела ответа)
+  maxNetworkRetries?: number;     // дефолт 2 (задержки 250/500мс) — только для ретраибельных
+  idempotent?: boolean;           // пометить POST/PATCH безопасным к авто-повтору
 }
 ```
 
-Поведение (порт carre, через `fetch`/`undici`):
+Поведение (порт carre, через `fetch`/`undici`; боевой контракт — аудит apidoc.cdek.ru 2026-07-09):
 - **OAuth:** `POST {baseUrl}/v2/oauth/token`, `application/x-www-form-urlencoded`, тело
   `grant_type=client_credentials&client_id=…&client_secret=…`. Ответ: `access_token`, `expires_in`.
   Кешируется *строка токена* (не весь ответ), TTL = `expires_in − 60` (минимум 60с, дефолт-фоллбэк 3540с).
 - **Заголовки запросов:** `Authorization: Bearer <token>`, `Accept: application/json`.
-- **Retry на 401:** `invalidateToken()` → новый токен → ровно один повтор.
-- **Сетевой retry:** до `maxNetworkRetries` с задержками 250/500мс.
-- **HTTP ≥ 400:** бросает `CdekError(message, body.errors, httpStatus)`.
+- **Ретраибельность:** запрос ретраибелен, если метод `GET`/`DELETE` **или** `idempotent: true`.
+  `POST`/`PATCH` без пометки НЕ авторетраятся (иначе дубли накладных `POST /v2/orders`):
+  сеть/таймаут → `CdekError('cdek_network_error_unconfirmed')` — запрос МОГ выполниться на стороне
+  СДЭК, вызывающий обязан свериться (напр., `GET /v2/orders?im_number=…`) перед повтором.
+- **Retry на 401:** `invalidateToken()` → новый токен → ровно один повтор. Отслеживается отдельным
+  флагом `tokenRetried` (не счётчиком сетевых попыток) и разрешён и для неидемпотентных
+  запросов — 401 означает, что запрос НЕ был обработан.
+- **Сетевой/5xx retry (ретраибельные):** до `maxNetworkRetries` с задержками 250/500мс.
+- **429:** для ретраибельных — ретрай с задержкой из `Retry-After` (сек → мс, кап 3000мс; без
+  заголовка — 250/500мс) в пределах `maxNetworkRetries`; иначе/по исчерпании →
+  `CdekError('cdek_rate_limited', …, { httpStatus: 429 })`.
+- **Таймаут:** один `AbortController`-дедлайн на fetch И `res.text()` — зависший body-стрим
+  обрывается (abort при чтении тела = сетевая ошибка → ретрай/`_unconfirmed`).
+- **HTTP ≥ 400:** бросает `CdekError(message, cdekErrors, httpStatus)`; `cdekErrors` — объединение
+  top-level `errors[]` и всех `requests[].errors[]` (дедуп по code+message), т.к. асинхронные
+  методы заказов кладут детали в `requests[].errors[]`. Хелпер `extractCdekErrors` экспортирован.
 
 ### 2.3 Кеш OAuth-токена — `token-cache.ts`
 
@@ -163,6 +180,12 @@ interface RequestOptions {
 `MemoryTokenStore` (Map, one-time `console.warn` про in-process кеш). Ключ:
 `cdek:oauth:token:<sha256(account)>`. Потокобезопасность: при промахе — single-flight (in-flight
 Promise на процесс), чтобы параллельные запросы не дёргали `/oauth/token` одновременно.
+
+Ретраи добычи токена (боевой контракт 2026-07-09): сам `POST /v2/oauth/token` идемпотентен,
+поэтому сетевая ошибка/таймаут и 5xx ретраятся до 2 раз (250/500мс) — один сетевой чих на
+истечении TTL больше не валит все конкурентные запросы. `400/401` от oauth НЕ ретраятся:
+это неверные креды → `CdekError('cdek_auth_failed')` с подсказкой проверить
+`CDEK_ACCOUNT`/`CDEK_SECRET` (и контур `CDEK_TEST_MODE`).
 
 ```ts
 export interface TokenStore {
@@ -822,13 +845,16 @@ mock-стоимость; webhook-роут тестируется фейковы�
 
 | Переменная | Назначение | Дефолт |
 |---|---|---|
-| `CDEK_BASE_URL` | базовый URL API | `https://api.cdek.ru` (test: `https://api.edu.cdek.ru`) |
+| `CDEK_BASE_URL` | базовый URL API в **боевом** режиме; при `CDEK_TEST_MODE=true` игнорируется | `https://api.cdek.ru` |
 | `CDEK_ACCOUNT` | client_id; **пусто → mock** | — |
 | `CDEK_SECRET` | client_secret; **пусто → mock** | — |
-| `CDEK_TEST_MODE` | тестовый контур СДЭК | `false` |
+| `CDEK_TEST_MODE` | тестовый контур СДЭК; `true` ⇒ baseUrl форсируется на `https://api.edu.cdek.ru` | `false` |
 | `CDEK_FROM_LOCATION_CODE` | код города отправления | `44` (Москва) |
+| `CDEK_FROM_ADDRESS` | адрес отправления (`from_location.address` заказов) | — |
 | `CDEK_SHIPMENT_POINT` | код склада отправителя (взаимоисключим с from_location) | — |
-| `CDEK_DEFAULT_TARIFF` | тариф по умолчанию | `136` |
+| `CDEK_DEFAULT_TARIFF` | тариф ПВЗ (склад-склад) по умолчанию | `136` |
+| `CDEK_DOOR_TARIFF` | тариф курьера «до двери» (склад-дверь) | `137` |
+| `CDEK_POSTAMAT_TARIFF` | тариф постамата (склад-постамат, Приложение 4) | `368` |
 | `CDEK_ALLOWED_TARIFFS` | белый список тарифов (csv); непуст → storefront-расчёт отклоняет код вне списка (fallback на `CDEK_DEFAULT_TARIFF`) | — |
 | `CDEK_SENDER_NAME` / `CDEK_SENDER_CONTACT_NAME` | отправитель | — |
 | `CDEK_SENDER_PHONE` | телефон отправителя | — |
