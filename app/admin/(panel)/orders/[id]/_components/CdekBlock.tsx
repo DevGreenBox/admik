@@ -5,13 +5,13 @@ import { useState } from 'react';
 
 import type { ActionResult } from '@/lib/server/action';
 import { errorMessage } from '../../_components/action-result';
-import { resolveLabelOutcome } from '@/lib/cdek/print-label';
+import { resolvePrintClick } from '@/lib/cdek/print-label';
+import { shipmentCreateUiState } from '@/lib/cdek/services/order';
 
 import {
   createCdekShipmentAction,
   cancelCdekShipmentAction,
   refreshCdekStatusAction,
-  getCdekLabelAction,
 } from './cdek-actions';
 
 type Fail = Extract<ActionResult<unknown>, { ok: false }>;
@@ -61,17 +61,24 @@ export function CdekBlock({
   history,
   deliveryType,
   paymentReady,
+  createOnOrder,
 }: {
   orderId: string;
   shipment: CdekShipmentView | null;
   history: CdekStatusLogView[];
   deliveryType: string;
   /**
-   * Поступила ли оплата (FF.md): накладную формируем ТОЛЬКО после оплаты. Если
-   * false — кнопку создания скрываем и поясняем, что отправление появится после
-   * оплаты (сервер всё равно отклонит преждевременное создание — двойная защита).
+   * Поступила ли оплата (FF.md): в штатном режиме накладную формируем ТОЛЬКО
+   * после оплаты. Сервер всё равно отклонит преждевременное создание — двойная
+   * защита.
    */
   paymentReady: boolean;
+  /**
+   * Режим «магазин без онлайн-кассы» (CDEK_CREATE_ON_ORDER): накладную можно
+   * создавать сразу, не дожидаясь оплаты. Тогда кнопка доступна и для
+   * неоплаченного заказа (зеркало серверного canCreateShipment).
+   */
+  createOnOrder: boolean;
 }) {
   const router = useRouter();
 
@@ -81,11 +88,12 @@ export function CdekBlock({
 
   const hasShipment = Boolean(shipment?.cdekUuid);
   const isPickup = deliveryType === 'pickup';
+  const ui = shipmentCreateUiState({ hasShipment, isPickup, paymentReady, createOnOrder });
 
   async function run(
     label: string,
     fn: () => Promise<ActionResult<unknown>>,
-    opts: { confirm?: string; openUrl?: boolean } = {},
+    opts: { confirm?: string } = {},
   ) {
     if (opts.confirm && !window.confirm(opts.confirm)) return;
     setPending(true);
@@ -94,29 +102,32 @@ export function CdekBlock({
     const result = await fn();
     setPending(false);
     if (result.ok) {
-      if (opts.openUrl) {
-        // Печать: в mock-режиме НЕ открываем мёртвый example.invalid (находка #12),
-        // а поясняем, что реальная накладная появится в боевом режиме. Боевую ветку
-        // (реальный URL) не трогаем — решение принимает чистая resolveLabelOutcome.
-        const url =
-          result.data && typeof (result.data as { url?: unknown }).url === 'string'
-            ? (result.data as { url: string }).url
-            : null;
-        const outcome = resolveLabelOutcome(label, {
-          isMock: shipment?.isMock ?? false,
-          url,
-        });
-        if (outcome.open && url) {
-          window.open(url, '_blank', 'noopener');
-        }
-        setSuccess(outcome.message);
-      } else {
-        setSuccess(`${label}: выполнено.`);
-      }
+      setSuccess(`${label}: выполнено.`);
       router.refresh();
     } else {
       setError(result);
     }
+  }
+
+  /**
+   * Печать накладной/ШК (гэп №3 боевого аудита 2026-07-09): открываем НАШ
+   * серверный PDF-прокси /admin/cdek/label (готовит форму и выкачивает PDF с
+   * Bearer-токеном на сервере), а НЕ прямой URL api.cdek.ru — тот требует токен
+   * и живёт ~1 час → браузер получал 401. window.open вызывается синхронно в
+   * обработчике клика (popup-блокер не срабатывает). В mock — пояснение без
+   * открытия вкладки (находка #12); решение принимает чистая resolvePrintClick.
+   */
+  function printLabel(label: string, kind: 'waybill' | 'barcode') {
+    setError(null);
+    const outcome = resolvePrintClick(label, {
+      isMock: shipment?.isMock ?? false,
+      orderId,
+      kind,
+    });
+    if (outcome.open && outcome.url) {
+      window.open(outcome.url, '_blank', 'noopener');
+    }
+    setSuccess(outcome.message);
   }
 
   return (
@@ -193,18 +204,27 @@ export function CdekBlock({
             ) : null}
           </dl>
 
-          {/* Накладная — только после оплаты (FF.md). Пока оплата не поступила,
-              кнопку создания не показываем, поясняем автоматику. */}
-          {!hasShipment && !paymentReady ? (
+          {/* Штатный режим (с кассой): накладная только после оплаты (FF.md) —
+              кнопку создания скрываем, поясняем автоматику. */}
+          {ui.showAwaitPaymentNotice ? (
             <p className="mt-4 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
               Отправление СДЭК и накладная создаются <strong>после поступления оплаты</strong> —
               автоматически, без ручных действий. Так заказ не уедет неоплаченным.
             </p>
           ) : null}
 
+          {/* Режим без онлайн-кассы (CDEK_CREATE_ON_ORDER): накладную можно
+              создать сразу, не дожидаясь оплаты. */}
+          {ui.showCreateWithoutPaymentHint ? (
+            <p className="mt-4 rounded border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
+              Магазин работает <strong>без онлайн-кассы</strong> — отправление и накладную
+              можно создать сразу, не дожидаясь оплаты.
+            </p>
+          ) : null}
+
           {/* --- Кнопки управления --- */}
           <div className="mt-4 flex flex-wrap gap-2">
-            {!hasShipment && paymentReady ? (
+            {ui.showCreateButton ? (
               <button
                 type="button"
                 disabled={pending}
@@ -231,13 +251,7 @@ export function CdekBlock({
                 <button
                   type="button"
                   disabled={pending}
-                  onClick={() =>
-                    run(
-                      'Печать накладной',
-                      () => getCdekLabelAction({ orderId, kind: 'waybill' }),
-                      { openUrl: true },
-                    )
-                  }
+                  onClick={() => printLabel('Печать накладной', 'waybill')}
                   className="rounded border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-50"
                 >
                   Печать накладной
@@ -245,13 +259,7 @@ export function CdekBlock({
                 <button
                   type="button"
                   disabled={pending}
-                  onClick={() =>
-                    run(
-                      'Печать ШК',
-                      () => getCdekLabelAction({ orderId, kind: 'barcode' }),
-                      { openUrl: true },
-                    )
-                  }
+                  onClick={() => printLabel('Печать ШК', 'barcode')}
                   className="rounded border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-50"
                 >
                   Печать ШК

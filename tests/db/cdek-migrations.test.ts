@@ -153,6 +153,44 @@ describe('db/migrations — СДЭК 0017/0018 (юнит)', () => {
 });
 
 // =============================================================================
+// (а2) ЮНИТ — 0034 orders.delivery_city_code (боевой аудит СДЭК 2026-07-09:
+// to_location курьерки требует идентификацию города — числовой код СДЭК).
+// =============================================================================
+describe('db/migrations — 0034 orders.delivery_city_code (юнит)', () => {
+  async function find0034() {
+    const all = await listMigrations();
+    return all.find((m) => m.version === '0034');
+  }
+
+  it('миграция 0034 существует с именем orders_delivery_city_code (сплошная нумерация)', async () => {
+    const m = await find0034();
+    expect(m).toBeDefined();
+    expect(m!.name).toBe('orders_delivery_city_code');
+    const all = await listMigrations();
+    const versions = all.map((x) => x.version);
+    const expected = versions.map((_, i) => String(i + 1).padStart(4, '0'));
+    expect(versions).toEqual(expected);
+  });
+
+  it('ADD COLUMN идемпотентен (IF NOT EXISTS), тип integer, NULLable (без NOT NULL)', async () => {
+    const m = await find0034();
+    const text = stripSqlComments(await readFile(m!.path, 'utf8'));
+    expect(text).toMatch(
+      /ALTER\s+TABLE\s+orders\s+ADD\s+COLUMN\s+IF\s+NOT\s+EXISTS\s+delivery_city_code\s+integer/i,
+    );
+    expect(text.toUpperCase()).not.toContain('NOT NULL');
+  });
+
+  it('пишет 0034 в schema_migrations с ON CONFLICT DO NOTHING', async () => {
+    const m = await find0034();
+    const text = await readFile(m!.path, 'utf8');
+    expect(text).toContain('schema_migrations');
+    expect(text).toContain(`'0034'`);
+    expect(text.toUpperCase()).toContain('ON CONFLICT DO NOTHING');
+  });
+});
+
+// =============================================================================
 // (б) ИНТЕГРАЦИЯ — нужна живая БД. В этой среде PostgreSQL нет → skipIf.
 // =============================================================================
 const INTEGRATION_DB_URL = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
@@ -231,6 +269,19 @@ describe.skipIf(!INTEGRATION_DB_URL)('db/migrations — СДЭК (интегра
         expect(set.has(`${t}.${c}`)).toBe(true);
       }
     }
+  });
+
+  it('0034 добавил orders.delivery_city_code (integer, NULLable)', async () => {
+    await ensureLoaded();
+    await applyAllMigrations();
+    const [col] = await sql`
+      SELECT data_type, is_nullable FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'orders'
+        AND column_name = 'delivery_city_code'
+    `;
+    expect(col).toBeDefined();
+    expect(col.data_type).toBe('integer');
+    expect(col.is_nullable).toBe('YES');
   });
 
   it('admik_app имеет полный DML на cdek_shipments', async () => {

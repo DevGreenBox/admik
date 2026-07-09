@@ -57,6 +57,7 @@ function makeOrder(over: Partial<Order> = {}): Order {
     deliveryType: 'pvz',
     deliveryStatus: 'pending',
     deliveryCity: 'Москва',
+    deliveryCityCode: 44,
     deliveryAddress: null,
     deliveryPvzCode: 'MSK42',
     deliveryCost: '0.00',
@@ -480,6 +481,32 @@ describe('schemas — парсинг/валидация тела (anti-tamper: �
       paymentMethod: 'cod',
     });
     expect(bad.success).toBe(false);
+  });
+
+  // Боевой аудит СДЭК 2026-07-09: витрина шлёт delivery.cityCode (числовой код
+  // города СДЭК) — он принимается роутом и персистится в orders.delivery_city_code
+  // (нужен для to_location курьерки при создании накладной).
+  it('CreateOrderSchema принимает delivery.cityCode (целое > 0) и сохраняет его в данных', () => {
+    const ok = CreateOrderSchema.safeParse({
+      items: [{ productId: PRODUCT_ID, qty: 1 }],
+      customer: { name: 'Иван', email: 'ivan@example.com', phone: '+79991234567' },
+      delivery: { type: 'courier', city: 'Москва', cityCode: 44, address: 'ул. Ленина, 1' },
+      paymentMethod: 'cod',
+    });
+    expect(ok.success).toBe(true);
+    if (ok.success) expect(ok.data.delivery.cityCode).toBe(44);
+  });
+
+  it('CreateOrderSchema отклоняет невалидный delivery.cityCode (0 / дробный)', () => {
+    for (const cityCode of [0, -1, 1.5]) {
+      const bad = CreateOrderSchema.safeParse({
+        items: [{ productId: PRODUCT_ID, qty: 1 }],
+        customer: { name: 'Иван', email: 'ivan@example.com', phone: '+79991234567' },
+        delivery: { type: 'courier', city: 'Москва', cityCode, address: 'ул. Ленина, 1' },
+        paymentMethod: 'cod',
+      });
+      expect(bad.success, `cityCode=${cityCode} должен быть отклонён`).toBe(false);
+    }
   });
 });
 

@@ -162,6 +162,13 @@ export interface Order {
   deliveryType: DeliveryType;
   deliveryStatus: DeliveryStatus;
   deliveryCity: string | null;
+  /**
+   * Числовой код города СДЭК (0034, аудит 2026-07-09): to_location курьерки
+   * требует идентификацию города (code | city | postal_code); code — самый
+   * надёжный. Витрина шлёт delivery.cityCode из автокомплита /cities; null →
+   * fallback на строковое deliveryCity.
+   */
+  deliveryCityCode: number | null;
   deliveryAddress: string | null;
   deliveryPvzCode: string | null;
   /** Расчётная стоимость доставки (СДЭК/заглушка); null → не рассчитана. */

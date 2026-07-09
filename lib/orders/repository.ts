@@ -135,6 +135,7 @@ export function mapOrder(row: Record<string, unknown>): Order {
     deliveryType: row.delivery_type as Order['deliveryType'],
     deliveryStatus: row.delivery_status as Order['deliveryStatus'],
     deliveryCity: strOrNull(row.delivery_city),
+    deliveryCityCode: numOrNull(row.delivery_city_code),
     deliveryAddress: strOrNull(row.delivery_address),
     deliveryPvzCode: strOrNull(row.delivery_pvz_code),
     deliveryCost: strOrNull(row.delivery_cost),
@@ -1063,13 +1064,15 @@ export async function createOrder(
         INSERT INTO orders (
           number, status, items_total, discount_total, delivery_total, grand_total,
           currency, payment_method, payment_status, delivery_type, delivery_city,
-          delivery_address, delivery_pvz_code, delivery_cost, promo_code_id, promo_code,
+          delivery_city_code, delivery_address, delivery_pvz_code, delivery_cost,
+          promo_code_id, promo_code,
           customer_name, customer_email, customer_phone, comment, idempotency_key,
           source, ip
         ) VALUES (
           ${number}, 'new', ${quote.itemsTotal}, ${quote.discount}, ${quote.deliveryCost},
           ${quote.grandTotal}, ${env.SHOP_CURRENCY}, ${input.paymentMethod}, 'pending',
           ${input.delivery.type}, ${input.delivery.city ?? null},
+          ${input.delivery.cityCode ?? null},
           ${input.delivery.address ?? null}, ${input.delivery.pvzCode ?? null},
           ${quote.deliveryCost}, ${promoRow?.id ?? null}, ${appliedPromo?.code ?? null},
           ${input.customer.name}, ${input.customer.email}, ${input.customer.phone},

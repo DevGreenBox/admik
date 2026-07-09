@@ -255,6 +255,41 @@ describe.skipIf(!INTEGRATION_DB_URL)('orders/repository (интеграция, �
     expect(Number(pc!.used_count)).toBe(1);
   });
 
+  // Боевой аудит СДЭК 2026-07-09: числовой код города СДЭК (delivery.cityCode из
+  // тела витрины) персистится в orders.delivery_city_code — он обязателен для
+  // to_location курьерки при регистрации накладной (code | city | postal_code).
+  it('createOrder персистит delivery.cityCode → orders.delivery_city_code (маппинг deliveryCityCode)', async () => {
+    const productId = await makeProduct({ basePrice: '100.00', quantity: 5 });
+    const r = await repo.createOrder({
+      items: [{ productId, qty: 1 }],
+      customer: customer('citycode@example.com'),
+      delivery: { type: 'courier', city: 'Москва', cityCode: 44, address: 'ул. Ленина, 1' },
+      paymentMethod: 'cod',
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    created.orderIds.push(r.order.id);
+    expect(r.order.deliveryCityCode).toBe(44);
+    const [row] = await sql<{ delivery_city_code: number | null }[]>`
+      SELECT delivery_city_code FROM orders WHERE id = ${r.order.id}
+    `;
+    expect(Number(row!.delivery_city_code)).toBe(44);
+  });
+
+  it('createOrder без cityCode → orders.delivery_city_code NULL (deliveryCityCode = null)', async () => {
+    const productId = await makeProduct({ basePrice: '100.00', quantity: 5 });
+    const r = await repo.createOrder({
+      items: [{ productId, qty: 1 }],
+      customer: customer('citycode-null@example.com'),
+      delivery: { type: 'courier', city: 'Москва', address: 'ул. Ленина, 1' },
+      paymentMethod: 'cod',
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    created.orderIds.push(r.order.id);
+    expect(r.order.deliveryCityCode).toBeNull();
+  });
+
   // БАГ A волны 7: scoped percent-промокод minQty=3, в scope 2 единицы (+5 вне
   // scope). Раньше validatePromo брал кол-во ВСЕЙ корзины (7 ≥ 3) → valid, но
   // pricing считал minQty по SCOPED-кол-ву (2 < 3) → discount=0, при этом

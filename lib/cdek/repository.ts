@@ -187,6 +187,24 @@ export async function bumpShipmentRetry(
   return row ? mapShipment(row) : null;
 }
 
+/**
+ * Денормализация трек-номера на заказ: orders.cdek_track (горячее поле для
+ * списков/витрины). Нужна tracking-синку: в боевом режиме cdek_number НЕ известен
+ * при создании накладной (POST /v2/orders его не возвращает) и приходит позже —
+ * его подхватывает GET /v2/orders/{uuid} (entity.cdek_number) в TrackingService.
+ * Идемпотентна (повторный вызов с тем же номером — no-op по смыслу).
+ */
+export async function setOrderCdekTrack(
+  orderId: string,
+  cdekNumber: string,
+): Promise<void> {
+  await sql`
+    UPDATE orders
+       SET cdek_track = ${cdekNumber}, updated_at = now()
+     WHERE id = ${orderId}
+  `;
+}
+
 /** Отправление по order_id; null если нет. */
 export async function getShipmentByOrderId(
   orderId: string,

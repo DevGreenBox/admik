@@ -21,6 +21,7 @@ import type { TransactionSql } from 'postgres';
 import type { CdekManager } from '../manager';
 import { getCdekManager } from '../manager';
 import { CdekError } from '../errors';
+import { extractCdekErrors } from '../client';
 import {
   getShipmentByOrderId,
   createShipment as repoCreateShipment,
@@ -104,6 +105,78 @@ function itemUnitWeight(item: OrderItem, defaultWeightG: number): number {
 }
 
 // -----------------------------------------------------------------------------
+// buildWareKey — ЧИСТАЯ (фикс 1, аудит 2026-07-09). Лимит ware_key string(20).
+// -----------------------------------------------------------------------------
+
+/** Документированный лимит packages[].items[].ware_key (apidoc.cdek.ru): string(20). */
+export const WARE_KEY_MAX_LENGTH = 20;
+
+/**
+ * Артикул позиции для СДЭК (ware_key, string(20)). Раньше уходил UUID варианта
+ * (36 символов) — боевая регистрация падала на документированном лимите.
+ *
+ * Базово — SKU-снимок позиции (trim, обрезка до 20); пустой SKU → UUID позиции
+ * без дефисов, первые 20. Уникальность ВНУТРИ packages[].items[] гарантирует
+ * набор `used`: коллизия после обрезки получает суффикс -2/-3/… с обрезкой базы
+ * так, чтобы итог не превышал 20 символов. Чистая, тестируется без сети/БД.
+ */
+export function buildWareKey(
+  item: Pick<OrderItem, 'skuSnapshot' | 'id'>,
+  used: Set<string> = new Set(),
+): string {
+  const sku = (item.skuSnapshot ?? '').trim();
+  const base =
+    sku.length > 0
+      ? sku.slice(0, WARE_KEY_MAX_LENGTH)
+      : item.id.replace(/-/g, '').slice(0, WARE_KEY_MAX_LENGTH);
+
+  let key = base;
+  for (let n = 2; used.has(key); n += 1) {
+    const suffix = `-${n}`;
+    key = base.slice(0, WARE_KEY_MAX_LENGTH - suffix.length) + suffix;
+  }
+  used.add(key);
+  return key;
+}
+
+// -----------------------------------------------------------------------------
+// Первое плечо тарифа (фикс 3): откуда СДЭК забирает груз — склад или дверь.
+// -----------------------------------------------------------------------------
+
+/**
+ * Первое плечо («от склада» / «от двери») по коду тарифа.
+ *
+ * Источник: Приложение 4 apidoc.cdek.ru («Коды тарифов», сверено 2026-07-09):
+ *   136 склад-склад, 137 склад-дверь, 233 экономичная посылка склад-склад,
+ *   234 экономичная посылка склад-дверь, 368 склад-постамат — «от склада»;
+ *   138 дверь-склад, 139 дверь-дверь, 366 дверь-постамат — «от двери».
+ *
+ * По документации: для тарифов «от склада» ОБЯЗАТЕЛЕН shipment_point (код ПВЗ
+ * самопривоза) и он несовместим с from_location (v2_shipment_address_multivalued);
+ * для тарифов «от двери» обязателен from_location с address.
+ */
+export const FIRST_LEG_BY_TARIFF: Readonly<Record<number, 'warehouse' | 'door'>> = {
+  136: 'warehouse',
+  137: 'warehouse',
+  138: 'door',
+  139: 'door',
+  233: 'warehouse',
+  234: 'warehouse',
+  366: 'door',
+  368: 'warehouse',
+};
+
+/**
+ * Первое плечо тарифа; неизвестный код → 'warehouse' (безопасный дефолт для ИМ:
+ * магазины сдают посылки на ПВЗ, а ошибка «не задан shipment_point» видна
+ * оператору сразу и понятно, тогда как молчаливый from_location без address —
+ * документированно запрещённая комбинация).
+ */
+export function firstLegForTariff(tariffCode: number): 'warehouse' | 'door' {
+  return FIRST_LEG_BY_TARIFF[tariffCode] ?? 'warehouse';
+}
+
+// -----------------------------------------------------------------------------
 // buildPayload — ЧИСТАЯ (порт OrderService::buildPayload). Тестируется без сети.
 // -----------------------------------------------------------------------------
 
@@ -113,9 +186,11 @@ export interface CdekOrderPayload {
   number: string;
   tariff_code: number;
   shipment_point?: string;
-  from_location?: { code: number };
+  /** Тарифы «от двери»: address обязателен (apidoc.cdek.ru, from_location). */
+  from_location?: { code?: number; address: string };
   delivery_point?: string;
-  to_location?: { code?: number; postal_code?: string; address?: string };
+  /** Тарифы «до двери»: address обязателен + идентификация города (code|city|postal_code). */
+  to_location?: { code?: number; city?: string; postal_code?: string; address: string };
   recipient: {
     name: string;
     phones: Array<{ number: string }>;
@@ -149,6 +224,11 @@ export interface CdekOrderPayload {
 export interface BuildPayloadOptions {
   defaultDimensions: { weightG: number; lengthCm: number; widthCm: number; heightCm: number };
   fromLocationCode: number;
+  /**
+   * Адрес отправления (CDEK_FROM_ADDRESS) — обязателен для тарифов «от двери»
+   * (from_location.address, фикс 3); для тарифов «от склада» не используется.
+   */
+  fromAddress: string | null;
   shipmentPoint: string | null;
   /** Тариф ПВЗ/постамата (склад-склад, 136). */
   defaultTariffCode: number;
@@ -164,12 +244,41 @@ export interface BuildPayloadOptions {
 }
 
 /**
- * Собирает payload создания отправления из заказа+позиций (порт buildPayload).
- * Чистая: вход — заказ/позиции/опции; никакого I/O.
+ * Телефон отправителя (CDEK_SENDER_PHONE) — та же нормализация, что у получателя,
+ * но с понятной оператору ошибкой про конкретную env-переменную (фикс 8).
+ */
+function normalizeSenderPhone(raw: string): string {
+  try {
+    return normalizePhone(raw);
+  } catch {
+    throw new CdekError(
+      'cdek_invalid_sender_phone',
+      `Некорректный телефон отправителя CDEK_SENDER_PHONE: "${raw}". ` +
+        'Задайте российский номер (10–11 цифр), например +79001234567.',
+    );
+  }
+}
+
+/**
+ * Собирает payload создания отправления из заказа+позиций (порт buildPayload,
+ * пересобран по боевому аудиту apidoc.cdek.ru 2026-07-09). Чистая: вход —
+ * заказ/позиции/опции; никакого I/O.
+ *
+ * Отправитель — по ПЕРВОМУ ПЛЕЧУ тарифа (фикс 3, firstLegForTariff):
+ *   • «от склада» → shipment_point ОБЯЗАТЕЛЕН (нет → cdek_shipment_point_required);
+ *   • «от двери» → from_location { code, address } (address из CDEK_FROM_ADDRESS,
+ *     пусто → cdek_from_address_required).
+ *   shipment_point и from_location взаимоисключимы ВСЕГДА
+ *   (v2_shipment_address_multivalued).
  *
  * Назначение: режим pvz/postamat → delivery_point (код ПВЗ); door → to_location
- * (код города + индекс/адрес). Отправитель: shipment_point ИЛИ from_location
- * (взаимоисключимы). packages — одна упаковка, агрегированная из позиций.
+ * { code?, city?, address } — address обязателен (cdek_address_required) и хотя
+ * бы одна идентификация города code|city (cdek_city_required) (фикс 4).
+ *
+ * ware_key — SKU-снимок с лимитом string(20) и уникальностью внутри упаковки
+ * (фикс 1, buildWareKey). sender — только при непустых CDEK_SENDER_*; телефон
+ * отправителя нормализуется (фикс 8). packages — одна упаковка, агрегированная
+ * из позиций.
  */
 export function buildPayload(
   order: Order,
@@ -189,6 +298,21 @@ export function buildPayload(
   // → курьер уходил с ПВЗ-тарифом.
   const tariffCode = mode === 'door' ? opts.doorTariffCode : opts.defaultTariffCode;
 
+  // Отправитель (sender) — фикс 8: пустые CDEK_SENDER_* → ключ sender вообще не
+  // включается (для типа 1 он опционален; пустой объект {} бессмыслен). Телефон
+  // нормализуется с понятной ошибкой про CDEK_SENDER_PHONE.
+  const senderPhone = opts.sender.phone ? normalizeSenderPhone(opts.sender.phone) : null;
+  const sender: NonNullable<CdekOrderPayload['sender']> = {
+    ...(opts.sender.name ? { company: opts.sender.name } : {}),
+    ...(opts.sender.contactName ? { name: opts.sender.contactName } : {}),
+    ...(opts.sender.email ? { email: opts.sender.email } : {}),
+    ...(opts.sender.inn ? { tin: opts.sender.inn } : {}),
+    ...(senderPhone ? { phones: [{ number: senderPhone }] } : {}),
+  };
+
+  // ware_key: лимит string(20) + уникальность внутри packages[].items[] (фикс 1).
+  const usedWareKeys = new Set<string>();
+
   const payload: CdekOrderPayload = {
     type: 1,
     number: order.number,
@@ -198,13 +322,7 @@ export function buildPayload(
       phones: [{ number: normalizePhone(order.customerPhone) }],
       ...(order.customerEmail ? { email: order.customerEmail } : {}),
     },
-    sender: {
-      ...(opts.sender.name ? { company: opts.sender.name } : {}),
-      ...(opts.sender.contactName ? { name: opts.sender.contactName } : {}),
-      ...(opts.sender.email ? { email: opts.sender.email } : {}),
-      ...(opts.sender.inn ? { tin: opts.sender.inn } : {}),
-      ...(opts.sender.phone ? { phones: [{ number: opts.sender.phone }] } : {}),
-    },
+    ...(Object.keys(sender).length > 0 ? { sender } : {}),
     packages: [
       {
         number: order.number,
@@ -214,7 +332,7 @@ export function buildPayload(
         ...(pkg.height !== undefined ? { height: pkg.height } : {}),
         items: items.map((it) => ({
           name: it.nameSnapshot,
-          ware_key: it.variantId ?? it.id,
+          ware_key: buildWareKey(it, usedWareKeys),
           payment: { value: 0 },
           cost: Number(it.unitPrice),
           amount: it.quantity,
@@ -225,11 +343,26 @@ export function buildPayload(
     ],
   };
 
-  // Отправитель: shipment_point ИЛИ from_location (взаимоисключимы).
-  if (opts.shipmentPoint) {
+  // Отправитель по первому плечу тарифа (фикс 3): shipment_point ⊕ from_location.
+  if (firstLegForTariff(tariffCode) === 'warehouse') {
+    if (!opts.shipmentPoint) {
+      throw new CdekError(
+        'cdek_shipment_point_required',
+        'Задайте CDEK_SHIPMENT_POINT — код ПВЗ, откуда сдаёте посылки ' +
+          '(обязателен для тарифов от склада).',
+      );
+    }
     payload.shipment_point = opts.shipmentPoint;
   } else {
-    payload.from_location = { code: opts.fromLocationCode };
+    // Тариф «от двери»: from_location.address обязателен по документации.
+    if (!opts.fromAddress) {
+      throw new CdekError(
+        'cdek_from_address_required',
+        'Задайте CDEK_FROM_ADDRESS — адрес забора посылок ' +
+          '(from_location.address обязателен для тарифов «от двери»).',
+      );
+    }
+    payload.from_location = { code: opts.fromLocationCode, address: opts.fromAddress };
   }
 
   // Назначение.
@@ -243,10 +376,29 @@ export function buildPayload(
       );
     }
   } else {
-    // door: адрес получателя (код города у заказа — это название, не числовой код
-    // СДЭК; адрес — основное поле для курьерской доставки).
+    // door (фикс 4): to_location = address (обязателен) + идентификация города
+    // (числовой code из delivery_city_code и/или строковое city). Без города
+    // СДЭК отклонит заказ — валидируем заранее с понятной оператору ошибкой.
+    if (!order.deliveryAddress) {
+      throw new CdekError(
+        'cdek_address_required',
+        `Для курьерской доставки (до двери) обязателен адрес получателя — ` +
+          `у заказа ${order.number} он не заполнен.`,
+      );
+    }
+    const cityCode = order.deliveryCityCode ?? undefined;
+    const cityName = order.deliveryCity ?? undefined;
+    if (cityCode === undefined && cityName === undefined) {
+      throw new CdekError(
+        'cdek_city_required',
+        `Для курьерской доставки нужен город получателя (код СДЭК или название) — ` +
+          `у заказа ${order.number} он не заполнен.`,
+      );
+    }
     payload.to_location = {
-      ...(order.deliveryAddress ? { address: order.deliveryAddress } : {}),
+      ...(cityCode !== undefined ? { code: cityCode } : {}),
+      ...(cityName !== undefined ? { city: cityName } : {}),
+      address: order.deliveryAddress,
     };
   }
 
@@ -286,37 +438,164 @@ export function shipmentBlockMessage(reason: ShipmentBlockReason): string {
   }
 }
 
-/** Можно ли создавать отправление для заказа (оплачен и не самовывоз). */
+/**
+ * Можно ли создавать отправление для заказа (не самовывоз; оплачен ЛИБО включён
+ * режим «накладная при заказе» для магазина без кассы — opts.createOnOrder).
+ */
 export function canCreateShipment(
   order: Order,
+  opts: { createOnOrder?: boolean } = {},
 ): { ok: boolean; reason?: ShipmentBlockReason } {
   if (order.deliveryType === 'pickup') {
     return { ok: false, reason: 'pickup' };
   }
-  if (!isOrderPaidForShipment(order)) {
+  // Гейт оплаты снимается только если магазин работает без кассы (createOnOrder):
+  // тогда «нажал Оплатить» = подтверждение заказа, накладная формируется сразу.
+  if (!opts.createOnOrder && !isOrderPaidForShipment(order)) {
     return { ok: false, reason: 'not_paid' };
   }
   return { ok: true };
+}
+
+/**
+ * Нужно ли регистрировать накладную СДЭК СРАЗУ при оформлении заказа (режим
+ * «магазин без онлайн-кассы», CDEK_CREATE_ON_ORDER). Чистое решение для горячего
+ * пути POST /orders. Условия (все обязательны):
+ *   • НЕ повторный idempotency-заказ (reused уже обрабатывался — не дёргаем СДЭК);
+ *   • включён режим createOnOrder;
+ *   • доставка НЕ самовывоз;
+ *   • модуль cdek эффективно включён — единый рубильник (аудит 2026-07-09, находка
+ *     #6: авто-создание обходило module toggle, дёргая СДЭК при выключенном модуле).
+ */
+export function wantsCdekShipmentOnOrder(args: {
+  reused: boolean;
+  createOnOrder: boolean;
+  deliveryType: string;
+  cdekModuleEnabled: boolean;
+}): boolean {
+  return (
+    !args.reused &&
+    args.createOnOrder &&
+    args.deliveryType !== 'pickup' &&
+    args.cdekModuleEnabled
+  );
+}
+
+/** UI-состояние блока «Создать отправление» в карточке заказа. */
+export interface ShipmentCreateUiState {
+  /** Показывать кнопку ручного создания отправления. */
+  showCreateButton: boolean;
+  /** Показывать пояснение «накладная — после оплаты» (штатный режим с кассой). */
+  showAwaitPaymentNotice: boolean;
+  /** Показывать подсказку «магазин без кассы — накладная без ожидания оплаты». */
+  showCreateWithoutPaymentHint: boolean;
+}
+
+/**
+ * Чистое решение, что рисовать в блоке создания отправления (карточка заказа) —
+ * зеркало серверного canCreateShipment для UI. Ключевое (демо «без оплаты»):
+ * при createOnOrder (магазин без онлайн-кассы) кнопка доступна и для
+ * НЕОПЛАЧЕННОГО заказа — иначе UI прятал бы её в обход разрешающего сервера
+ * (paymentReady раньше не учитывал createOnOrder). Самовывоз и уже созданное
+ * отправление — ни кнопки, ни уведомлений.
+ */
+export function shipmentCreateUiState(args: {
+  hasShipment: boolean;
+  isPickup: boolean;
+  paymentReady: boolean;
+  createOnOrder: boolean;
+}): ShipmentCreateUiState {
+  const { hasShipment, isPickup, paymentReady, createOnOrder } = args;
+  if (hasShipment || isPickup) {
+    return {
+      showCreateButton: false,
+      showAwaitPaymentNotice: false,
+      showCreateWithoutPaymentHint: false,
+    };
+  }
+  const canCreateNow = paymentReady || createOnOrder;
+  return {
+    showCreateButton: canCreateNow,
+    // «Ждём оплату» — только в штатном режиме с кассой (без createOnOrder).
+    showAwaitPaymentNotice: !canCreateNow,
+    // Подсказка про режим без кассы — когда флаг включён, а оплаты ещё нет.
+    showCreateWithoutPaymentHint: createOnOrder && !paymentReady,
+  };
+}
+
+// -----------------------------------------------------------------------------
+// Разбор асинхронных 202-ответов методов заказов (apidoc.cdek.ru «Асинхронность»).
+// -----------------------------------------------------------------------------
+
+/** 202-ответ асинхронных методов заказов (POST/DELETE/refusal). */
+interface CdekAsyncRaw {
+  entity?: { uuid?: string };
+  requests?: Array<{ state?: string; errors?: unknown; warnings?: unknown }>;
+}
+
+/**
+ * true, если ошибка СДЭК означает «сущность не найдена» (GET /v2/orders?im_number
+ * по несуществующему/удалённому заказу): HTTP 404 либо коды
+ * v2_entity_not_found / v2_entity_not_found_im_number (apidoc.cdek.ru).
+ */
+function isCdekNotFound(err: CdekError): boolean {
+  return (
+    err.httpStatus === 404 ||
+    err.cdekErrors.some(
+      (e) => e.code === 'v2_entity_not_found' || e.code === 'v2_entity_not_found_im_number',
+    )
+  );
+}
+
+/** true, если какой-либо requests[].state === 'INVALID' (фоновая валидация отклонила). */
+function hasInvalidRequestState(raw: unknown): boolean {
+  if (!raw || typeof raw !== 'object') return false;
+  const requests = (raw as Record<string, unknown>).requests;
+  if (!Array.isArray(requests)) return false;
+  return requests.some(
+    (r) => r !== null && typeof r === 'object' && (r as Record<string, unknown>).state === 'INVALID',
+  );
+}
+
+/**
+ * Проверяет 202-ответ асинхронного метода заказов (фиксы 2/6/7): статус 202 —
+ * лишь «запрос принят», фактический результат — в requests[].state / errors[].
+ * INVALID ЛИБО любые errors[] → CdekError(errorCode) с человекочитаемым
+ * перечислением code/message всех ошибок (extractCdekErrors: top-level + все
+ * requests[].errors[]) и структурированными cdekErrors для программной обработки.
+ */
+function assertCdekRequestsOk(raw: unknown, errorCode: string, context: string): void {
+  const cdekErrors = extractCdekErrors(raw);
+  if (!hasInvalidRequestState(raw) && cdekErrors.length === 0) return;
+  const details =
+    cdekErrors.length > 0
+      ? cdekErrors.map((e) => `${e.code}: ${e.message}`).join('; ')
+      : 'requests[].state=INVALID (СДЭК не вернул детали ошибок)';
+  throw new CdekError(errorCode, `${context}: ${details}`, { cdekErrors });
 }
 
 // -----------------------------------------------------------------------------
 // OrderService.
 // -----------------------------------------------------------------------------
 
-/** Результат создания отправления в СДЭК (real). */
-interface CdekCreateRaw {
-  entity?: { uuid?: string };
-  requests?: unknown;
-}
-
 export class OrderService {
   constructor(private readonly manager: CdekManager = getCdekManager()) {}
 
-  /** Низкоуровневое создание в СДЭК: POST /v2/orders → uuid. */
+  /**
+   * Низкоуровневое создание в СДЭК: POST /v2/orders → uuid.
+   *
+   * Фикс 2 (критический, аудит 2026-07-09): ответ 202 разбирается ПОЛНОСТЬЮ.
+   * requests[].state=INVALID либо requests[].errors[] → CdekError
+   * 'cdek_create_invalid' с деталями; entity.uuid при этом НЕ считается успехом
+   * и не сохраняется (раньше INVALID-создание было невидимым — uuid принимался,
+   * а накладной в СДЭК не существовало). ACCEPTED/WAITING/SUCCESSFUL без ошибок
+   * + entity.uuid → успех.
+   */
   async create(payload: CdekOrderPayload): Promise<{ uuid: string }> {
-    const raw = await this.manager.client.request<CdekCreateRaw>('POST', '/v2/orders', {
+    const raw = await this.manager.client.request<CdekAsyncRaw>('POST', '/v2/orders', {
       json: payload,
     });
+    assertCdekRequestsOk(raw, 'cdek_create_invalid', 'СДЭК отклонил регистрацию заказа');
     const uuid = raw?.entity?.uuid;
     if (!uuid) {
       throw new CdekError('cdek_create_no_uuid', 'СДЭК не вернул uuid отправления.');
@@ -324,12 +603,52 @@ export class OrderService {
     return { uuid };
   }
 
-  /** Низкоуровневая отмена: DELETE до приёмки, PATCH после (порт cancel). */
+  /**
+   * Сверка «существует ли заказ в СДЭК» по номеру ИМ: GET /v2/orders?im_number=…
+   * (идемпотентный, безопасен к авто-повтору). Возвращает uuid найденного заказа
+   * или null при v2_entity_not_found_im_number / 404. Используется фиксом 5:
+   * ПЕРЕД повторным POST после прошлой ошибки и СРАЗУ после
+   * 'cdek_network_error_unconfirmed' (запрос МОГ выполниться на стороне СДЭК —
+   * слепой повтор POST создал бы дубль накладной).
+   */
+  async findUuidByImNumber(imNumber: string): Promise<string | null> {
+    try {
+      const raw = await this.manager.client.request<CdekAsyncRaw>('GET', '/v2/orders', {
+        query: { im_number: imNumber },
+        idempotent: true,
+      });
+      const uuid = raw?.entity?.uuid;
+      return typeof uuid === 'string' && uuid.length > 0 ? uuid : null;
+    } catch (err) {
+      if (err instanceof CdekError && isCdekNotFound(err)) return null;
+      throw err;
+    }
+  }
+
+  /**
+   * Низкоуровневая отмена. До приёмки груза — DELETE /v2/orders/{uuid}; после —
+   * POST /v2/orders/{uuid}/refusal («Регистрация отказа», apidoc.cdek.ru).
+   *
+   * Фикс 6: раньше afterAcceptance слал PATCH {} — по документации PATCH это
+   * ИЗМЕНЕНИЕ заказа и после движения груза запрещён (v2_update_forbidden);
+   * операция отказа — отдельный endpoint refusal (тот же асинхронный 202).
+   * Фикс 7: 202-ответ ОБОИХ методов разбирается (requests[].state INVALID /
+   * errors[], в т.ч. v2_similar_request_still_processed) → CdekError, вызывающий
+   * НЕ помечает отправление отменённым.
+   */
   async cancel(uuid: string, afterAcceptance = false): Promise<void> {
     if (afterAcceptance) {
-      await this.manager.client.request('PATCH', `/v2/orders/${uuid}`, { json: {} });
+      const raw = await this.manager.client.request<CdekAsyncRaw>(
+        'POST',
+        `/v2/orders/${uuid}/refusal`,
+      );
+      assertCdekRequestsOk(raw, 'cdek_refusal_invalid', 'СДЭК отклонил регистрацию отказа');
     } else {
-      await this.manager.client.request('DELETE', `/v2/orders/${uuid}`);
+      const raw = await this.manager.client.request<CdekAsyncRaw>(
+        'DELETE',
+        `/v2/orders/${uuid}`,
+      );
+      assertCdekRequestsOk(raw, 'cdek_cancel_invalid', 'СДЭК отклонил удаление заказа');
     }
   }
 
@@ -415,7 +734,9 @@ export class OrderService {
     }
     const { order, items } = loaded;
 
-    const precond = canCreateShipment(order);
+    const precond = canCreateShipment(order, {
+      createOnOrder: this.manager.config.createOnOrder,
+    });
     if (!precond.ok) {
       throw new CdekError(
         'cdek_precondition_failed',
@@ -438,16 +759,45 @@ export class OrderService {
         cdekNumber = r.cdekNumber;
         isMock = true;
       } else {
-        const payload = buildPayload(order, items, {
-          defaultDimensions: cfg.defaultDimensions,
-          fromLocationCode: cfg.fromLocationCode,
-          shipmentPoint: cfg.shipmentPoint,
-          defaultTariffCode: cfg.defaultTariffCode,
-          doorTariffCode: cfg.doorTariffCode,
-          sender: cfg.sender,
-        });
-        const created = await this.create(payload);
-        cdekUuid = created.uuid;
+        // Фикс 5 (high, анти-дубль накладных). POST /v2/orders неидемпотентен и
+        // клиентом НЕ авторетраится; «повтор» возможен только через сверку:
+        //   (а) прошлая попытка неуспешна (existing.error, cron-ретрай/force
+        //       после ошибки) → СНАЧАЛА GET /v2/orders?im_number=<number>. Заказ
+        //       уже существует в СДЭК (например, прошлый POST дошёл, а ответ
+        //       потерялся) → принимаем его uuid БЕЗ второго POST; не найден
+        //       (v2_entity_not_found_im_number) → создаём как обычно.
+        //   (б) сам POST упал 'cdek_network_error_unconfirmed' (МОГ выполниться
+        //       на стороне СДЭК) → та же сверка немедленно; найден → успех;
+        //       не найден → пробрасываем исходную ошибку (cron-ретрай позже
+        //       снова начнёт со сверки (а)).
+        let uuid: string | null = null;
+        if (existing?.error) {
+          uuid = await this.findUuidByImNumber(order.number);
+        }
+        if (!uuid) {
+          const payload = buildPayload(order, items, {
+            defaultDimensions: cfg.defaultDimensions,
+            fromLocationCode: cfg.fromLocationCode,
+            fromAddress: cfg.fromAddress,
+            shipmentPoint: cfg.shipmentPoint,
+            defaultTariffCode: cfg.defaultTariffCode,
+            doorTariffCode: cfg.doorTariffCode,
+            sender: cfg.sender,
+          });
+          try {
+            uuid = (await this.create(payload)).uuid;
+          } catch (err) {
+            if (err instanceof CdekError && err.code === 'cdek_network_error_unconfirmed') {
+              // Сбой сверки не должен затенить исходную ошибку — .catch(null).
+              const found = await this.findUuidByImNumber(order.number).catch(() => null);
+              if (!found) throw err;
+              uuid = found;
+            } else {
+              throw err;
+            }
+          }
+        }
+        cdekUuid = uuid;
         cdekNumber = null; // трек придёт позже (webhook/tracking)
         isMock = false;
       }
