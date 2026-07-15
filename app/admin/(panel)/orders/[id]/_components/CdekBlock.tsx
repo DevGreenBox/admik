@@ -6,7 +6,7 @@ import { useState } from 'react';
 import type { ActionResult } from '@/lib/server/action';
 import { errorMessage } from '../../_components/action-result';
 import { resolvePrintClick } from '@/lib/cdek/print-label';
-import { shipmentCreateUiState } from '@/lib/cdek/services/order';
+import { shipmentCreateUiState } from '@/lib/cdek/services/order-ui';
 
 import {
   createCdekShipmentAction,
