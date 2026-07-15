@@ -28,20 +28,24 @@ describe('buildInfoLinks (авто-навигация из страниц Кон
     const links = buildInfoLinks([
       { slug: 'about', title: 'О компании' },
       { slug: 'faq', title: 'Вопросы и ответы' },
-      { slug: 'delivery', title: 'Доставка и оплата' },
+      { slug: 'returns', title: 'Обмен и возврат' },
     ]);
     expect(links).toEqual([
       { href: '/about', label: 'О компании' },
       { href: '/faq', label: 'Вопросы и ответы' },
-      { href: '/delivery', label: 'Доставка и оплата' },
+      { href: '/returns', label: 'Обмен и возврат' },
     ]);
   });
 
-  it('отбрасывает пустые slug/title и служебный slug contacts (есть отдельная ссылка)', () => {
+  it('отбрасывает пустые slug/title и служебные slug contacts/delivery (есть отдельные ссылки)', () => {
+    // Правка Ани2 #13: «Доставка и оплата» дублировалась — правый пункт «Доставка»
+    // (/#delivery) + авто-ссылка из CMS-страницы /delivery. Прячем slug delivery
+    // из «Информации», как и contacts (у обоих есть свой пункт в шапке).
     const links = buildInfoLinks([
       { slug: '', title: 'пусто' },
       { slug: 'x', title: '' },
       { slug: 'contacts', title: 'Контакты' },
+      { slug: 'delivery', title: 'Доставка и оплата' },
       { slug: 'terms', title: 'Соглашение' },
     ]);
     expect(links).toEqual([{ href: '/terms', label: 'Соглашение' }]);
@@ -53,36 +57,37 @@ describe('buildInfoLinks (авто-навигация из страниц Кон
 });
 
 describe('buildHeaderNav — дефолтное меню (нет кастома)', () => {
-  it('содержит Каталог/Коллекция/О бренде слева и правые Доставка/Контакты (фасеты свёрнуты в «Коллекцию»)', () => {
+  it('содержит Каталог/О бренде слева и правые Доставка/Контакты (Каталог = выпадашка, без дубля «Коллекция»)', () => {
     const { left, right } = buildHeaderNav({});
     const labels = left.map((l) => l.label);
-    // 6 пунктов в ряд распирали центр-сетку шапки → Распродажа/Новинки убраны
-    // из верхнего ряда и свёрнуты в подменю «Коллекция» (см. ниже).
-    expect(labels).toEqual(['Каталог', 'Коллекция', 'О бренде']);
+    // Правка Ани2 #3: «Каталог» и «Коллекция» дублировали друг друга (оба /catalog).
+    // Оставлен ОДИН пункт «Каталог» с выпадающим подменю (категории + фасеты);
+    // отдельная «Коллекция» убрана.
+    expect(labels).toEqual(['Каталог', 'О бренде']);
     expect(right).toEqual(DEFAULT_NAV_RIGHT);
   });
 
-  it('F18: фасеты «Распродажа»/«Новинки» доступны кликом — внутри подменю «Коллекция»', () => {
-    const collection = buildHeaderNav({}).left.find((l) => l.label === 'Коллекция');
-    expect(collection?.children).toEqual(CATALOG_FACETS);
-    expect(collection?.children?.find((c) => c.label === 'Распродажа')?.href).toBe('/catalog?sale=1');
-    expect(collection?.children?.find((c) => c.label === 'Новинки')?.href).toBe('/catalog?new=1');
+  it('F18: фасеты «Распродажа»/«Новинки» доступны кликом — внутри подменю «Каталог»', () => {
+    const catalog = buildHeaderNav({}).left.find((l) => l.label === 'Каталог');
+    expect(catalog?.children).toEqual(CATALOG_FACETS);
+    expect(catalog?.children?.find((c) => c.label === 'Распродажа')?.href).toBe('/catalog?sale=1');
+    expect(catalog?.children?.find((c) => c.label === 'Новинки')?.href).toBe('/catalog?new=1');
   });
 
-  it('подменю «Коллекция» = категории магазина + фасеты (Распродажа/Новинки в конце)', () => {
+  it('подменю «Каталог» = категории магазина + фасеты (Распродажа/Новинки в конце)', () => {
     const collectionChildren = [
       { href: '/catalog?category=halaty', label: 'Халаты' },
       { href: '/catalog?category=kostyumy', label: 'Костюмы' },
     ];
     const { left } = buildHeaderNav({ collectionChildren });
-    const collection = left.find((l) => l.label === 'Коллекция');
-    expect(collection?.children).toEqual([...collectionChildren, ...CATALOG_FACETS]);
+    const catalog = left.find((l) => l.label === 'Каталог');
+    expect(catalog?.children).toEqual([...collectionChildren, ...CATALOG_FACETS]);
   });
 
-  it('без категорий «Коллекция» всё равно выпадашка (только фасеты), href /catalog', () => {
-    const collection = buildHeaderNav({}).left.find((l) => l.label === 'Коллекция');
-    expect(collection?.children).toEqual(CATALOG_FACETS);
-    expect(collection?.href).toBe('/catalog');
+  it('без категорий «Каталог» всё равно выпадашка (только фасеты), href /catalog', () => {
+    const catalog = buildHeaderNav({}).left.find((l) => l.label === 'Каталог');
+    expect(catalog?.children).toEqual(CATALOG_FACETS);
+    expect(catalog?.href).toBe('/catalog');
   });
 
   it('добавляет выпадающую «Информацию» из опубликованных страниц', () => {

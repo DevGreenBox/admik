@@ -8,6 +8,9 @@ import {
   formatDeliveryCost,
   issueReasonLabel,
   describeQuoteIssues,
+  formatRuPhone,
+  isValidRuPhone,
+  contactFieldErrors,
 } from './checkout';
 import type { CartItem } from '@/types';
 
@@ -59,30 +62,78 @@ describe('formatEta', () => {
   });
 });
 
+const FULL_PHONE = '+7 (982) 510-31-76'; // 11 цифр
+
 describe('isContactStepValid', () => {
-  it('true когда имя/email/телефон заполнены', () => {
+  it('true когда имя/email заполнены и телефон полный (11 цифр)', () => {
     expect(
-      isContactStepValid({ firstName: 'Иван', lastName: '', email: 'i@e.ru', phone: '+7' }),
+      isContactStepValid({ firstName: 'Иван', lastName: '', email: 'i@e.ru', phone: FULL_PHONE }),
     ).toBe(true);
   });
-  it('false если пусто (с учётом пробелов)', () => {
+  it('false если имя пусто (с учётом пробелов)', () => {
     expect(
-      isContactStepValid({ firstName: '  ', lastName: 'П', email: 'i@e.ru', phone: '+7' }),
+      isContactStepValid({ firstName: '  ', lastName: 'П', email: 'i@e.ru', phone: FULL_PHONE }),
     ).toBe(false);
     expect(
-      isContactStepValid({ firstName: 'И', lastName: '', email: '', phone: '+7' }),
+      isContactStepValid({ firstName: 'И', lastName: '', email: '', phone: FULL_PHONE }),
+    ).toBe(false);
+  });
+  it('false при неполном телефоне (правка Ани2 #8: нужны все 11 цифр)', () => {
+    expect(
+      isContactStepValid({ firstName: 'Иван', lastName: '', email: 'i@e.ru', phone: '+7 (982) 510' }),
     ).toBe(false);
   });
   it('false при невалидном формате email (ранний гейт, не доводим до сервера)', () => {
     expect(
-      isContactStepValid({ firstName: 'Иван', lastName: 'П', email: 'неэмейл', phone: '+7' }),
+      isContactStepValid({ firstName: 'Иван', lastName: 'П', email: 'неэмейл', phone: FULL_PHONE }),
     ).toBe(false);
     expect(
-      isContactStepValid({ firstName: 'Иван', lastName: 'П', email: 'a@b', phone: '+7' }),
+      isContactStepValid({ firstName: 'Иван', lastName: 'П', email: 'a@b', phone: FULL_PHONE }),
     ).toBe(false);
     expect(
-      isContactStepValid({ firstName: 'Иван', lastName: 'П', email: 'a@b.ru', phone: '+7' }),
+      isContactStepValid({ firstName: 'Иван', lastName: 'П', email: 'a@b.ru', phone: FULL_PHONE }),
     ).toBe(true);
+  });
+});
+
+describe('formatRuPhone (маска телефона РФ, ≤11 цифр)', () => {
+  it('форматирует полный номер', () => {
+    expect(formatRuPhone('79825103176')).toBe('+7 (982) 510-31-76');
+  });
+  it('нормализует ведущую 8 → 7', () => {
+    expect(formatRuPhone('89825103176')).toBe('+7 (982) 510-31-76');
+  });
+  it('не даёт ввести больше 11 цифр', () => {
+    expect(formatRuPhone('798251031769999999')).toBe('+7 (982) 510-31-76');
+    expect((formatRuPhone('798251031769999999').match(/\d/g) || []).length).toBe(11);
+  });
+  it('прогрессивно форматирует частичный ввод', () => {
+    expect(formatRuPhone('798')).toBe('+7 (98');
+    expect(formatRuPhone('7982')).toBe('+7 (982)');
+    expect(formatRuPhone('7982510')).toBe('+7 (982) 510');
+    expect(formatRuPhone('798251031')).toBe('+7 (982) 510-31');
+  });
+  it('чистит буквы/символы', () => {
+    expect(formatRuPhone('+7 (982) abc 510-31-76')).toBe('+7 (982) 510-31-76');
+  });
+});
+
+describe('isValidRuPhone', () => {
+  it('true только при ровно 11 цифрах', () => {
+    expect(isValidRuPhone('+7 (982) 510-31-76')).toBe(true);
+    expect(isValidRuPhone('+7 (982) 510-31')).toBe(false);
+    expect(isValidRuPhone('')).toBe(false);
+  });
+});
+
+describe('contactFieldErrors (подсветка полей)', () => {
+  it('помечает пустое имя, кривой email и неполный телефон; фамилия необязательна', () => {
+    const e = contactFieldErrors({ firstName: '', lastName: '', email: 'bad', phone: '+7 (982)' });
+    expect(e).toEqual({ firstName: true, lastName: false, email: true, phone: true });
+  });
+  it('нет ошибок при валидной форме', () => {
+    const e = contactFieldErrors({ firstName: 'Иван', lastName: '', email: 'i@e.ru', phone: FULL_PHONE });
+    expect(e).toEqual({ firstName: false, lastName: false, email: false, phone: false });
   });
 });
 

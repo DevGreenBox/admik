@@ -26,6 +26,8 @@ import {
   isDeliveryStepValid,
   formatDeliveryCost,
   describeQuoteIssues,
+  formatRuPhone,
+  contactFieldErrors,
 } from "@/lib/checkout";
 import { appliedPromoCode, isPromoInSync } from "@/lib/promo";
 import { Button } from "@/components/ui/Button";
@@ -59,6 +61,9 @@ export default function CheckoutPage() {
   const [applyingPromo, setApplyingPromo] = useState(false);
 
   const [form, setForm] = useState({ firstName: "", lastName: "", email: "", phone: "" });
+  // Правка Ани2 #7: показывать подсветку незаполненных/неверных полей ПОСЛЕ первой
+  // попытки перейти «Далее» (иначе кнопка молча неактивна и покупатель не понимает).
+  const [showContactErrors, setShowContactErrors] = useState(false);
 
   // Idempotency-Key — один на сессию оформления (повтор не плодит заказы).
   const idempotencyKey = useRef<string>("");
@@ -332,23 +337,62 @@ export default function CheckoutPage() {
           <FadeIn>
             <div className="space-y-5 mt-8">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {(["firstName", "lastName", "email", "phone"] as const).map((key) => (
-                  <div key={key}>
-                    <label className="label-caps text-muted block mb-3">
-                      {{ firstName: "Имя", lastName: "Фамилия", email: "Email", phone: "Телефон" }[key]}
-                    </label>
-                    <input
-                      type={key === "email" ? "email" : key === "phone" ? "tel" : "text"}
-                      value={form[key]}
-                      onChange={(e) => setForm({ ...form, [key]: e.target.value })}
-                      className="w-full border border-border px-4 py-3 text-sm focus:border-graphite outline-none transition-colors"
-                    />
-                  </div>
-                ))}
+                {(["firstName", "lastName", "email", "phone"] as const).map((key) => {
+                  const fieldErrors = contactFieldErrors(form);
+                  const invalid = showContactErrors && fieldErrors[key];
+                  const errText = {
+                    firstName: "Укажите имя",
+                    lastName: "",
+                    email: "Введите корректный email",
+                    phone: "Введите номер полностью (11 цифр)",
+                  }[key];
+                  return (
+                    <div key={key}>
+                      <label className="label-caps text-muted block mb-3">
+                        {{ firstName: "Имя", lastName: "Фамилия", email: "Email", phone: "Телефон" }[key]}
+                      </label>
+                      <input
+                        type={key === "email" ? "email" : key === "phone" ? "tel" : "text"}
+                        inputMode={key === "phone" ? "numeric" : undefined}
+                        placeholder={key === "phone" ? "+7 (___) ___-__-__" : undefined}
+                        value={form[key]}
+                        aria-invalid={invalid || undefined}
+                        onChange={(e) =>
+                          setForm({
+                            ...form,
+                            // Маска телефона (правка Ани2 #8): ≤11 цифр, авто-формат.
+                            [key]: key === "phone" ? formatRuPhone(e.target.value) : e.target.value,
+                          })
+                        }
+                        className={`w-full border px-4 py-3 text-sm outline-none transition-colors ${
+                          invalid ? "border-red-500 focus:border-red-500" : "border-border focus:border-graphite"
+                        }`}
+                      />
+                      {invalid && errText ? (
+                        <p className="mt-1.5 text-xs text-red-600">{errText}</p>
+                      ) : null}
+                    </div>
+                  );
+                })}
               </div>
-              <Button variant="primary" size="lg" magnetic disabled={!isContactStepValid(form)} onClick={() => setStep(2)}>
+              {/* Правка Ани2 #7: кнопка кликабельна всегда; при невалидности не
+                  переходит молча, а включает подсветку незаполненных полей. */}
+              <Button
+                variant="primary"
+                size="lg"
+                magnetic
+                onClick={() => {
+                  if (isContactStepValid(form)) setStep(2);
+                  else setShowContactErrors(true);
+                }}
+              >
                 Далее
               </Button>
+              {showContactErrors && !isContactStepValid(form) ? (
+                <p className="mt-2 text-sm text-red-600">
+                  Заполните обязательные поля, отмеченные красным.
+                </p>
+              ) : null}
             </div>
           </FadeIn>
         )}

@@ -25,7 +25,7 @@ export interface NavPage {
  * Slug'и, которые НЕ выводим в авто-меню «Информация»: у них уже есть собственная
  * точка входа в навигации (или они являются якорями главной), иначе дублировались бы.
  */
-const NAV_HIDE_SLUGS = new Set<string>(['contacts']);
+const NAV_HIDE_SLUGS = new Set<string>(['contacts', 'delivery']);
 
 /**
  * Строит ссылки «Информация» из списка опубликованных страниц. Каждая страница →
@@ -115,9 +115,11 @@ export function buildHeaderNav(opts: {
   // «Коллекция» — всегда выпадашка: категории магазина + фасеты каталога (F18).
   // Даже без категорий внутри есть Распродажа/Новинки, поэтому подменю не пустеет.
   const collectionItems: SiteNavLink[] = [...collectionChildren, ...CATALOG_FACETS];
+  // Правка Ани2 #3: «Каталог» и «Коллекция» дублировали друг друга (оба ведут на
+  // /catalog). Оставлен ОДИН пункт «Каталог» с выпадающим подменю (категории +
+  // фасеты Распродажа/Новинки) — отдельная «Коллекция» убрана.
   const left: HeaderNavItem[] = [
-    { href: '/catalog', label: 'Каталог' },
-    { href: '/catalog', label: 'Коллекция', children: collectionItems },
+    { href: '/catalog', label: 'Каталог', children: collectionItems },
     { href: '/#about', label: 'О бренде' },
     ...(infoLink ? [infoLink] : []),
   ];

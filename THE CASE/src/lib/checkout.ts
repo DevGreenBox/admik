@@ -67,8 +67,45 @@ export function isContactStepValid(form: ContactForm): boolean {
   return (
     form.firstName.trim() !== '' &&
     isValidEmail(form.email) &&
-    form.phone.trim() !== ''
+    isValidRuPhone(form.phone)
   );
+}
+
+/**
+ * Маска телефона РФ (правка Ани2 #8: «нельзя ввести больше 11 цифр»). Оставляет
+ * только цифры, нормализует ведущую 8→7, ограничивает 11 цифрами и форматирует
+ * как «+7 (900) 123-45-67». Частичный ввод форматируется прогрессивно (не мешает
+ * набору). Чистая — покрыта юнит-тестами.
+ */
+export function formatRuPhone(raw: string): string {
+  let digits = (raw.match(/\d/g) || []).join('');
+  // ведущая 8 или 7 — это код страны; нормализуем к 7
+  if (digits.startsWith('8')) digits = '7' + digits.slice(1);
+  if (!digits.startsWith('7')) digits = '7' + digits;
+  digits = digits.slice(0, 11); // максимум 11 цифр (7 + 10)
+  const d = digits.slice(1); // 10 цифр номера
+  let out = '+7';
+  if (d.length > 0) out += ' (' + d.slice(0, 3);
+  if (d.length >= 3) out += ')';
+  if (d.length > 3) out += ' ' + d.slice(3, 6);
+  if (d.length > 6) out += '-' + d.slice(6, 8);
+  if (d.length > 8) out += '-' + d.slice(8, 10);
+  return out;
+}
+
+/** Телефон валиден: ровно 11 цифр (РФ: 7 + 10). */
+export function isValidRuPhone(phone: string): boolean {
+  return (phone.match(/\d/g) || []).length === 11;
+}
+
+/** Поля шага 1 с ошибками (для подсветки — правка Ани2 #7: показать, где не так). */
+export function contactFieldErrors(form: ContactForm): Record<keyof ContactForm, boolean> {
+  return {
+    firstName: form.firstName.trim() === '',
+    lastName: false, // фамилия необязательна
+    email: !isValidEmail(form.email),
+    phone: !isValidRuPhone(form.phone),
+  };
 }
 
 /** Шаг 2 валиден: выбран город (cityCode) и ПВЗ (pvzCode). */
