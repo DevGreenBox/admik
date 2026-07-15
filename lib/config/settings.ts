@@ -204,6 +204,19 @@ function mergeHome(db: HomeSettings): HomeContent {
           linkHref: db.philosophy.linkHref ?? HOME_DEFAULTS.philosophy.linkHref,
         }
       : HOME_DEFAULTS.philosophy,
+    reviews: db.reviews
+      ? {
+          // enabled по умолчанию false (блок opt-in): отсутствие флага в оверрайде
+          // не включает блок молча. Тексты/фото пусты → пофилдовый дефолт витрины.
+          enabled: db.reviews.enabled ?? HOME_DEFAULTS.reviews.enabled,
+          eyebrow: db.reviews.eyebrow ?? HOME_DEFAULTS.reviews.eyebrow,
+          title: db.reviews.title ?? HOME_DEFAULTS.reviews.title,
+          text: db.reviews.text ?? HOME_DEFAULTS.reviews.text,
+          photoKeys: db.reviews.photoKeys ?? [],
+          ctaLabel: db.reviews.ctaLabel ?? HOME_DEFAULTS.reviews.ctaLabel,
+          ctaHref: db.reviews.ctaHref ?? HOME_DEFAULTS.reviews.ctaHref,
+        }
+      : HOME_DEFAULTS.reviews,
   };
 }
 

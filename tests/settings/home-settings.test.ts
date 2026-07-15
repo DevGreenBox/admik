@@ -151,6 +151,37 @@ describe('settings/schemas — homeSchema', () => {
   it('philosophy.linkHref отклоняет опечатку без «/» и протокола', () => {
     expect(homeSchema.safeParse({ philosophy: { linkHref: 'about' } }).success).toBe(false);
   });
+
+  // Блок фото-отзывов «ВЫ + THE CASE»: enabled + eyebrow/title/text + photoKeys + cta.
+  it('reviews принимает enabled/eyebrow/title/text/photoKeys/cta, strip режет лишнее', () => {
+    const parsed = homeSchema.parse({
+      reviews: {
+        enabled: true,
+        eyebrow: 'Сообщество',
+        title: 'ВЫ + THE CASE',
+        text: 'Фото врачей.',
+        photoKeys: ['home/reviews/r1.webp', 'home/reviews/r2.webp'],
+        ctaLabel: 'Оставить отзыв',
+        ctaHref: '/reviews',
+        bogus: 1,
+      },
+      evil: 2,
+    });
+    expect(parsed.reviews?.enabled).toBe(true);
+    expect(parsed.reviews?.title).toBe('ВЫ + THE CASE');
+    expect(parsed.reviews?.photoKeys).toEqual(['home/reviews/r1.webp', 'home/reviews/r2.webp']);
+    expect(parsed.reviews?.ctaHref).toBe('/reviews');
+    expect('bogus' in (parsed.reviews ?? {})).toBe(false);
+    expect('evil' in parsed).toBe(false);
+  });
+
+  it('reviews.ctaHref отклоняет опечатку без «/» и протокола', () => {
+    expect(homeSchema.safeParse({ reviews: { ctaHref: 'reviews' } }).success).toBe(false);
+  });
+
+  it('reviews.photoKeys отклоняет пустые строки в массиве', () => {
+    expect(homeSchema.safeParse({ reviews: { photoKeys: [''] } }).success).toBe(false);
+  });
 });
 
 // =============================================================================
@@ -272,6 +303,45 @@ describe('config/settings — home merge', () => {
     });
     expect(eff.home.valuesStrip).toEqual(HOME_DEFAULTS.valuesStrip);
   });
+
+  it('пустая БД → блок отзывов скрыт по умолчанию (enabled:false) = HOME_DEFAULTS.reviews', () => {
+    const eff = mergeSettings(envWith(), []);
+    expect(eff.home.reviews.enabled).toBe(false);
+    expect(eff.home.reviews.title).toBe('ВЫ + THE CASE');
+    expect(eff.home.reviews).toEqual(HOME_DEFAULTS.reviews);
+  });
+
+  it('оверрайд reviews целиком (enabled:true + свои поля/фото)', () => {
+    const eff = mergeSettings(envWith(), [
+      {
+        setting_key: 'home',
+        value: {
+          reviews: {
+            enabled: true,
+            eyebrow: 'Клиенты',
+            title: 'ВЫ + ACME',
+            text: 'Фото клиентов.',
+            photoKeys: ['home/reviews/a.webp'],
+            ctaLabel: 'Прислать',
+            ctaHref: '/contacts',
+          },
+        },
+      },
+    ]);
+    expect(eff.home.reviews.enabled).toBe(true);
+    expect(eff.home.reviews.title).toBe('ВЫ + ACME');
+    expect(eff.home.reviews.photoKeys).toEqual(['home/reviews/a.webp']);
+    // остальные блоки не тронуты
+    expect(eff.home.philosophy).toEqual(HOME_DEFAULTS.philosophy);
+  });
+
+  // about-дефолт без слова Fashion (клиент просил «Comfort + Medicine»).
+  it('пустая БД → about без слова Fashion (Comfort + Medicine)', () => {
+    const eff = mergeSettings(envWith(), []);
+    expect(eff.home.about.values[0]).toBe('Comfort + Medicine');
+    expect(eff.home.about.paragraphs[0]).toContain('Comfort + Medicine');
+    expect(eff.home.about.paragraphs[0]).not.toContain('Fashion');
+  });
 });
 
 // =============================================================================
@@ -327,6 +397,37 @@ describe('storefront/settings-dto — home', () => {
     // по умолчанию (пустая БД) лента скрыта
     const dflt = toPublicSettingsDto(mergeSettings(envWith(), []));
     expect(dflt.home.valuesStrip.enabled).toBe(false);
+  });
+
+  it('DTO содержит reviews; фото отдаются как URL (ключи наружу не утекают)', () => {
+    const eff = mergeSettings(envWith(), [
+      {
+        setting_key: 'home',
+        value: {
+          reviews: {
+            enabled: true,
+            title: 'ВЫ + THE CASE',
+            photoKeys: ['home/reviews/r1.webp', 'home/reviews/r2.webp'],
+          },
+        },
+      },
+    ]);
+    const dto = toPublicSettingsDto(eff, (k) => `https://cdn.test/${k}`);
+    expect(dto.home.reviews.enabled).toBe(true);
+    expect(dto.home.reviews.title).toBe('ВЫ + THE CASE');
+    expect(dto.home.reviews.photos).toEqual([
+      'https://cdn.test/home/reviews/r1.webp',
+      'https://cdn.test/home/reviews/r2.webp',
+    ]);
+    // незаданные текстовые поля добиты дефолтом
+    expect(dto.home.reviews.eyebrow).toBe(HOME_DEFAULTS.reviews.eyebrow);
+    // сырые ключи наружу не раскрываются
+    const json = JSON.stringify(dto.home.reviews);
+    expect(json).not.toContain('photoKeys');
+    expect(json).not.toContain('"home/reviews/r1.webp"');
+    // по умолчанию (пустая БД) блок скрыт
+    const dflt = toPublicSettingsDto(mergeSettings(envWith(), []));
+    expect(dflt.home.reviews.enabled).toBe(false);
   });
 });
 

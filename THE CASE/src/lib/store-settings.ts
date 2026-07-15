@@ -50,8 +50,8 @@ export const STORE_DEFAULTS = {
     titleDefault: 'THE CASE — Premium Medical Uniform',
     titleTemplate: '%s | THE CASE',
     description:
-      'Премиальная медицинская форма нового поколения. Fashion + Medicine. Минимализм, уверенность, чистые силуэты.',
-    ogDescription: 'Fashion meets medicine. Премиальная медицинская униформа.',
+      'Премиальная медицинская форма нового поколения. Comfort + Medicine. Минимализм, уверенность, чистые силуэты.',
+    ogDescription: 'Comforts + Medicine = THE CASE. Премиальная медицинская униформа.',
   },
   contacts: {
     phoneDisplay: '+7 (___) ___-__-__',

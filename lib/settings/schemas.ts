@@ -297,6 +297,22 @@ export const homeSchema = z
       })
       .strip()
       .optional(),
+    // Фото-отзывы «ВЫ + THE CASE»: показ (enabled) + eyebrow/title/text, фото
+    // ключами S3 (photoKeys, как about.imageKeys) и кнопка (label/href). По
+    // умолчанию (нет оверрайда) блок скрыт; opt-in включение из админки без кода.
+    // ctaHref валидируется как маршрут (как hero.ctaHref), чтобы не вёл на 404.
+    reviews: z
+      .object({
+        enabled: z.boolean().optional(),
+        eyebrow: z.string().trim().min(1).optional(),
+        title: z.string().trim().min(1).optional(),
+        text: z.string().trim().min(1).optional(),
+        photoKeys: z.array(z.string().trim().min(1)).optional(),
+        ctaLabel: z.string().trim().min(1).optional(),
+        ctaHref: hrefSchema.optional(),
+      })
+      .strip()
+      .optional(),
   })
   .strip();
 

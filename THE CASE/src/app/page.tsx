@@ -6,6 +6,7 @@ import {
   ShopCategories,
   EditorialStatement,
   About,
+  CommunityReviews,
   Delivery,
 } from "@/components/home/Sections";
 import {
@@ -21,7 +22,8 @@ export const dynamic = "force-dynamic";
 
 // Композиция главной (правки клиента): обложка → «Создано вместе с врачами»
 // (+ качество ткани) → коллекция (вкладки женщины/мужчины) → лента
-// «форма/функция/дисциплина» → категории → философия → о бренде → доставка.
+// «форма/функция/дисциплина» → категории → философия → о бренде →
+// фото-отзывы «ВЫ + THE CASE» (opt-in, по умолчанию скрыт) → доставка.
 // Убраны: «Medical Fashion», «Editorial», «Bestsellers» (пока нет товаров),
 // «Материалы» (нечем заполнить). Women/Men объединены в Collection (вкладки).
 export default async function HomePage() {
@@ -68,6 +70,7 @@ export default async function HomePage() {
       <ShopCategories categories={categories} />
       <EditorialStatement philosophy={home.philosophy} />
       <About about={home.about} />
+      <CommunityReviews reviews={home.reviews} />
       <Delivery delivery={home.delivery} />
     </>
   );
