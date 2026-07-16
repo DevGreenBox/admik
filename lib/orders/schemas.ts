@@ -86,6 +86,13 @@ export const deliverySelectionSchema = z
      * сервер из каталога, тариф — из whitelist (anti-tamper, ADR-010).
      */
     cityCode: z.number().int().positive().optional(),
+    /**
+     * Страна назначения (из автокомплита /cities). Нужна для тарификации: по РФ
+     * доставка бесплатна покупателю, СНГ/зарубеж — платно. Из тела (не цена; итог
+     * считает сервер). Примечание: для строгого anti-tamper страну стоит
+     * резолвить по cityCode на сервере — сейчас доверяем витрине (ранняя стадия).
+     */
+    country: z.string().trim().max(100).optional(),
     address: z.string().trim().max(500).optional(),
     pvzCode: z.string().trim().max(64).optional(),
   })

@@ -502,6 +502,18 @@ export async function resolveGiftLine(promo: PromoCode): Promise<ResolvedLine | 
  * сохранено). При включённом cdek + назначении → расчёт СДЭК (mock без сети).
  * Порог бесплатной доставки и промокоды применяются ПОВЕРХ — в calculateQuote.
  */
+/**
+ * Право на бесплатную доставку по порогу — только РФ (владелец: по России
+ * бесплатно, СНГ/зарубеж платно). Страна не задана (старые клиенты / самовывоз) →
+ * true (обратная совместимость: порог действует как раньше). Сравнение
+ * регистро-/пробел-независимое, покрывает «Россия»/«Российская Федерация»/«RU».
+ */
+function isRussianDelivery(country: string | null | undefined): boolean {
+  const c = (country ?? '').trim().toLowerCase();
+  if (!c) return true; // страна неизвестна → не ужесточаем (прежнее поведение)
+  return /(росси|russia|\bru\b|российск)/.test(c);
+}
+
 async function resolveDeliveryCost(args: {
   deliveryType: DeliveryType | undefined;
   // BUG A (CRITICAL, anti-undercharge): сюда ОБЯЗАТЕЛЬНО нести вес/габариты линии,
@@ -681,6 +693,8 @@ export async function quoteCart(
     delivery: {
       cost: delivery.cost,
       freeThreshold,
+      // Бесплатно по порогу — только РФ; СНГ/зарубеж платят реальную цену.
+      freeEligible: isRussianDelivery(input.delivery?.country),
     },
     scopeTargets,
   });
@@ -966,6 +980,8 @@ export async function createOrder(
     delivery: {
       cost: deliveryCost,
       freeThreshold,
+      // Бесплатно по порогу — только РФ; СНГ/зарубеж платят реальную цену.
+      freeEligible: isRussianDelivery(input.delivery.country),
     },
     scopeTargets,
   });

@@ -220,6 +220,13 @@ export interface DeliveryInput {
   cost: MoneyString;
   /** Порог бесплатной доставки (SHOP_FREE_DELIVERY_THRESHOLD); 0 = выключено. */
   freeThreshold: number;
+  /**
+   * Право на бесплатную доставку по порогу (владелец: бесплатно только по РФ,
+   * СНГ/зарубеж — платно). undefined/true → как раньше (порог действует). false →
+   * порог НЕ применяется (не-РФ), покупатель платит реальную стоимость.
+   * Промокод free_delivery действует независимо (это явная акция магазина).
+   */
+  freeEligible?: boolean;
 }
 
 /** Полный вход расчёта итога. */
@@ -591,8 +598,12 @@ export function resolveDelivery(
   const baseCostMinor = toMinor(delivery.cost);
 
   // Порог: 0 (или отрицательный) = выключено → никогда не «бесплатно по порогу».
+  // freeEligible=false (не-РФ) → порог не применяется вовсе: СНГ/зарубеж платят
+  // реальную стоимость (владелец: бесплатно только по России).
   const thresholdMinor =
-    delivery.freeThreshold > 0 ? toMinor(delivery.freeThreshold) : Number.POSITIVE_INFINITY;
+    delivery.freeEligible !== false && delivery.freeThreshold > 0
+      ? toMinor(delivery.freeThreshold)
+      : Number.POSITIVE_INFINITY;
   const freeThresholdMet =
     Number.isFinite(thresholdMinor) && netItemsMinor >= thresholdMinor;
 

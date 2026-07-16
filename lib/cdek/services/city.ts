@@ -53,6 +53,9 @@ function mapSuggestCity(raw: RawSuggestCity): CdekCity | null {
     code,
     name: parts[0] ?? '',
     region: parts.length >= 3 ? parts.slice(1, -1).join(', ') : '',
+    // Страна — последняя часть full_name («Город, Регион, Страна» / «Город, Страна»).
+    // Для «Город» без страны — пусто. Нужна для бесплатной доставки только по РФ.
+    country: parts.length >= 2 ? parts[parts.length - 1] : '',
   };
 }
 

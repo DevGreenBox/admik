@@ -234,6 +234,22 @@ describe('pricing — calculateQuote: scoped free_delivery (баг #10, защи
     expect(q.delivery.baseCost).toBe('350.00'); // реальная СДЭК для админки
   });
 
+  it('бесплатно ТОЛЬКО по РФ: freeEligible=false (СНГ) → покупатель платит реальную цену', () => {
+    // Владелец: по РФ бесплатно, СНГ/зарубеж — платно.
+    const rf = calculateQuote({
+      lines: [line({ unitPrice: '1.00', qty: 1 })],
+      delivery: { cost: '350.00', freeThreshold: 0.01, freeEligible: true },
+    });
+    expect(rf.deliveryCost).toBe('0.00'); // РФ — бесплатно покупателю
+
+    const sng = calculateQuote({
+      lines: [line({ unitPrice: '1.00', qty: 1 })],
+      delivery: { cost: '350.00', freeThreshold: 0.01, freeEligible: false },
+    });
+    expect(sng.deliveryCost).toBe('350.00'); // СНГ — платит реальную цену
+    expect(sng.delivery.free).toBe(false);
+  });
+
   it('cart free_delivery без scopeTargets → прежнее поведение (бесплатно)', () => {
     const q = calculateQuote({
       lines: [line({ unitPrice: '500.00', qty: 1 })],

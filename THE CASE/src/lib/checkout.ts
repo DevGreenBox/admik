@@ -180,3 +180,15 @@ export function describeQuoteIssues(
     return { name, reason: issueReasonLabel(issue.code) };
   });
 }
+
+/**
+ * Страна назначения — Россия? (для тарификации: РФ — доставка бесплатна покупателю,
+ * СНГ/зарубеж — платно). Пустая/неизвестная страна → true (не ужесточаем на
+ * витрине; финальную бесплатность подтверждает сервер quote). Зеркалит серверный
+ * isRussianDelivery (lib/orders/repository).
+ */
+export function isRussianCountry(country: string | null | undefined): boolean {
+  const c = (country ?? "").trim().toLowerCase();
+  if (!c) return true;
+  return /(росси|russia|\bru\b|российск)/.test(c);
+}

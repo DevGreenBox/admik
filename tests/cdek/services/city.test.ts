@@ -85,7 +85,7 @@ describe('cdek/city — real-путь (замоканный manager.client, sugg
     const { m } = makeManager([rawSuggest]);
     const cities = await new CityService(m).searchCities('новос');
     expect(cities).toEqual([
-      { code: 270, name: 'Новосибирск', region: 'Новосибирская область' },
+      { code: 270, name: 'Новосибирск', region: 'Новосибирская область', country: 'Россия' },
     ]);
   });
 
@@ -94,13 +94,13 @@ describe('cdek/city — real-путь (замоканный manager.client, sugg
       { city_uuid: 'u-1', code: 44, full_name: 'Москва, Россия' },
     ]);
     const cities = await new CityService(m).searchCities('моск');
-    expect(cities).toEqual([{ code: 44, name: 'Москва', region: '' }]);
+    expect(cities).toEqual([{ code: 44, name: 'Москва', region: '', country: 'Россия' }]);
   });
 
   it('full_name без запятых → name как есть, region пустой', async () => {
     const { m } = makeManager([{ city_uuid: 'u-2', code: 44, full_name: 'Москва' }]);
     const cities = await new CityService(m).searchCities('моск');
-    expect(cities).toEqual([{ code: 44, name: 'Москва', region: '' }]);
+    expect(cities).toEqual([{ code: 44, name: 'Москва', region: '', country: '' }]);
   });
 
   it('отбрасывает записи без числового code', async () => {
@@ -110,7 +110,7 @@ describe('cdek/city — real-путь (замоканный manager.client, sugg
     ]);
     const cities = await new CityService(m).searchCities('абвгд');
     expect(cities).toEqual([
-      { code: 270, name: 'Новосибирск', region: 'Новосибирская область' },
+      { code: 270, name: 'Новосибирск', region: 'Новосибирская область', country: 'Россия' },
     ]);
   });
 

@@ -173,7 +173,7 @@ export function mockSearchCities(query: string): CdekCity[] {
   // mockGetOffices. Код детерминирован (стабильный hash) и в высоком диапазоне,
   // чтобы не пересечься с фикстурными кодами; ПВЗ для него отдаёт mockGetOffices
   // (MOCK-<cityCode>). С боевыми/тестовыми ключами СДЭК fallback не задействуется.
-  return [{ code: syntheticCityCode(q), name: titleCaseCity(query.trim()), region: 'Демо (СДЭК mock)' }];
+  return [{ code: syntheticCityCode(q), name: titleCaseCity(query.trim()), region: 'Демо (СДЭК mock)', country: 'Россия' }];
 }
 
 /** Стабильный положительный код города из нормализованного имени (вне диапазона фикстур). */

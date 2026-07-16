@@ -137,6 +137,8 @@ export interface AdmikDeliverySelection {
   /** Точный код города СДЭК (из выбора на шаге доставки). Передаётся в quote/order,
    *  чтобы сервер считал доставку по коду, а не геокодил неоднозначное имя города. */
   cityCode?: number;
+  /** Страна назначения (для тарификации: РФ — бесплатно, СНГ/зарубеж — платно). */
+  country?: string;
   address?: string;
   pvzCode?: string;
 }
@@ -247,6 +249,9 @@ export interface AdmikCdekCityDto {
   code: number;
   name: string;
   region: string;
+  /** Страна (для тарификации: РФ — доставка бесплатна, СНГ/зарубеж — платно).
+   *  Опционально для совместимости со старым бэкендом. */
+  country?: string;
 }
 
 export interface AdmikCdekPvzDto {

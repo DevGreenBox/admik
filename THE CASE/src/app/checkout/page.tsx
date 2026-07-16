@@ -29,6 +29,7 @@ import {
   describeQuoteIssues,
   formatRuPhone,
   contactFieldErrors,
+  isRussianCountry,
 } from "@/lib/checkout";
 import { appliedPromoCode, isPromoInSync } from "@/lib/promo";
 import { Button } from "@/components/ui/Button";
@@ -140,11 +141,13 @@ export default function CheckoutPage() {
       ]);
       if (seq !== citySeqRef.current) return; // выбран другой город — игнорируем устаревший ответ
       setPickupPoints(points);
-      // Правка владельца: доставка покупателю бесплатна (реальная стоимость СДЭК —
-      // в заказе для магазина). Не показываем сырой тариф cdekCalculate до выбора
-      // ПВЗ — сразу «Бесплатно» (0); финальный quote после ПВЗ подтвердит. calc
-      // всё равно нужен для срока доставки.
-      setDeliveryCost(0);
+      // Правка владельца: по РФ доставка покупателю бесплатна (реальная стоимость
+      // СДЭК — в заказе для магазина) → показываем 0 сразу, не сырой тариф. Для
+      // СНГ/зарубежа доставка платная → показываем реальный тариф calc.cost.
+      // Финальный quote после ПВЗ подтвердит (сервер — источник истины). calc всё
+      // равно нужен для срока доставки.
+      const isRu = isRussianCountry(city.country);
+      setDeliveryCost(isRu ? 0 : calc.cost);
       setDeliveryEta(formatEta(calc.periodMin, calc.periodMax));
     } catch (e) {
       if (seq !== citySeqRef.current) return;
@@ -165,7 +168,7 @@ export default function CheckoutPage() {
       const q = await quoteCart({
         items: cartToItems(cart),
         promoCode: promoCode.trim() || undefined,
-        delivery: { type: "pvz", city: selectedCity!.name, cityCode: selectedCity!.code, pvzCode: pvz.code },
+        delivery: { type: "pvz", city: selectedCity!.name, cityCode: selectedCity!.code, country: selectedCity!.country, pvzCode: pvz.code },
       });
       setQuote(q);
       setDeliveryCost(Number(q.deliveryTotal)); // серверная доставка (с порогом бесплатной)
@@ -183,7 +186,7 @@ export default function CheckoutPage() {
       const q = await quoteCart({
         items: cartToItems(cart),
         promoCode: promoCode.trim() || undefined,
-        delivery: { type: "pvz", city: selectedCity.name, cityCode: selectedCity.code, pvzCode: selectedPickup.code },
+        delivery: { type: "pvz", city: selectedCity.name, cityCode: selectedCity.code, country: selectedCity.country, pvzCode: selectedPickup.code },
       });
       setQuote(q);
       setStep(3);
@@ -205,7 +208,7 @@ export default function CheckoutPage() {
       const q = await quoteCart({
         items: cartToItems(cart),
         promoCode: promoCode.trim() || undefined,
-        delivery: { type: "pvz", city: selectedCity.name, cityCode: selectedCity.code, pvzCode: selectedPickup.code },
+        delivery: { type: "pvz", city: selectedCity.name, cityCode: selectedCity.code, country: selectedCity.country, pvzCode: selectedPickup.code },
       });
       setQuote(q);
     } catch (e) {
@@ -228,7 +231,7 @@ export default function CheckoutPage() {
       const q = await quoteCart({
         items: cartToItems(cart),
         promoCode: undefined,
-        delivery: { type: "pvz", city: selectedCity.name, cityCode: selectedCity.code, pvzCode: selectedPickup.code },
+        delivery: { type: "pvz", city: selectedCity.name, cityCode: selectedCity.code, country: selectedCity.country, pvzCode: selectedPickup.code },
       });
       setQuote(q);
     } catch (e) {
@@ -257,7 +260,7 @@ export default function CheckoutPage() {
             email: form.email,
             phone: form.phone,
           },
-          delivery: { type: "pvz", city: selectedCity.name, cityCode: selectedCity.code, pvzCode: selectedPickup.code },
+          delivery: { type: "pvz", city: selectedCity.name, cityCode: selectedCity.code, country: selectedCity.country, pvzCode: selectedPickup.code },
           paymentMethod: mapPaymentMethod(paymentMethod),
           // Источник истины для ОТПРАВКИ = применённый сервером код (по которому
           // посчитан показанный итог), а НЕ сырое значение поля ввода. Так заказ
