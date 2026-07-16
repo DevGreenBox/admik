@@ -250,11 +250,23 @@ export function CatalogPage({
               </button>
             </div>
 
-            <FilterSection title={`Цена до ${(priceMax || range.max).toLocaleString("ru-RU")} ₽`}>
-              <input type="range" min={range.min} max={range.max} step={500}
-                value={priceMax || range.max} onChange={(e) => setPriceMax(Number(e.target.value))}
-                className="w-full accent-graphite mt-2" />
-            </FilterSection>
+            {/* Ползунок цены — только если есть реальный диапазон (min < max). Когда
+                все товары одной цены (напр. все по 1 ₽), диапазон схлопнут в точку и
+                ползунок физически не двигается → секцию не показываем. Шаг адаптивный
+                (~1% диапазона, минимум 1), а не фиксированные 500 ₽. */}
+            {range.max > range.min && (
+              <FilterSection title={`Цена до ${(priceMax || range.max).toLocaleString("ru-RU")} ₽`}>
+                <input
+                  type="range"
+                  min={range.min}
+                  max={range.max}
+                  step={Math.max(1, Math.round((range.max - range.min) / 100))}
+                  value={priceMax || range.max}
+                  onChange={(e) => setPriceMax(Number(e.target.value))}
+                  className="w-full accent-graphite mt-2"
+                />
+              </FilterSection>
+            )}
 
             <FilterSection title="Коллекция">
               <label className="flex items-center gap-3 py-2 text-sm cursor-pointer text-muted">
