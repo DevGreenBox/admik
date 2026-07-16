@@ -32,6 +32,7 @@ const CONTACTS_FALLBACK: ResolvedContacts = {
   email: "hello@thecase.ru",
   telegramHandle: "@thecase",
   telegramUrl: "https://t.me/thecase",
+  address: null,
   socials: [],
 };
 

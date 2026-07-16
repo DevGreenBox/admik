@@ -195,6 +195,16 @@ describe('resolveContacts', () => {
     });
     expect(resolveContacts(s).telegramUrl).toBe('https://t.me/x');
   });
+  it('address из настроек пробрасывается (ПВЗ на странице контактов)', () => {
+    const s = dto({
+      contacts: { ...dto().contacts, address: 'г. Сургут, ул. Юности, 8, 628403' },
+    });
+    expect(resolveContacts(s).address).toBe('г. Сургут, ул. Юности, 8, 628403');
+  });
+  it('address отсутствует → null (блок ПВЗ не рендерится)', () => {
+    expect(resolveContacts(dto()).address).toBeNull();
+    expect(resolveContacts(null).address).toBeNull();
+  });
 });
 
 describe('resolveHome', () => {

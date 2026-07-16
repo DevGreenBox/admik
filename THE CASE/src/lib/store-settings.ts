@@ -171,6 +171,8 @@ export interface ResolvedContacts {
   telegramHandle: string | null;
   /** Ссылка Telegram либо null. */
   telegramUrl: string | null;
+  /** Адрес ПВЗ/самовывоза либо null (не рендерится, если не задан). */
+  address: string | null;
   /** Все соцссылки (для футера/контактов) — сырой список. */
   socials: AdmikSocialDto[];
 }
@@ -194,6 +196,7 @@ export function resolveContacts(s: AdmikSettingsDto | null): ResolvedContacts {
     email,
     telegramHandle: tg ? clean(tg.type) ?? 'Telegram' : STORE_DEFAULTS.contacts.telegramHandle,
     telegramUrl: tg?.url ?? STORE_DEFAULTS.contacts.telegramUrl,
+    address: clean(s?.contacts.address) ?? null,
     socials,
   };
 }

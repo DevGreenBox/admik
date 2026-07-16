@@ -1,4 +1,4 @@
-import { Send, Phone, Mail } from "lucide-react";
+import { Send, Phone, Mail, MapPin } from "lucide-react";
 import { FadeIn } from "@/components/ui/Animations";
 import { getStoreSettings, resolveContacts } from "@/lib/store-settings";
 import { ContactsForm } from "./ContactsForm";
@@ -66,6 +66,15 @@ export default async function ContactsPage() {
                   </span>
                 </a>
               </li>
+              {c.address && (
+                <li className="flex items-start gap-4">
+                  <MapPin className="h-5 w-5 text-graphite mt-0.5" strokeWidth={1} />
+                  <span>
+                    <span className="block eyebrow text-muted mb-1">Пункт выдачи</span>
+                    <span className="text-sm text-graphite">{c.address}</span>
+                  </span>
+                </li>
+              )}
             </ul>
           </FadeIn>
         </div>

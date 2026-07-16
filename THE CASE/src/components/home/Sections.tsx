@@ -111,20 +111,32 @@ export function CoverSlides({ quality = HOME_FALLBACK.quality }: { quality?: Res
             className="relative mt-6 flex min-h-[360px] items-center overflow-hidden md:min-h-[420px]"
             style={{ background: "linear-gradient(135deg,#3a3a3d,#2b2b2b 45%,#202022)" }}
           >
-            {/* TODO(контент клиента): заменить серый градиент на фото фактуры ткани.
-                Светлые диагональные линии (а не чёрные) дают видимую фактуру ткани
-                поверх тёмного градиента вместо «грязного серого»; opacity поднята до
-                0.2 — текстура читается, но остаётся фоном под текстом. */}
+            {/* Аня-2 №14: фон-фактура ткани. Два перекрёстных набора светлых
+                диагоналей дают эффект переплетения нитей (ткань), а не «грязный
+                серый». TODO(контент клиента): при наличии заменить на фото фактуры. */}
             <div
-              className="absolute inset-0 opacity-20 mix-blend-soft-light"
-              style={{ backgroundImage: "repeating-linear-gradient(45deg,#fff 0 1px,transparent 1px 5px)" }}
+              className="absolute inset-0 opacity-[0.18] mix-blend-soft-light"
+              style={{
+                backgroundImage:
+                  "repeating-linear-gradient(45deg,#fff 0 1px,transparent 1px 5px)," +
+                  "repeating-linear-gradient(-45deg,#fff 0 1px,transparent 1px 5px)",
+              }}
             />
             <div className="relative w-full px-8 py-14 text-white md:px-14 md:py-20">
-              <p className="eyebrow mb-6 text-white/60">{quality.title}</p>
-              <ul className="max-w-xl space-y-4">
-                {quality.items.map((f) => (
-                  <li key={f} className="body-editorial border-l border-white/40 pl-5 text-white/90">
-                    {f}
+              <p className="eyebrow mb-8 text-white/60">{quality.title}</p>
+              {/* Аня-2 №14: пункты характеристик оформлены карточками (вместо списка)
+                  на фоне-фактуре ткани. Карточки — полупрозрачное стекло поверх
+                  текстуры, нумерация даёт «каталожный» ритм бренда. */}
+              <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                {quality.items.map((f, i) => (
+                  <li
+                    key={f}
+                    className="group border border-white/15 bg-white/[0.06] p-6 backdrop-blur-sm transition-colors hover:bg-white/[0.1]"
+                  >
+                    <span className="mb-4 block text-[11px] tracking-[0.2em] text-white/40">
+                      {String(i + 1).padStart(2, "0")}
+                    </span>
+                    <span className="body-editorial block text-sm text-white/90">{f}</span>
                   </li>
                 ))}
               </ul>

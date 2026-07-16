@@ -18,6 +18,7 @@ function contacts(over: Partial<ResolvedContacts> = {}): ResolvedContacts {
     email: 'hello@shop.ru',
     telegramHandle: '@shop',
     telegramUrl: 'https://t.me/shop',
+    address: null,
     socials: [],
     ...over,
   };
