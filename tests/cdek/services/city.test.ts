@@ -69,7 +69,7 @@ describe('cdek/city — real-путь (замоканный manager.client, sugg
     full_name: 'Новосибирск, Новосибирская область, Россия',
   };
 
-  it('идёт в GET /v2/location/suggest/cities с name и country_code=RU (НЕ в /v2/location/cities)', async () => {
+  it('идёт в GET /v2/location/suggest/cities с name, БЕЗ country_code (поиск по всем странам — СНГ)', async () => {
     const { m, fetchImpl } = makeManager([rawSuggest]);
     await new CityService(m).searchCities('новос');
     const [url] = (fetchImpl as ReturnType<typeof vi.fn>).mock.calls[0];
@@ -78,7 +78,9 @@ describe('cdek/city — real-путь (замоканный manager.client, sugg
     // подстроке возвращал пусто (аудит 2026-07-09). Подсказки — suggest/cities.
     expect(parsed.pathname).toBe('/v2/location/suggest/cities');
     expect(parsed.searchParams.get('name')).toBe('новос');
-    expect(parsed.searchParams.get('country_code')).toBe('RU');
+    // country_code НЕ передаём — иначе СДЭК ограничил бы поиск только РФ и города
+    // СНГ (Казахстан/Беларусь/…) были бы недоступны (владелец: доставка в СНГ).
+    expect(parsed.searchParams.get('country_code')).toBeNull();
   });
 
   it('маппит [{ city_uuid, code, full_name }] → DTO { code, name, region } витрины', async () => {

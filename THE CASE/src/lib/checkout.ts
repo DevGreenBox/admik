@@ -112,8 +112,13 @@ export function contactFieldErrors(form: ContactForm): Record<keyof ContactForm,
 export function isDeliveryStepValid(
   cityCode: number | null,
   pvzCode: string | null,
+  method: "pvz" | "courier" = "pvz",
+  courierAddress = "",
 ): boolean {
-  return cityCode !== null && Boolean(pvzCode);
+  if (cityCode === null) return false;
+  // Курьер: нужен город + непустой адрес (ПВЗ не требуется). ПВЗ: город + пункт.
+  if (method === "courier") return courierAddress.trim().length > 0;
+  return Boolean(pvzCode);
 }
 
 /** Полное имя покупателя из формы (для customer.name заказа). */

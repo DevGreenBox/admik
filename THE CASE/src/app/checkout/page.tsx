@@ -44,7 +44,9 @@ export default function CheckoutPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // Шаг 2 — доставка СДЭК (ПВЗ).
+  // Шаг 2 — доставка СДЭК. Способ: ПВЗ (пункт выдачи) или курьер (на адрес).
+  const [deliveryMethod, setDeliveryMethod] = useState<"pvz" | "courier">("pvz");
+  const [courierAddress, setCourierAddress] = useState("");
   const [cityQuery, setCityQuery] = useState("");
   const [cities, setCities] = useState<AdmikCdekCityDto[]>([]);
   const [selectedCity, setSelectedCity] = useState<AdmikCdekCityDto | null>(null);
@@ -56,10 +58,10 @@ export default function CheckoutPage() {
   // Шаг 3 — оплата + серверный итог (quote).
   const [paymentMethod, setPaymentMethod] = useState(PAYMENT_METHODS[0]?.id ?? "card");
   const [quote, setQuote] = useState<AdmikQuoteDto | null>(null);
-  // Промокод (опционально). Сервер — источник истины: применённость/скидку
-  // возвращает quote.promo / quote.discountTotal (anti-tamper); пустую строку
-  // шлём как undefined.
-  const [promoCode, setPromoCode] = useState("");
+  // Промокод: единый источник — store (введён в корзине, переносится сюда). Сервер
+  // подтверждает применённость/скидку (quote.promo / quote.discountTotal, anti-tamper).
+  const promoCode = useStore((s) => s.promoCode);
+  const setPromoCode = useStore((s) => s.setPromoCode);
   const [applyingPromo, setApplyingPromo] = useState(false);
 
   const [form, setForm] = useState({ firstName: "", lastName: "", email: "", phone: "" });
@@ -135,7 +137,7 @@ export default function CheckoutPage() {
         cdekPvz({ cityCode: city.code }),
         cdekCalculate({
           to: { city_code: city.code },
-          deliveryMode: "pvz",
+          deliveryMode: deliveryMethod === "courier" ? "door" : "pvz",
           items: cartToItems(cart),
         }),
       ]);
@@ -158,6 +160,27 @@ export default function CheckoutPage() {
     }
   };
 
+  // Единый билдер объекта доставки по выбранному способу (ПВЗ/курьер) — чтобы не
+  // дублировать (и не рассинхронить) поля в quote/order. Для ПВЗ несёт pvzCode, для
+  // курьера — address (адрес на дом). Город/страна общие. pvzOverride — для колбэка
+  // выбора ПВЗ, где selectedPickup ещё не применился в стейт.
+  const buildDelivery = (pvzOverride?: AdmikCdekPvzDto) => {
+    const base = {
+      city: selectedCity?.name,
+      cityCode: selectedCity?.code,
+      country: selectedCity?.country,
+    };
+    if (deliveryMethod === "courier") {
+      return { type: "courier" as const, ...base, address: courierAddress.trim() };
+    }
+    return { type: "pvz" as const, ...base, pvzCode: (pvzOverride ?? selectedPickup)?.code };
+  };
+
+  // Назначение доставки готово: город + (ПВЗ для pickup / адрес для курьера).
+  const deliveryReady = Boolean(
+    selectedCity && (deliveryMethod === "courier" ? courierAddress.trim() : selectedPickup),
+  );
+
   // Выбор ПВЗ → серверный quote (anti-tamper): показываем на шаге 2 ИМЕННО серверную
   // стоимость доставки (с учётом порога бесплатной доставки), а не сырой тариф СДЭК —
   // иначе шаг 2 покажет ненулевую сумму там, где сервер в итоге посчитает 0.
@@ -168,7 +191,7 @@ export default function CheckoutPage() {
       const q = await quoteCart({
         items: cartToItems(cart),
         promoCode: promoCode.trim() || undefined,
-        delivery: { type: "pvz", city: selectedCity!.name, cityCode: selectedCity!.code, country: selectedCity!.country, pvzCode: pvz.code },
+        delivery: buildDelivery(pvz),
       });
       setQuote(q);
       setDeliveryCost(Number(q.deliveryTotal)); // серверная доставка (с порогом бесплатной)
@@ -179,14 +202,14 @@ export default function CheckoutPage() {
 
   // Переход на шаг 3 — серверный расчёт итога (anti-tamper).
   const goToPayment = async () => {
-    if (!selectedCity || !selectedPickup) return;
+    if (!deliveryReady) return;
     setError("");
     setLoading(true);
     try {
       const q = await quoteCart({
         items: cartToItems(cart),
         promoCode: promoCode.trim() || undefined,
-        delivery: { type: "pvz", city: selectedCity.name, cityCode: selectedCity.code, country: selectedCity.country, pvzCode: selectedPickup.code },
+        delivery: buildDelivery(),
       });
       setQuote(q);
       setStep(3);
@@ -201,14 +224,14 @@ export default function CheckoutPage() {
   // считает сервер (anti-tamper), мы лишь показываем результат. Доставка уже выбрана,
   // поэтому пересчёт идёт с тем же ПВЗ.
   const applyPromo = async () => {
-    if (!selectedCity || !selectedPickup) return;
+    if (!deliveryReady) return;
     setError("");
     setApplyingPromo(true);
     try {
       const q = await quoteCart({
         items: cartToItems(cart),
         promoCode: promoCode.trim() || undefined,
-        delivery: { type: "pvz", city: selectedCity.name, cityCode: selectedCity.code, country: selectedCity.country, pvzCode: selectedPickup.code },
+        delivery: buildDelivery(),
       });
       setQuote(q);
     } catch (e) {
@@ -223,7 +246,7 @@ export default function CheckoutPage() {
   // promoCode: undefined явно, не полагаясь на устаревший стейт. Без этого снять
   // применённую скидку было нельзя (кнопка «Применить» заблокирована на пустом поле).
   const clearPromo = async () => {
-    if (!selectedCity || !selectedPickup) return;
+    if (!deliveryReady) return;
     setPromoCode("");
     setError("");
     setApplyingPromo(true);
@@ -231,7 +254,7 @@ export default function CheckoutPage() {
       const q = await quoteCart({
         items: cartToItems(cart),
         promoCode: undefined,
-        delivery: { type: "pvz", city: selectedCity.name, cityCode: selectedCity.code, country: selectedCity.country, pvzCode: selectedPickup.code },
+        delivery: buildDelivery(),
       });
       setQuote(q);
     } catch (e) {
@@ -242,7 +265,7 @@ export default function CheckoutPage() {
   };
 
   const handleSubmit = async () => {
-    if (!selectedCity || !selectedPickup || !quote || !quote.fulfillable) return;
+    if (!deliveryReady || !quote || !quote.fulfillable) return;
     // Нельзя оформлять, пока доставка не посчитана (явный available === false).
     if (quote.delivery?.available === false) return;
     // Находка 19: поле промокода правили после применения, не нажав «Применить»
@@ -260,7 +283,7 @@ export default function CheckoutPage() {
             email: form.email,
             phone: form.phone,
           },
-          delivery: { type: "pvz", city: selectedCity.name, cityCode: selectedCity.code, country: selectedCity.country, pvzCode: selectedPickup.code },
+          delivery: buildDelivery(),
           paymentMethod: mapPaymentMethod(paymentMethod),
           // Источник истины для ОТПРАВКИ = применённый сервером код (по которому
           // посчитан показанный итог), а НЕ сырое значение поля ввода. Так заказ
@@ -408,6 +431,31 @@ export default function CheckoutPage() {
         {step === 2 && (
           <FadeIn>
             <div className="space-y-6 mt-8">
+              {/* Способ доставки (Мадина: добавить курьера). ПВЗ (пункт выдачи) или
+                  курьер на адрес. Переключение сбрасывает выбранный ПВЗ/адрес. */}
+              <div>
+                <label className="label-caps text-muted block mb-3">Способ доставки</label>
+                <div className="grid grid-cols-2 gap-3">
+                  {([["pvz", "Пункт выдачи"], ["courier", "Курьером"]] as const).map(([m, label]) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => {
+                        setDeliveryMethod(m);
+                        setSelectedPickup(null);
+                        setQuote(null);
+                        // Стоимость пересчитается: 0 (РФ) сразу, для СНГ — при quote.
+                        if (selectedCity) setDeliveryCost(isRussianCountry(selectedCity.country) ? 0 : deliveryCost);
+                      }}
+                      aria-pressed={deliveryMethod === m}
+                      className={`border px-4 py-3 text-sm transition-colors ${deliveryMethod === m ? "border-graphite bg-graphite text-white" : "border-border text-muted hover:border-graphite"}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <div className="relative">
                 <label className="label-caps text-muted block mb-3">Город</label>
                 <input type="text" value={cityQuery} onChange={(e) => {
@@ -441,13 +489,28 @@ export default function CheckoutPage() {
                   <span>{formatDeliveryCost(deliveryCost, !deliveryUnavailable, formatPrice)}</span>
                 </div>
               )}
-              {pickupPoints.length > 0 && (
+              {/* ПВЗ: компактный дропдаун (только для способа «Пункт выдачи»). */}
+              {deliveryMethod === "pvz" && pickupPoints.length > 0 && (
                 <PvzSelect points={pickupPoints} selected={selectedPickup} onSelect={handlePvzSelect} />
+              )}
+              {/* Курьер: поле адреса доставки (город уже выбран выше). */}
+              {deliveryMethod === "courier" && selectedCity && (
+                <div>
+                  <label htmlFor="courier-address" className="label-caps text-muted block mb-3">Адрес доставки</label>
+                  <input
+                    id="courier-address"
+                    type="text"
+                    value={courierAddress}
+                    onChange={(e) => { setCourierAddress(e.target.value); setQuote(null); }}
+                    placeholder="Улица, дом, квартира"
+                    className="w-full border border-border px-4 py-3 text-sm focus:border-graphite outline-none transition-colors"
+                  />
+                </div>
               )}
               {error && <p className="text-sm text-accent">{error}</p>}
               <div className="flex gap-4">
                 <Button variant="outline" size="md" onClick={() => setStep(1)}>Назад</Button>
-                <Button variant="primary" size="lg" magnetic disabled={loading || !isDeliveryStepValid(selectedCity?.code ?? null, selectedPickup?.code ?? null)} onClick={goToPayment}>
+                <Button variant="primary" size="lg" magnetic disabled={loading || !isDeliveryStepValid(selectedCity?.code ?? null, selectedPickup?.code ?? null, deliveryMethod, courierAddress)} onClick={goToPayment}>
                   {loading ? "Расчёт..." : "Далее"}
                 </Button>
               </div>

@@ -1,10 +1,13 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { Minus, Plus, Trash2, ShoppingBag } from "lucide-react";
 import { useStore, useHydrated, selectCartTotal, isAtStockLimit } from "@/lib/store";
 import { formatPrice } from "@/lib/format";
+import { quoteCart, AdmikApiError } from "@/lib/admik";
+import { cartToItems } from "@/lib/checkout";
 import { Button } from "@/components/ui/Button";
 import { FadeIn } from "@/components/ui/Animations";
 
@@ -13,7 +16,40 @@ export default function CartPage() {
   const updateQuantity = useStore((s) => s.updateQuantity);
   const removeFromCart = useStore((s) => s.removeFromCart);
   const total = useStore(selectCartTotal);
+  const promoCode = useStore((s) => s.promoCode);
+  const setPromoCode = useStore((s) => s.setPromoCode);
   const hydrated = useHydrated();
+
+  // Промокод в корзине (Мадина: перенести из чекаута). Ввод хранится в store и
+  // переносится в чекаут; применённость/скидку подтверждает сервер (quoteCart).
+  const [promoInput, setPromoInput] = useState(promoCode);
+  const [applying, setApplying] = useState(false);
+  const [promoMsg, setPromoMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [discount, setDiscount] = useState(0);
+
+  const applyPromo = async () => {
+    const code = promoInput.trim();
+    setApplying(true);
+    setPromoMsg(null);
+    try {
+      const q = await quoteCart({ items: cartToItems(cart), promoCode: code || undefined });
+      const applied = Boolean(q.promo?.applied);
+      setDiscount(Number(q.discountTotal ?? 0));
+      setPromoCode(applied ? code : "");
+      if (!code) {
+        setPromoMsg(null);
+      } else if (applied) {
+        setPromoMsg({ ok: true, text: `Промокод ${q.promo?.code} применён.` });
+      } else {
+        setPromoMsg({ ok: false, text: "Промокод недействителен." });
+        setDiscount(0);
+      }
+    } catch (e) {
+      setPromoMsg({ ok: false, text: e instanceof AdmikApiError ? e.message : "Не удалось применить промокод." });
+    } finally {
+      setApplying(false);
+    }
+  };
 
   // До завершения регидрации не показываем «Корзина пуста» (иначе мерцает пустотой
   // при наличии сохранённой корзины).
@@ -126,11 +162,42 @@ export default function CartPage() {
           <FadeIn delay={0.2}>
             <div className="lg:sticky lg:top-28 bg-surface p-8">
               <h2 className="heading-md mb-6">Итого</h2>
+
+              {/* Промокод (Мадина: перенести в корзину). Ввод + применение через
+                  серверный quoteCart; скидка учитывается в итоге, код едет в чекаут. */}
+              <div className="mb-6">
+                <label htmlFor="cart-promo" className="label-caps text-muted block mb-3">Промокод</label>
+                <div className="flex gap-3">
+                  <input
+                    id="cart-promo"
+                    type="text"
+                    value={promoInput}
+                    onChange={(e) => setPromoInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); applyPromo(); } }}
+                    placeholder="Введите промокод"
+                    autoCapitalize="characters"
+                    className="flex-1 border border-border px-4 py-3 text-sm uppercase tracking-wide focus:border-graphite outline-none transition-colors"
+                  />
+                  <Button variant="outline" size="md" disabled={applying || (promoInput.trim() === "" && discount === 0)} onClick={applyPromo}>
+                    {applying ? "Проверка..." : "Применить"}
+                  </Button>
+                </div>
+                {promoMsg && (
+                  <p className={`text-[11px] mt-2 ${promoMsg.ok ? "text-muted" : "text-accent"}`}>{promoMsg.text}</p>
+                )}
+              </div>
+
               <div className="space-y-3 mb-6">
                 <div className="flex justify-between text-sm">
                   <span className="text-muted">Товары</span>
                   <span>{formatPrice(total)}</span>
                 </div>
+                {discount > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted">Скидка по промокоду</span>
+                    <span className="text-accent">−{formatPrice(discount)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between gap-4 text-sm">
                   <span className="shrink-0 text-muted">Доставка</span>
                   <span className="text-right text-muted">Рассчитывается при оформлении</span>
@@ -138,7 +205,7 @@ export default function CartPage() {
               </div>
               <div className="flex justify-between text-lg border-t border-border pt-4 mb-8">
                 <span className="uppercase tracking-[0.1em] text-[11px]">Итого</span>
-                <span>{formatPrice(total)}</span>
+                <span>{formatPrice(Math.max(0, total - discount))}</span>
               </div>
               <Link href="/checkout">
                 <Button variant="primary" size="lg" magnetic className="w-full">

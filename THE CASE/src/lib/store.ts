@@ -11,11 +11,15 @@ interface StoreState {
   wishlist: string[];
   user: User | null;
   orders: Order[];
+  /** Промокод, введённый в корзине — переносится в чекаут (Мадина: промокод в
+   *  корзину). Применённость/скидку подтверждает сервер (quoteCart), это лишь ввод. */
+  promoCode: string;
 
   addToCart: (item: Omit<CartItem, "quantity">, quantity?: number) => void;
   removeFromCart: (variantId: string) => void;
   updateQuantity: (variantId: string, quantity: number) => void;
   clearCart: () => void;
+  setPromoCode: (code: string) => void;
 
   toggleWishlist: (slug: string) => void;
   isInWishlist: (slug: string) => boolean;
@@ -36,6 +40,7 @@ export const useStore = create<StoreState>()(
       wishlist: [],
       user: null,
       orders: [],
+      promoCode: "",
 
       addToCart: (item, quantity = 1) => {
         set((state) => {
@@ -90,7 +95,8 @@ export const useStore = create<StoreState>()(
         }));
       },
 
-      clearCart: () => set({ cart: [] }),
+      clearCart: () => set({ cart: [], promoCode: "" }),
+      setPromoCode: (code) => set({ promoCode: code }),
 
       toggleWishlist: (slug) => {
         set((state) => ({
@@ -123,6 +129,7 @@ export const useStore = create<StoreState>()(
         cart: state.cart,
         wishlist: state.wishlist,
         orders: state.orders,
+        promoCode: state.promoCode,
       }),
     }
   )

@@ -64,9 +64,12 @@ export class CityService {
 
   /**
    * Поиск городов по подстроке имени. В mock — фикстуры; в real — GET
-   * /v2/location/suggest/cities?name=…&country_code=RU с маппингом. Пустой/
-   * короткий запрос (<2 символов) → пустой список (как mock). Устойчив к
-   * не-массиву. suggest не принимает size — режем результат по limit сами.
+   * /v2/location/suggest/cities?name=… с маппингом. БЕЗ country_code — ищем по
+   * всем странам присутствия СДЭК (РФ + СНГ/зарубеж), чтобы были доступны города
+   * Казахстана/Беларуси/Армении и т.д. (владелец: доставка в СНГ). Страна каждого
+   * города берётся из full_name (mapSuggestCity), тарификация РФ/СНГ — по ней.
+   * Пустой/короткий запрос (<2) → пустой список. suggest не принимает size —
+   * режем по limit сами.
    */
   async searchCities(query: string, limit = 10): Promise<CdekCity[]> {
     const q = (query ?? '').trim();
@@ -80,7 +83,8 @@ export class CityService {
       'GET',
       '/v2/location/suggest/cities',
       {
-        query: { name: q, country_code: 'RU' },
+        // Без country_code — СДЭК ищет по всем странам (РФ + СНГ/зарубеж).
+        query: { name: q },
       },
     );
     if (!Array.isArray(raw)) return [];

@@ -138,11 +138,17 @@ describe('contactFieldErrors (подсветка полей)', () => {
 });
 
 describe('isDeliveryStepValid', () => {
-  it('true только когда есть город и ПВЗ', () => {
+  it('ПВЗ: true только когда есть город и ПВЗ', () => {
     expect(isDeliveryStepValid(44, 'MSK1')).toBe(true);
     expect(isDeliveryStepValid(null, 'MSK1')).toBe(false);
     expect(isDeliveryStepValid(44, null)).toBe(false);
     expect(isDeliveryStepValid(44, '')).toBe(false);
+  });
+  it('курьер: true при городе + непустом адресе (ПВЗ не нужен)', () => {
+    expect(isDeliveryStepValid(44, null, 'courier', 'Ленина 1')).toBe(true);
+    expect(isDeliveryStepValid(44, null, 'courier', '  ')).toBe(false);
+    expect(isDeliveryStepValid(44, null, 'courier', '')).toBe(false);
+    expect(isDeliveryStepValid(null, null, 'courier', 'Ленина 1')).toBe(false);
   });
 });
 
