@@ -140,7 +140,11 @@ export default function CheckoutPage() {
       ]);
       if (seq !== citySeqRef.current) return; // выбран другой город — игнорируем устаревший ответ
       setPickupPoints(points);
-      setDeliveryCost(calc.cost);
+      // Правка владельца: доставка покупателю бесплатна (реальная стоимость СДЭК —
+      // в заказе для магазина). Не показываем сырой тариф cdekCalculate до выбора
+      // ПВЗ — сразу «Бесплатно» (0); финальный quote после ПВЗ подтвердит. calc
+      // всё равно нужен для срока доставки.
+      setDeliveryCost(0);
       setDeliveryEta(formatEta(calc.periodMin, calc.periodMax));
     } catch (e) {
       if (seq !== citySeqRef.current) return;
