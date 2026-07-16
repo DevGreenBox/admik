@@ -107,13 +107,13 @@ export function Footer({
   const socialLinks = resolveSocialLinks(c);
 
   return (
-    <footer id="contacts" className="relative bg-graphite text-white mt-32 md:mt-40 lg:mt-48 overflow-hidden">
+    <footer id="contacts" className="relative bg-graphite text-white mt-16 md:mt-24 lg:mt-28 overflow-hidden">
       <div
         className="absolute inset-0 bg-cover bg-center pointer-events-none saturate-0 blur-[2px]"
         style={{ backgroundImage: `url(${IMAGES.footer.bg})` }}
       />
       <div className="absolute inset-0 bg-black/25 pointer-events-none" />
-      <div className="container-brand py-20 md:py-28 relative z-10">
+      <div className="container-brand py-14 md:py-20 relative z-10">
         <FadeIn>
           <div className="grid grid-cols-1 md:grid-cols-12 gap-14 md:gap-8 lg:gap-6">
             <div className="md:col-span-3">

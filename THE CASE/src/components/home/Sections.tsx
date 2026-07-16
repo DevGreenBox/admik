@@ -83,7 +83,7 @@ export function CoverSlides({ quality = HOME_FALLBACK.quality }: { quality?: Res
   return (
     // Правка 3 + Саша-3/Аня-3: уменьшены отступы — промежуток до блока «Коллекция»
     // был слишком большим; вертикальный ритм сокращён консистентно по всей главной.
-    <section className="pt-16 pb-10 md:pt-24 md:pb-12 lg:pt-28 lg:pb-16">
+    <section className="pt-10 pb-10 md:pt-14 md:pb-12 lg:pt-16 lg:pb-16">
       <div className="container-brand">
         <FadeIn>
           <div className="grid grid-cols-1 items-center gap-10 bg-surface p-8 md:p-14 lg:grid-cols-2 lg:gap-16">
@@ -109,7 +109,7 @@ export function CoverSlides({ quality = HOME_FALLBACK.quality }: { quality?: Res
         {/* «Качество ткани» — статичный блок ниже (правка 2: вместо отдельного слайда) */}
         <FadeIn delay={0.1}>
           <div
-            className="relative mt-6 flex min-h-[360px] items-center overflow-hidden md:min-h-[420px]"
+            className="relative mt-6 flex items-center overflow-hidden"
             style={{ background: "linear-gradient(135deg,#3a3a3d,#2b2b2b 45%,#202022)" }}
           >
             {/* Аня-2 №14: фон-фактура ткани. Два перекрёстных набора светлых
@@ -123,8 +123,8 @@ export function CoverSlides({ quality = HOME_FALLBACK.quality }: { quality?: Res
                   "repeating-linear-gradient(-45deg,#fff 0 1px,transparent 1px 5px)",
               }}
             />
-            <div className="relative w-full px-8 py-14 text-white md:px-14 md:py-20">
-              <p className="eyebrow mb-8 text-white/60">{quality.title}</p>
+            <div className="relative w-full px-8 py-10 text-white md:px-14 md:py-16">
+              <p className="eyebrow mb-6 text-white/60">{quality.title}</p>
               {/* Аня-2 №14: пункты характеристик оформлены карточками (вместо списка)
                   на фоне-фактуре ткани. Карточки — полупрозрачное стекло поверх
                   текстуры, нумерация даёт «каталожный» ритм бренда. */}
@@ -152,7 +152,7 @@ export function CoverSlides({ quality = HOME_FALLBACK.quality }: { quality?: Res
 /** Medical Fashion — text block */
 export function EditorialIntro() {
   return (
-    <section className="section-space-sm pb-14 md:pb-20 lg:pb-28">
+    <section className="section-space-sm pb-10 md:pb-14 lg:pb-16">
       <div className="container-brand">
         <FadeIn>
           <div className="max-w-xl mx-auto text-center py-8 md:py-12">
@@ -221,21 +221,23 @@ export function CommunityReviews({
   if (!reviews.enabled) return null;
 
   const hasPhotos = reviews.photos.length > 0;
-  // Плейсхолдеры показываем, когда фото ещё не загружены (6 ячеек, как на /reviews).
-  const cells: (string | null)[] = hasPhotos ? reviews.photos : Array.from({ length: 6 }, () => null);
+  // Пока фото не загружены — 3 компактных плейсхолдера в ОДИН ряд (было 6 в сетке
+  // 2 колонки = 3 высоких ряда пустых квадратов ≈ 800px пустоты на мобильном,
+  // из-за чего блок выглядел «полупустым»). С фото — обычная сетка 2/3 колонки.
+  const cells: (string | null)[] = hasPhotos ? reviews.photos : Array.from({ length: 3 }, () => null);
 
   return (
     <section className="section-space-sm">
       <div className="container-brand">
         <FadeIn>
-          <div className="max-w-2xl mb-12 md:mb-16">
+          <div className="max-w-2xl mb-8 md:mb-12">
             <p className="eyebrow mb-6">{reviews.eyebrow}</p>
             <h2 className="heading-lg heading-rule mb-6">{reviews.title}</h2>
             <p className="body-editorial">{reviews.text}</p>
           </div>
         </FadeIn>
 
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
+        <div className="grid grid-cols-3 gap-3 md:gap-6">
           {cells.map((src, i) => (
             <FadeIn key={src ?? `ph-${i}`} delay={i * 0.05}>
               {src ? (
@@ -245,12 +247,12 @@ export function CommunityReviews({
                     alt={`${reviews.title} — фото ${i + 1}`}
                     fill
                     className="object-cover object-center"
-                    sizes="(max-width: 768px) 50vw, 33vw"
+                    sizes="(max-width: 768px) 33vw, 33vw"
                   />
                 </div>
               ) : (
-                <div className="aspect-[3/4] bg-surface flex items-center justify-center">
-                  <span className="text-[10px] uppercase tracking-[0.2em] text-muted">
+                <div className="aspect-square bg-surface flex items-center justify-center">
+                  <span className="text-[9px] uppercase tracking-[0.15em] text-muted text-center px-1">
                     Ваше фото
                   </span>
                 </div>
@@ -426,7 +428,7 @@ export function Collection({
   return (
     // Правка 3 + Саша-3/Аня-3: верхний и нижний отступы сокращены (единый ритм
     // главной; прежние pb-32/44/52 давали избыточный разрыв с блоком ниже).
-    <section id="shop" className="pt-12 pb-20 md:pt-16 md:pb-28 lg:pt-20 lg:pb-32">
+    <section id="shop" className="pt-10 pb-12 md:pt-14 md:pb-16 lg:pt-16 lg:pb-20">
       <div className="container-brand">
         <FadeIn>
           <h2 className="heading-lg heading-rule mb-10 md:mb-12 max-w-2xl">
@@ -497,7 +499,7 @@ export function ShopCategories({
   categories?: AdmikCategoryDto[];
 }) {
   return (
-    <section className="section-space-sm pb-20 md:pb-28 lg:pb-32">
+    <section className="section-space-sm pb-12 md:pb-16 lg:pb-20">
       <div className="container-brand">
         <FadeIn>
           <p className="eyebrow mb-6 text-center md:text-left">Категории</p>
@@ -664,7 +666,7 @@ function AboutGallery({ images }: { images: string[] }) {
  */
 export function About({ about = HOME_FALLBACK.about }: { about?: ResolvedHome["about"] }) {
   return (
-    <section id="about" className="pt-20 md:pt-28 lg:pt-32">
+    <section id="about" className="pt-12 md:pt-16 lg:pt-20">
       <div className="container-brand">
         <div className="grid grid-cols-1 gap-10 lg:grid-cols-5 lg:items-start lg:gap-16">
           {/* Текст слева (~60%). Заголовок/абзацы/ценности — из настроек Admik
@@ -706,7 +708,7 @@ export function Delivery({ delivery = HOME_FALLBACK.delivery }: { delivery?: Res
   return (
     // Правка 6 + Саша-3/Аня-3: без верхней границы и с компактным верхним отступом —
     // блок «О бренде» и «Доставка и оплата» читаются как единое целое; ритм сокращён.
-    <section id="delivery" className="bg-white pt-14 pb-16 md:pt-20 md:pb-24 lg:pt-24 lg:pb-28">
+    <section id="delivery" className="bg-white pt-12 pb-12 md:pt-16 md:pb-16 lg:pt-20 lg:pb-20">
       <div className="container-brand">
         <FadeIn>
           <div className="max-w-xl mb-16 md:mb-24 lg:mb-28">
