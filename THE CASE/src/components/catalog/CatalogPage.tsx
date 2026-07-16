@@ -253,6 +253,17 @@ export function CatalogPage({
             >
               Сбросить
             </button>
+
+            {/* Мадина №5: крупная кнопка «Показать» внизу — и применяет, и закрывает
+                панель. Раньше закрыть можно было только мелким X вверху длинной
+                панели или тапом по подложке (на телефоне панель full-width, подложки
+                почти не видно) → «фильтр невозможно закрыть». */}
+            <button
+              onClick={() => setFiltersOpen(false)}
+              className="mt-3 w-full bg-graphite py-4 text-[11px] uppercase tracking-[0.2em] text-white transition-colors duration-500 hover:bg-black"
+            >
+              Показать {filtered.length}
+            </button>
           </div>
         </div>
       )}

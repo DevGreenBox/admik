@@ -106,38 +106,33 @@ export function CoverSlides({ quality = HOME_FALLBACK.quality }: { quality?: Res
           </div>
         </FadeIn>
 
-        {/* «Качество ткани» — статичный блок ниже (правка 2: вместо отдельного слайда) */}
+        {/* «Качество ткани» (Мадина №2): светлый фон как у других блоков + крупный
+            заголовок heading-lg heading-rule (было мелкое eyebrow на тёмном градиенте
+            — выбивалось из ритма главной). Тонкая фактура-переплетение поверх surface
+            вместо «грязного серого». */}
         <FadeIn delay={0.1}>
-          <div
-            className="relative mt-6 flex items-center overflow-hidden"
-            style={{ background: "linear-gradient(135deg,#3a3a3d,#2b2b2b 45%,#202022)" }}
-          >
-            {/* Аня-2 №14: фон-фактура ткани. Два перекрёстных набора светлых
-                диагоналей дают эффект переплетения нитей (ткань), а не «грязный
-                серый». TODO(контент клиента): при наличии заменить на фото фактуры. */}
+          <div className="relative mt-6 overflow-hidden bg-surface px-8 py-12 md:px-14 md:py-16">
             <div
-              className="absolute inset-0 opacity-[0.18] mix-blend-soft-light"
+              className="pointer-events-none absolute inset-0 opacity-[0.06]"
               style={{
                 backgroundImage:
-                  "repeating-linear-gradient(45deg,#fff 0 1px,transparent 1px 5px)," +
-                  "repeating-linear-gradient(-45deg,#fff 0 1px,transparent 1px 5px)",
+                  "repeating-linear-gradient(45deg,#2b2b2b 0 1px,transparent 1px 6px)," +
+                  "repeating-linear-gradient(-45deg,#2b2b2b 0 1px,transparent 1px 6px)",
               }}
             />
-            <div className="relative w-full px-8 py-10 text-white md:px-14 md:py-16">
-              <p className="eyebrow mb-6 text-white/60">{quality.title}</p>
-              {/* Аня-2 №14: пункты характеристик оформлены карточками (вместо списка)
-                  на фоне-фактуре ткани. Карточки — полупрозрачное стекло поверх
-                  текстуры, нумерация даёт «каталожный» ритм бренда. */}
+            <div className="relative">
+              <h2 className="heading-lg heading-rule mb-8 md:mb-10">{quality.title}</h2>
+              {/* Пункты-характеристики карточками с нумерацией (каталожный ритм). */}
               <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 {quality.items.map((f, i) => (
                   <li
                     key={f}
-                    className="group border border-white/15 bg-white/[0.06] p-6 backdrop-blur-sm transition-colors hover:bg-white/[0.1]"
+                    className="group border border-border bg-white p-6 transition-colors hover:border-graphite"
                   >
-                    <span className="mb-4 block text-[11px] tracking-[0.2em] text-white/40">
+                    <span className="mb-4 block text-[11px] tracking-[0.2em] text-muted">
                       {String(i + 1).padStart(2, "0")}
                     </span>
-                    <span className="body-editorial block text-sm text-white/90">{f}</span>
+                    <span className="body-editorial block text-sm text-graphite">{f}</span>
                   </li>
                 ))}
               </ul>

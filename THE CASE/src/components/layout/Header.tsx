@@ -136,9 +136,13 @@ export function Header({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[60] bg-white"
+            className="fixed inset-0 z-[60] flex flex-col bg-white"
           >
-            <div className="container-brand flex h-16 items-center justify-between">
+            {/* Шапка меню закреплена сверху (shrink-0), список ниже — в отдельной
+                скроллящейся области. Раньше меню было fixed inset-0 без прокрутки:
+                длинный список (Каталог/О бренде/Информация…) обрезался и на телефоне
+                не листался. overscroll-contain + touch-momentum для iOS. */}
+            <div className="container-brand flex h-16 shrink-0 items-center justify-between">
               <Logo size="md" shopName={shopName} logoUrl={logoUrl} />
               <button onClick={() => setMenuOpen(false)} aria-label="Закрыть">
                 <X className="h-5 w-5" strokeWidth={1} />
@@ -148,7 +152,7 @@ export function Header({
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.1, duration: 0.6 }}
-              className="container-brand flex flex-col gap-10 pt-20"
+              className="container-brand flex flex-1 flex-col gap-10 overflow-y-auto overscroll-contain pt-12 pb-16 [-webkit-overflow-scrolling:touch]"
             >
               {[...NAV_LEFT, ...navRight].map((link, i) => (
                 <motion.div

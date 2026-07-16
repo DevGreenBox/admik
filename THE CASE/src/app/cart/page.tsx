@@ -131,9 +131,9 @@ export default function CartPage() {
                   <span className="text-muted">Товары</span>
                   <span>{formatPrice(total)}</span>
                 </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted">Доставка</span>
-                  <span className="text-muted">Рассчитывается при оформлении</span>
+                <div className="flex justify-between gap-4 text-sm">
+                  <span className="shrink-0 text-muted">Доставка</span>
+                  <span className="text-right text-muted">Рассчитывается при оформлении</span>
                 </div>
               </div>
               <div className="flex justify-between text-lg border-t border-border pt-4 mb-8">
