@@ -36,6 +36,12 @@
     scroll-behavior: smooth;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    /* overflow-x:hidden ДОЛЖЕН быть на html, а не на body: на iOS Safari
+       overflow-x:hidden на <body> делает body scroll-контейнером и полностью
+       ломает вертикальный momentum-скролл пальцем (страница «вообще не
+       скроллится»). На html он гасит горизонтальный сдвиг, не трогая
+       вертикальный скролл. */
+    overflow-x: hidden;
   }
 
   body {
@@ -43,7 +49,6 @@
     font-family: var(--font-text);
     font-feature-settings: "kern" 1;
     letter-spacing: normal;
-    overflow-x: hidden;
   }
 
   h1,
