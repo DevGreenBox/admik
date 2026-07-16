@@ -71,6 +71,7 @@ export function ProductGallery({ images, name }: ProductGalleryProps) {
             alt={`${name} — фото ${active + 1}`}
             fill
             priority
+            quality={90}
             className="object-contain"
             sizes="(max-width: 1024px) 100vw, 45vw"
           />
@@ -116,7 +117,7 @@ export function ProductGallery({ images, name }: ProductGalleryProps) {
               className="relative w-full max-w-3xl aspect-[3/4] mx-6"
               onClick={(e) => e.stopPropagation()}
             >
-              <Image key={active} src={images[active]} alt={name} fill className="object-contain" sizes="100vw" />
+              <Image key={active} src={images[active]} alt={name} fill quality={90} className="object-contain" sizes="100vw" />
             </motion.div>
             {images.length > 1 && (
               <>

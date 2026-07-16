@@ -40,6 +40,7 @@ export function HomeBanner({ hero = HOME_FALLBACK.hero }: { hero?: ResolvedHome[
           width={3620}
           height={1810}
           priority
+          quality={90}
           onError={() => setBannerFailed(true)}
           className="block w-full h-auto object-contain"
           sizes="100vw"
