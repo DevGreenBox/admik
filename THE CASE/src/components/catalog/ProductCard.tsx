@@ -220,7 +220,7 @@ function QuickViewModal({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-10 md:gap-16 px-6 md:px-10 pb-10 md:pb-12">
               <div className="relative aspect-[3/4] bg-surface">
                 {view.images[0] && (
-                  <Image src={view.images[0]} alt={view.name} fill quality={85} className="object-contain" />
+                  <Image src={view.images[0]} alt={view.name} fill quality={90} className="object-contain" />
                 )}
               </div>
               <div className="flex flex-col justify-center py-2">

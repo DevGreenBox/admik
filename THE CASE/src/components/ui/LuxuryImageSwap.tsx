@@ -43,7 +43,7 @@ export function LuxuryImageSwap({
         priority={priority}
         loading={priority ? "eager" : "lazy"}
         sizes={sizes}
-        quality={85}
+        quality={90}
         className={`${imageClassName} ${hasSwap ? "group-hover/swap:invisible" : ""}`}
       />
       {hasSwap && (
@@ -54,7 +54,7 @@ export function LuxuryImageSwap({
           fill
           loading="eager"
           sizes={sizes}
-          quality={85}
+          quality={90}
           className={`absolute inset-0 invisible group-hover/swap:visible ${imageClassName}`}
         />
       )}
