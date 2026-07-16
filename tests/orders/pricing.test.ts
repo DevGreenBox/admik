@@ -221,6 +221,19 @@ describe('pricing — calculateQuote: scoped free_delivery (баг #10, защи
     expect(q.grandTotal).toBe('500.00');
   });
 
+  it('при бесплатной доставке baseCost хранит РЕАЛЬНУЮ стоимость СДЭК (для админки)', () => {
+    // Правка владельца: покупателю доставка бесплатна (deliveryCost=0), но реальная
+    // стоимость (baseCost) сохраняется — идёт в orders.delivery_cost для владельца.
+    const q = calculateQuote({
+      lines: [line({ unitPrice: '1.00', qty: 1 })],
+      // порог 1 копейка → любой заказ бесплатен покупателю; cost = реальная СДЭК.
+      delivery: { cost: '350.00', freeThreshold: 0.01 },
+    });
+    expect(q.deliveryCost).toBe('0.00'); // покупатель — бесплатно
+    expect(q.delivery.free).toBe(true);
+    expect(q.delivery.baseCost).toBe('350.00'); // реальная СДЭК для админки
+  });
+
   it('cart free_delivery без scopeTargets → прежнее поведение (бесплатно)', () => {
     const q = calculateQuote({
       lines: [line({ unitPrice: '500.00', qty: 1 })],

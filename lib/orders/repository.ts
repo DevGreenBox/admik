@@ -1074,7 +1074,11 @@ export async function createOrder(
           ${input.delivery.type}, ${input.delivery.city ?? null},
           ${input.delivery.cityCode ?? null},
           ${input.delivery.address ?? null}, ${input.delivery.pvzCode ?? null},
-          ${quote.deliveryCost}, ${promoRow?.id ?? null}, ${appliedPromo?.code ?? null},
+          -- delivery_total (выше) = что платит ПОКУПАТЕЛЬ (0 при бесплатной доставке);
+          -- delivery_cost = РЕАЛЬНАЯ стоимость СДЭК (baseCost, до обнуления по порогу) —
+          -- её видит владелец в админке и оплачивает сам (правка владельца: покупателю
+          -- доставка бесплатна, реальная цена — только в заказе для магазина).
+          ${quote.delivery.baseCost}, ${promoRow?.id ?? null}, ${appliedPromo?.code ?? null},
           ${input.customer.name}, ${input.customer.email}, ${input.customer.phone},
           ${input.comment ?? ''}, ${input.idempotencyKey ?? null}, ${source}, ${ctx.ip ?? null}
         )

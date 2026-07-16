@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { ChevronDown } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useStore, useHydrated } from "@/lib/store";
 import { formatPrice } from "@/lib/format";
@@ -434,9 +435,7 @@ export default function CheckoutPage() {
                 </div>
               )}
               {pickupPoints.length > 0 && (
-                <OptionGroup title="Пункт выдачи" options={pickupPoints} selected={selectedPickup?.code}
-                  onSelect={handlePvzSelect}
-                  render={(opt) => opt.name} sub={(opt) => opt.address} />
+                <PvzSelect points={pickupPoints} selected={selectedPickup} onSelect={handlePvzSelect} />
               )}
               {error && <p className="text-sm text-accent">{error}</p>}
               <div className="flex gap-4">
@@ -580,6 +579,59 @@ function Row({ label, value, bold }: { label: string; value: string; bold?: bool
   return (
     <div className={`flex justify-between text-sm ${bold ? "text-base border-t border-border pt-3" : ""}`}>
       <span className={bold ? "" : "text-muted"}>{label}</span><span>{value}</span>
+    </div>
+  );
+}
+
+/**
+ * Компактный выбор ПВЗ (правка владельца: «как у carre russe»). Раньше все ПВЗ
+ * рендерились столбиком карточек → на телефоне приходилось листать до самого низа,
+ * чтобы дойти до «Далее». Теперь — свёрнутая строка с выбранным пунктом; клик
+ * разворачивает скроллящийся (max-h) список, выбор сворачивает обратно.
+ */
+function PvzSelect({
+  points, selected, onSelect,
+}: {
+  points: AdmikCdekPvzDto[];
+  selected: AdmikCdekPvzDto | null;
+  onSelect: (opt: AdmikCdekPvzDto) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div>
+      <p className="label-caps text-muted mb-3">Пункт выдачи</p>
+      <div className="relative">
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          className="w-full flex items-center justify-between border border-border px-4 py-3 text-left text-sm focus:border-graphite outline-none hover:border-graphite transition-colors"
+          aria-expanded={open}
+        >
+          <span className={selected ? "text-graphite" : "text-muted"}>
+            {selected ? (
+              <><span className="block">{selected.name}</span><span className="block text-[10px] text-muted mt-0.5">{selected.address}</span></>
+            ) : (
+              `Выберите пункт выдачи (${points.length})`
+            )}
+          </span>
+          <ChevronDown className={`h-4 w-4 shrink-0 text-muted transition-transform ${open ? "rotate-180" : ""}`} strokeWidth={1.5} />
+        </button>
+        {open && (
+          <div className="absolute z-20 w-full bg-white border border-border mt-1 max-h-64 overflow-y-auto shadow-lg [-webkit-overflow-scrolling:touch]">
+            {points.map((pvz) => (
+              <button
+                key={pvz.code}
+                type="button"
+                onClick={() => { onSelect(pvz); setOpen(false); }}
+                className={`w-full text-left px-4 py-3 text-sm hover:bg-surface transition-colors ${selected?.code === pvz.code ? "bg-surface" : ""}`}
+              >
+                <span className="block text-graphite">{pvz.name}</span>
+                <span className="block text-[10px] text-muted mt-0.5">{pvz.address}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
