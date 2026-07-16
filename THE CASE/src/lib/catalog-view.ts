@@ -305,6 +305,10 @@ export interface CatalogViewParams {
   onlyNew: boolean;
   onlyBestseller: boolean;
   sort: CatalogSort;
+  /** Фасеты каталога (Мадина №5). Пустые/пропущенные — фильтр по ним не применяется. */
+  genders?: string[];
+  colors?: string[];
+  sizes?: string[];
 }
 
 /**
@@ -318,5 +322,13 @@ export function applyCatalogView(
   let result = products.filter((p) => p.price <= params.priceMax);
   if (params.onlyNew) result = result.filter((p) => p.isNew);
   if (params.onlyBestseller) result = result.filter((p) => p.isBestseller);
+  // Фасеты (Мадина №5): пол/цвет/размер. OR внутри одного фасета (выбрано «жен ИЛИ
+  // муж»), AND между фасетами. Пустой набор — фасет не ограничивает.
+  const genders = params.genders ?? [];
+  const colors = (params.colors ?? []).map((c) => c.toLowerCase());
+  const sizes = params.sizes ?? [];
+  if (genders.length) result = result.filter((p) => genders.includes(p.gender));
+  if (colors.length) result = result.filter((p) => colors.includes(p.color.toLowerCase()));
+  if (sizes.length) result = result.filter((p) => p.sizes.some((s) => sizes.includes(s)));
   return sortProducts(result, params.sort);
 }

@@ -122,6 +122,11 @@ export interface ProductListItemDto {
   inStock: boolean;
   /** Доступное к заказу количество (≥0) — для ограничения корзины (см. VariantDto.availableQty). */
   availableQty: number;
+  /** Фасеты каталога (Мадина №5): для фильтра сетки по полу/цвету/размеру.
+   *  gender/color — из attributes_cache товара; sizes — метки вариантов. */
+  gender: string;
+  color: string;
+  sizes: string[];
 }
 
 export interface ProductDetailDto {
@@ -288,7 +293,20 @@ export function toProductListItemDto(
     // Семантика совпадает с computeInStock карточки/детали.
     inStock: row.availableStock > 0,
     availableQty: Math.max(0, row.availableStock),
+    // Фасеты каталога (Мадина №5): пол/цвет из attributes_cache, размеры из вариантов.
+    gender: attrStr(row.attributesCache, ['gender', 'пол']),
+    color: attrStr(row.attributesCache, ['color', 'цвет']),
+    sizes: row.sizes,
   };
+}
+
+/** Читает строковый атрибут по одному из ключей (регистронезависимо). */
+function attrStr(attrs: Record<string, unknown>, keys: string[]): string {
+  for (const k of keys) {
+    const v = attrs?.[k];
+    if (typeof v === 'string' && v.trim()) return v.trim();
+  }
+  return '';
 }
 
 /** Медиа → публичный DTO (без storage_key/размеров/байт). */

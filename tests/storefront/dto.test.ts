@@ -135,6 +135,8 @@ describe('storefront/dto — список товаров', () => {
     totalStock: 3,
     availableStock: 3,
     primaryMediaUrl: 'https://cdn/img.jpg',
+    attributesCache: { color: 'Графит', gender: 'men' },
+    sizes: ['48 / M', '50 / L'],
     createdAt: D,
   };
 
@@ -154,11 +156,16 @@ describe('storefront/dto — список товаров', () => {
     });
     expect(dto.imageUrl).toBe('https://cdn/img.jpg');
     expect(dto.inStock).toBe(true);
+    // Фасетные поля каталога (Мадина №5): пол/цвет/размеры для фильтра сетки.
+    expect(dto.gender).toBe('men');
+    expect(dto.color).toBe('Графит');
+    expect(dto.sizes).toEqual(['48 / M', '50 / L']);
     // Внутренние поля наружу не отдаём.
     expect(dto).not.toHaveProperty('id');
     expect(dto).not.toHaveProperty('status');
     expect(dto).not.toHaveProperty('totalStock');
     expect(dto).not.toHaveProperty('availableStock');
+    expect(dto).not.toHaveProperty('attributesCache');
   });
 
   it('inStock=false при нулевом доступном остатке', () => {

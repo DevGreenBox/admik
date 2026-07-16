@@ -141,9 +141,10 @@ export function sortVariants(variants: StorefrontVariant[]): StorefrontVariant[]
 // ---------------------------------------------------------------------------
 
 /**
- * Список товаров: list-DTO не несёт атрибутов/вариантов/категорий — поля,
- * выводимые из атрибутов, получают дефолты, варианты пусты. Карточке достаточно
- * name/price/image/бейджей/наличия.
+ * Список товаров: list-DTO теперь несёт фасетные поля gender/color/sizes (Мадина
+ * №5 — для фильтра сетки по полу/цвету/размеру). Варианты/категории/состав по-
+ * прежнему пусты (только в detail-DTO). Карточке достаточно name/price/image/
+ * бейджей/наличия + фасеты для клиентского фильтра каталога.
  */
 export function fromListItem(dto: AdmikProductListItemDto): StorefrontProduct {
   return {
@@ -161,14 +162,15 @@ export function fromListItem(dto: AdmikProductListItemDto): StorefrontProduct {
     images: dto.imageUrl ? [dto.imageUrl] : [],
     brand: dto.brand ? { slug: dto.brand.slug, name: dto.brand.name } : null,
     categories: [],
-    gender: 'unisex',
-    color: '',
+    // Фасеты: gender резолвим той же логикой, что и в detail (из строки атрибута).
+    gender: resolveGender({ gender: dto.gender ?? '' }),
+    color: (dto.color ?? '').trim(),
     composition: '',
     care: '',
     features: [],
     description: '',
     variants: [],
-    sizes: [],
+    sizes: Array.isArray(dto.sizes) ? dto.sizes : [],
   };
 }
 

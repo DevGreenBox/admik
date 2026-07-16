@@ -56,6 +56,11 @@ export interface AdmikProductListItemDto {
   inStock: boolean;
   /** Доступно к заказу (≥0) — лимит счётчика в корзине. */
   availableQty: number;
+  /** Фасеты каталога (Мадина №5): пол/цвет/размеры для фильтра сетки. Опциональны
+   *  для обратной совместимости со старым бэкендом (тогда фильтр по ним пуст). */
+  gender?: string;
+  color?: string;
+  sizes?: string[];
 }
 
 export interface AdmikProductDetailDto {

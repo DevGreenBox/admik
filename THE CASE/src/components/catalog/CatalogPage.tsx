@@ -6,6 +6,7 @@ import { SlidersHorizontal, X } from "lucide-react";
 import { HEADER_OFFSET } from "@/components/layout/Header";
 import { ProductCard } from "@/components/catalog/ProductCard";
 import { FadeIn } from "@/components/ui/Animations";
+import { colorHex } from "@/lib/color-swatch";
 import type { StorefrontProduct, AdmikCategoryDto } from "@/lib/admik";
 import {
   applyCatalogView,
@@ -72,6 +73,28 @@ export function CatalogPage({
   const [priceMax, setPriceMax] = useState(range.max);
   const [onlyNew, setOnlyNew] = useState(false);
   const [onlyBestseller, setOnlyBestseller] = useState(false);
+  // Фасеты каталога (Мадина №5): множественный выбор пол/цвет/размер.
+  const [genders, setGenders] = useState<string[]>([]);
+  const [colors, setColors] = useState<string[]>([]);
+  const [sizes, setSizes] = useState<string[]>([]);
+
+  // Доступные значения фасетов — из загруженной выборки товаров (только то, что
+  // реально есть). Пол показываем метками, размеры/цвета — как в данных.
+  const GENDER_LABELS: Record<string, string> = { women: "Женское", men: "Мужское", unisex: "Унисекс" };
+  const availGenders = useMemo(
+    () => [...new Set(products.map((p) => p.gender).filter((g) => g && g !== "unisex"))],
+    [products]
+  );
+  const availColors = useMemo(
+    () => [...new Set(products.map((p) => p.color).filter(Boolean))],
+    [products]
+  );
+  const availSizes = useMemo(
+    () => [...new Set(products.flatMap((p) => p.sizes))].filter(Boolean),
+    [products]
+  );
+  const toggle = (arr: string[], v: string) =>
+    arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v];
 
   const filtered = useMemo(
     () =>
@@ -80,8 +103,11 @@ export function CatalogPage({
         onlyNew,
         onlyBestseller,
         sort,
+        genders,
+        colors,
+        sizes,
       }),
-    [products, priceMax, range.max, onlyNew, onlyBestseller, sort]
+    [products, priceMax, range.max, onlyNew, onlyBestseller, sort, genders, colors, sizes]
   );
 
   const goToCategory = (slug: string) => {
@@ -212,7 +238,9 @@ export function CatalogPage({
       </div>
 
       {filtersOpen && (
-        <div className="fixed inset-0 z-50 flex justify-end">
+        // z-[70] выше фиксированной шапки (z-50): раньше при равном z-index крестик
+        // X оказывался под шапкой на телефоне → «фильтр невозможно закрыть».
+        <div className="fixed inset-0 z-[70] flex justify-end">
           <div className="absolute inset-0 bg-black/20" onClick={() => setFiltersOpen(false)} />
           <div className="relative w-full max-w-md bg-white h-full overflow-y-auto p-8 md:p-10 animate-[slideIn_0.5s_ease-out]">
             <div className="flex justify-between items-center mb-12">
@@ -239,11 +267,71 @@ export function CatalogPage({
               </label>
             </FilterSection>
 
+            {/* Пол (Мадина №5) — показываем, если у товаров есть женское/мужское. */}
+            {availGenders.length > 0 && (
+              <FilterSection title="Пол">
+                {availGenders.map((g) => (
+                  <label key={g} className="flex items-center gap-3 py-2 text-sm cursor-pointer text-muted">
+                    <input type="checkbox" checked={genders.includes(g)} onChange={() => setGenders((a) => toggle(a, g))} className="accent-graphite" />
+                    {GENDER_LABELS[g] ?? g}
+                  </label>
+                ))}
+              </FilterSection>
+            )}
+
+            {/* Цвет (Мадина №5) — свотчи-кружки доступных цветов. */}
+            {availColors.length > 0 && (
+              <FilterSection title="Цвет">
+                <div className="flex flex-wrap gap-3 pt-1">
+                  {availColors.map((c) => {
+                    const on = colors.includes(c);
+                    return (
+                      <button
+                        key={c}
+                        type="button"
+                        onClick={() => setColors((a) => toggle(a, c))}
+                        aria-pressed={on}
+                        title={c}
+                        className={`flex h-8 w-8 items-center justify-center rounded-full border-2 transition-colors ${on ? "border-graphite" : "border-border"}`}
+                      >
+                        <span className="h-5 w-5 rounded-full border border-border" style={{ backgroundColor: colorHex(c) }} />
+                      </button>
+                    );
+                  })}
+                </div>
+              </FilterSection>
+            )}
+
+            {/* Размер (Мадина №5) — метки размеров из вариантов. */}
+            {availSizes.length > 0 && (
+              <FilterSection title="Размер">
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {availSizes.map((s) => {
+                    const on = sizes.includes(s);
+                    return (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={() => setSizes((a) => toggle(a, s))}
+                        aria-pressed={on}
+                        className={`min-w-[44px] border px-3 py-2 text-[10px] uppercase tracking-[0.15em] transition-colors ${on ? "border-graphite bg-graphite text-white" : "border-border text-muted hover:border-graphite"}`}
+                      >
+                        {s}
+                      </button>
+                    );
+                  })}
+                </div>
+              </FilterSection>
+            )}
+
             <button
               onClick={() => {
                 setPriceMax(range.max);
                 setOnlyNew(false);
                 setOnlyBestseller(false);
+                setGenders([]);
+                setColors([]);
+                setSizes([]);
                 // Консистентность (C22): если активны серверные фасеты — сбрасываем и
                 // их (URL), а не только клиентское состояние, иначе «Сбросить» вводит
                 // в заблуждение (фасет остаётся включённым).

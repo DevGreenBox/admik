@@ -283,5 +283,9 @@ export interface ProductListRow {
   availableStock: number;
   /** URL главного изображения (is_primary), если есть. */
   primaryMediaUrl: string | null;
+  /** Презентационный кеш атрибутов товара (цвет/пол/…) — для фасетов каталога. */
+  attributesCache: Record<string, unknown>;
+  /** Метки размеров из имён вариантов (для фильтра по размеру в сетке каталога). */
+  sizes: string[];
   createdAt: Date;
 }

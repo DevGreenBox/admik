@@ -7,6 +7,7 @@ import { formatPrice } from "@/lib/format";
 import { productCtaLabel } from "@/lib/product-cta";
 import { brandLabel } from "@/lib/brand-label";
 import { variantUnavailableLabel } from "@/lib/variant-availability";
+import { colorHex } from "@/lib/color-swatch";
 import { useStore, useHydrated } from "@/lib/store";
 import type { StorefrontProduct, StorefrontVariant } from "@/lib/admik";
 import { Button } from "@/components/ui/Button";
@@ -31,6 +32,7 @@ const DEFAULT_COMPOSITION = "72% полиэфир, 21% вискоза, 7% спа
 const DEFAULT_CARE =
   "Вывернуть одежду наизнанку и стирать при температуре воды не выше 30 °С с вещами аналогичного цвета. " +
   "Не подвергать химической чистке и не отбеливать. Гладить с изнаночной стороны при температуре не выше 110 °С.";
+
 
 export function ProductDetailClient({ product, related }: ProductDetailClientProps) {
   const [selectedVariant, setSelectedVariant] = useState<StorefrontVariant | null>(null);
@@ -157,6 +159,28 @@ export function ProductDetailClient({ product, related }: ProductDetailClientPro
               </div>
               <p className="body-editorial">{product.description || DEFAULT_DESCRIPTION}</p>
 
+              {/* Цвет (Мадина №6): свотч-образец. Показываем, когда у товара задан
+                  атрибут цвета. Один цвет на товар → один активный свотч. */}
+              {product.color && (
+                <div>
+                  <p className="mb-4 text-[10px] uppercase tracking-[0.2em]">
+                    Цвет: <span className="text-muted">{product.color}</span>
+                  </p>
+                  <div className="flex flex-wrap gap-3">
+                    <span
+                      aria-label={product.color}
+                      title={product.color}
+                      className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-graphite"
+                    >
+                      <span
+                        className="h-6 w-6 rounded-full border border-border"
+                        style={{ backgroundColor: colorHex(product.color) }}
+                      />
+                    </span>
+                  </div>
+                </div>
+              )}
+
               {/* Размер — только для товаров с вариантами. */}
               {hasVariants && (
                 <div>
@@ -242,7 +266,6 @@ export function ProductDetailClient({ product, related }: ProductDetailClientPro
                 <p className="text-[10px] uppercase tracking-[0.2em] text-graphite">Состав и уход</p>
                 <Detail label="Состав" value={product.composition || DEFAULT_COMPOSITION} />
                 <Detail label="Рекомендации по уходу" value={product.care || DEFAULT_CARE} />
-                {product.color && <Detail label="Цвет" value={product.color} />}
                 {product.features.length > 0 && (
                   <div>
                     <p className="text-[10px] uppercase tracking-[0.2em] text-muted mb-3">Детали</p>

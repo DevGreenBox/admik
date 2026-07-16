@@ -451,7 +451,13 @@ export async function listProducts(
                OR NOT EXISTS (SELECT 1 FROM product_variants v WHERE v.product_id = p.id))), 0) AS available_stock,
       (SELECT m.url FROM product_media m
         WHERE m.product_id = p.id AND m.is_primary
-        LIMIT 1) AS primary_media_url
+        LIMIT 1) AS primary_media_url,
+      -- Фасеты каталога (Мадина №5): атрибуты товара (цвет/пол) + метки размеров
+      -- из имён вариантов (variant.name = «48 / M» и т.п.), отсортированные.
+      p.attributes_cache,
+      COALESCE((SELECT array_agg(v.name ORDER BY v.sort)
+        FROM product_variants v
+        WHERE v.product_id = p.id AND v.is_active AND v.name <> ''), '{}') AS variant_sizes
     FROM products p
     LEFT JOIN brands b ON b.id = p.brand_id
     ${where}
@@ -491,6 +497,13 @@ export async function listProducts(
       totalStock: Number(r.total_stock ?? 0),
       availableStock: Number(r.available_stock ?? 0),
       primaryMediaUrl: r.primary_media_url ?? null,
+      attributesCache:
+        r.attributes_cache && typeof r.attributes_cache === 'object'
+          ? (r.attributes_cache as Record<string, unknown>)
+          : {},
+      sizes: Array.isArray(r.variant_sizes)
+        ? (r.variant_sizes as string[]).filter(Boolean)
+        : [],
       createdAt,
     };
   });

@@ -402,6 +402,30 @@ describe("applyCatalogView", () => {
     expect(out.map((p) => p.slug)).toEqual(["a", "b"]);
   });
 
+  describe("фасеты пол/цвет/размер (Мадина №5)", () => {
+    const faceted = [
+      mk({ slug: "ordo", gender: "women", color: "Белый", sizes: ["42 / XS", "44 / S"] }),
+      mk({ slug: "altera", gender: "men", color: "Графит", sizes: ["48 / M", "50 / L"] }),
+    ];
+    const base = { priceMax: 999999, onlyNew: false, onlyBestseller: false, sort: "default" as const };
+
+    it("пустые фасеты не ограничивают", () => {
+      expect(applyCatalogView(faceted, base).map((p) => p.slug)).toEqual(["ordo", "altera"]);
+    });
+    it("фильтр по полу", () => {
+      expect(applyCatalogView(faceted, { ...base, genders: ["women"] }).map((p) => p.slug)).toEqual(["ordo"]);
+    });
+    it("фильтр по цвету (регистронезависимо)", () => {
+      expect(applyCatalogView(faceted, { ...base, colors: ["графит"] }).map((p) => p.slug)).toEqual(["altera"]);
+    });
+    it("фильтр по размеру (товар содержит любой из выбранных)", () => {
+      expect(applyCatalogView(faceted, { ...base, sizes: ["48 / M"] }).map((p) => p.slug)).toEqual(["altera"]);
+    });
+    it("несколько фасетов = AND между ними", () => {
+      expect(applyCatalogView(faceted, { ...base, genders: ["women"], colors: ["графит"] })).toHaveLength(0);
+    });
+  });
+
   it("чекбокс Новинки + сортировка по цене", () => {
     const out = applyCatalogView(products, {
       priceMax: 10000,
