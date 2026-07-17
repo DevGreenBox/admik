@@ -427,6 +427,10 @@ export function ShopCategories({
 }: {
   categories?: AdmikCategoryDto[];
 }) {
+  // Плитки строятся из реального каталога: нет категорий (или getCategories не
+  // ответил) — прячем и заголовок, иначе «Категории» повиснет над пустотой.
+  if (categories.length === 0) return null;
+
   return (
     <section className="section-space-sm pb-12 md:pb-16 lg:pb-20">
       <div className="container-brand">

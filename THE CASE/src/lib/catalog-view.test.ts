@@ -10,6 +10,7 @@ import {
   topLevelAncestorSlug,
   resolveCategoryHref,
   categoryLinks,
+  topCategoryLinks,
   buildCatalogHref,
   removeFacet,
 } from "@/lib/catalog-view";
@@ -181,6 +182,49 @@ describe("resolveCategoryHref — тематическая ссылка глав
       { slug: "tops", name: "Women's Scrubs", description: "", children: [] },
     ];
     expect(resolveCategoryHref(en, "women")).toBe("/catalog?category=tops");
+  });
+});
+
+describe("topCategoryLinks — плитки «Категории» на главной", () => {
+  it("ТОЛЬКО верхний уровень: подкатегории не подмешиваются", () => {
+    // Отличие от categoryLinks (DFS): «Хирургические (жен)/(муж)» — дети, в
+    // плитки они попасть не должны, иначе ребёнок встанет рядом с родителем.
+    expect(topCategoryLinks(REAL_CATS, 6)).toEqual([
+      {
+        slug: "meditsinskie-kostyumy",
+        name: "Медицинские костюмы",
+        description: "",
+        href: "/catalog?category=meditsinskie-kostyumy",
+      },
+      {
+        slug: "hirurgicheskie-operatsionnye",
+        name: "Хирургические (операционные)",
+        description: "",
+        href: "/catalog?category=hirurgicheskie-operatsionnye",
+      },
+    ]);
+  });
+
+  it("ограничение max режет лишние плитки", () => {
+    expect(topCategoryLinks(REAL_CATS, 1).map((l) => l.slug)).toEqual([
+      "meditsinskie-kostyumy",
+    ]);
+  });
+
+  it("пустое дерево → пустой массив (секция скрывается целиком)", () => {
+    expect(topCategoryLinks([], 3)).toEqual([]);
+  });
+
+  it("description пробрасывается: заменяет выдуманные статы «3 кроя»", () => {
+    const cats: AdmikCategoryDto[] = [
+      { slug: "halaty", name: "Халаты", description: "4 длины", children: [] },
+    ];
+    expect(topCategoryLinks(cats, 3)[0].description).toBe("4 длины");
+  });
+
+  it("max <= 0 → пусто (не роняем на отрицательном)", () => {
+    expect(topCategoryLinks(REAL_CATS, 0)).toEqual([]);
+    expect(topCategoryLinks(REAL_CATS, -5)).toEqual([]);
   });
 });
 

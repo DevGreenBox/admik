@@ -1,14 +1,14 @@
 import Link from "next/link";
-import { resolveCategoryHref } from "@/lib/catalog-view";
+import { topCategoryLinks } from "@/lib/catalog-view";
 import type { AdmikCategoryDto } from "@/lib/admik";
 
 type InfographicProps = {
   index: number;
-  stats: readonly string[];
+  description: string;
   children: React.ReactNode;
 };
 
-function InfographicCard({ index, stats, children }: InfographicProps) {
+function InfographicCard({ index, description, children }: InfographicProps) {
   return (
     <div className="flex h-full min-h-[140px] flex-col items-center justify-between border border-border bg-surface px-3 py-4 md:min-h-[152px] md:px-5 md:py-5 transition-colors duration-700 group-hover:border-graphite">
       <span className="text-[9px] uppercase tracking-[0.24em] text-muted tabular-nums">
@@ -19,13 +19,11 @@ function InfographicCard({ index, stats, children }: InfographicProps) {
 
       <div className="w-full">
         <div className="accent-line-sm mx-auto mb-3 w-6" />
-        <ul className="space-y-1 text-center">
-          {stats.map((stat) => (
-            <li key={stat} className="text-[8px] uppercase tracking-[0.14em] text-graphite/70 leading-relaxed">
-              {stat}
-            </li>
-          ))}
-        </ul>
+        {/* Подпись — description категории из админки. Пусто → строка-распорка,
+            чтобы плитки в ряду остались одной высоты. */}
+        <p className="min-h-[1rem] text-center text-[8px] uppercase tracking-[0.14em] text-graphite/70 leading-relaxed">
+          {description}
+        </p>
       </div>
     </div>
   );
@@ -67,51 +65,43 @@ function AccessoriesGraphic() {
   );
 }
 
-// `hint` (а не зашитый slug): тема плитки резолвится в РЕАЛЬНУЮ категорию каталога
-// (resolveCategoryHref) — иначе ссылка вела бы на несуществующий slug и пустой
-// каталог. Графика/подпись/статы — фирменный декор, остаются.
-const INFOGRAPHICS = [
-  {
-    hint: "suits",
-    label: "Костюмы",
-    stats: ["3 кроя", "Premium ткань"],
-    Graphic: SuitsGraphic,
-  },
-  {
-    hint: "coats",
-    label: "Халаты",
-    stats: ["4 длины", "Клинический крой"],
-    Graphic: CoatsGraphic,
-  },
-  {
-    hint: "accessories",
-    label: "Аксессуары",
-    stats: ["12+ позиций", "Минимализм"],
-    Graphic: AccessoriesGraphic,
-  },
-] as const;
+// Графика — фирменный ДЕКОР, а не иллюстрация конкретной категории: категории
+// приезжают из каталога любого магазина, поля под картинку у них в БД нет.
+// Раздаём по кругу, чтобы у каждой плитки был рисунок и соседние отличались.
+const GRAPHICS = [SuitsGraphic, CoatsGraphic, AccessoriesGraphic] as const;
+
+/** Сколько плиток показываем: больше — ряд из flex-1 схлопывается в полоски. */
+const MAX_TILES = 3;
 
 export function CategoryInfographics({
   categories = [],
 }: {
   categories?: AdmikCategoryDto[];
 }) {
+  // Категории верхнего уровня из РЕАЛЬНОГО каталога (порядок — sort из админки).
+  // Раньше плитки были захардкожены (Костюмы/Халаты/Аксессуары) и две из трёх
+  // вели в общий /catalog, потому что таких категорий в каталоге нет.
+  const tiles = topCategoryLinks(categories, MAX_TILES);
+
+  // Каталог пуст или не ответил (таймаут getCategories → []) — секции нет вовсе,
+  // иначе на главной висел бы заголовок «Категории» над пустотой.
+  if (tiles.length === 0) return null;
+
   return (
     <div className="flex flex-row items-stretch gap-2 md:gap-6 lg:gap-8">
-      {INFOGRAPHICS.map(({ hint, label, stats, Graphic }, i) => (
-        <Link
-          key={hint}
-          href={resolveCategoryHref(categories, hint)}
-          className="group flex flex-1 flex-col"
-        >
-          <InfographicCard index={i + 1} stats={stats}>
-            <Graphic />
-          </InfographicCard>
-          <p className="mt-2 min-h-[1.25rem] text-center text-[8px] uppercase tracking-[0.16em] text-muted group-hover:text-graphite transition-colors duration-700">
-            {label}
-          </p>
-        </Link>
-      ))}
+      {tiles.map(({ slug, name, description, href }, i) => {
+        const Graphic = GRAPHICS[i % GRAPHICS.length];
+        return (
+          <Link key={slug} href={href} className="group flex flex-1 flex-col">
+            <InfographicCard index={i + 1} description={description}>
+              <Graphic />
+            </InfographicCard>
+            <p className="mt-2 min-h-[1.25rem] text-center text-[8px] uppercase tracking-[0.16em] text-muted group-hover:text-graphite transition-colors duration-700">
+              {name}
+            </p>
+          </Link>
+        );
+      })}
     </div>
   );
 }
