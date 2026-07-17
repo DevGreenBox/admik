@@ -57,22 +57,6 @@ export interface HomeContent {
     linkLabel: string;
     linkHref: string;
   };
-  /**
-   * Блок фото-отзывов сообщества «ВЫ + THE CASE» на главной. По умолчанию СКРЫТ
-   * (enabled:false) — opt-in блок, как valuesStrip: магазин включает его и правит
-   * тексты/фото в админке без кода. Фото хранятся КЛЮЧАМИ S3 (photoKeys, не URL) —
-   * единый контракт с about.imageKeys/CMS; витрина резолвит ключ в URL на своей
-   * стороне. Пустой photoKeys → витрина показывает плейсхолдеры «Ваше фото».
-   */
-  reviews: {
-    enabled: boolean;
-    eyebrow: string;
-    title: string;
-    text: string;
-    photoKeys: string[];
-    ctaLabel: string;
-    ctaHref: string;
-  };
 }
 
 /**
@@ -146,17 +130,5 @@ export const HOME_DEFAULTS: HomeContent = {
     text: 'Премиальная медицинская форма для тех, кто ценит эстетику, функциональность и уверенность в профессии.',
     linkLabel: 'О бренде',
     linkHref: '/#about',
-  },
-  // Фото-отзывы «ВЫ + THE CASE» по умолчанию СКРЫТЫ (opt-in). Тексты — нейтральный
-  // дефолт витрины (страница /reviews), переопределяется в админке без кода.
-  // photoKeys пуст → витрина покажет плейсхолдеры «Ваше фото».
-  reviews: {
-    enabled: false,
-    eyebrow: 'Сообщество',
-    title: 'ВЫ + THE CASE',
-    text: 'Врачи и медперсонал в форме THE CASE. Поделитесь своим фото — напишите нам в Telegram, и оно появится здесь.',
-    photoKeys: [],
-    ctaLabel: 'Оставить отзыв',
-    ctaHref: '/reviews',
   },
 };

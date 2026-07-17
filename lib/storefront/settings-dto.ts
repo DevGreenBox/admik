@@ -55,20 +55,6 @@ export interface PublicHomeDto {
     linkLabel: string;
     linkHref: string;
   };
-  /**
-   * Фото-отзывы «ВЫ + THE CASE»: показ (enabled) + eyebrow/title/text + кнопка.
-   * Фото отдаём ПУБЛИЧНЫМИ URL (photos), сырые S3-ключи наружу не раскрываем
-   * (как about.imageUrls). По умолчанию блок скрыт.
-   */
-  reviews: {
-    enabled: boolean;
-    eyebrow: string;
-    title: string;
-    text: string;
-    photos: string[];
-    ctaLabel: string;
-    ctaHref: string;
-  };
 }
 
 /** Публичный DTO настроек магазина (наружу витрине). */
@@ -212,16 +198,6 @@ export function toPublicSettingsDto(
         items: eff.home.valuesStrip.items.map((i) => ({ ...i })),
       },
       philosophy: { ...eff.home.philosophy },
-      reviews: {
-        enabled: eff.home.reviews.enabled,
-        eyebrow: eff.home.reviews.eyebrow,
-        title: eff.home.reviews.title,
-        text: eff.home.reviews.text,
-        // Фото: ключи S3 → публичные URL (сырые ключи наружу не раскрываем).
-        photos: eff.home.reviews.photoKeys.map((k) => publicUrl(k)),
-        ctaLabel: eff.home.reviews.ctaLabel,
-        ctaHref: eff.home.reviews.ctaHref,
-      },
     },
     navigation: {
       header: eff.navigation.header.map((i) => ({ label: i.label, href: i.href })),

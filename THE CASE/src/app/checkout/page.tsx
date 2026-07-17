@@ -58,11 +58,10 @@ export default function CheckoutPage() {
   // Шаг 3 — оплата + серверный итог (quote).
   const [paymentMethod, setPaymentMethod] = useState(PAYMENT_METHODS[0]?.id ?? "card");
   const [quote, setQuote] = useState<AdmikQuoteDto | null>(null);
-  // Промокод: единый источник — store (введён в корзине, переносится сюда). Сервер
-  // подтверждает применённость/скидку (quote.promo / quote.discountTotal, anti-tamper).
+  // Промокод: вводится только в корзине, сюда приезжает через store — поля ввода на
+  // шаге оплаты нет. Сервер подтверждает применённость/скидку (quote.promo /
+  // quote.discountTotal, anti-tamper).
   const promoCode = useStore((s) => s.promoCode);
-  const setPromoCode = useStore((s) => s.setPromoCode);
-  const [applyingPromo, setApplyingPromo] = useState(false);
 
   const [form, setForm] = useState({ firstName: "", lastName: "", email: "", phone: "" });
   // Правка Ани2 #7: показывать подсветку незаполненных/неверных полей ПОСЛЕ первой
@@ -220,58 +219,22 @@ export default function CheckoutPage() {
     }
   };
 
-  // Применение промокода на шаге 3: пересчёт quote с текущим promoCode — итог/скидку
-  // считает сервер (anti-tamper), мы лишь показываем результат. Доставка уже выбрана,
-  // поэтому пересчёт идёт с тем же ПВЗ.
-  const applyPromo = async () => {
-    if (!deliveryReady) return;
-    setError("");
-    setApplyingPromo(true);
-    try {
-      const q = await quoteCart({
-        items: cartToItems(cart),
-        promoCode: promoCode.trim() || undefined,
-        delivery: buildDelivery(),
-      });
-      setQuote(q);
-    } catch (e) {
-      setError(e instanceof AdmikApiError ? e.message : "Не удалось применить промокод");
-    } finally {
-      setApplyingPromo(false);
-    }
-  };
-
-  // Снятие промокода (#26): очищаем поле и пересчитываем quote БЕЗ кода. Отдельный
-  // обработчик нужен, потому что setPromoCode("") применится асинхронно — здесь шлём
-  // promoCode: undefined явно, не полагаясь на устаревший стейт. Без этого снять
-  // применённую скидку было нельзя (кнопка «Применить» заблокирована на пустом поле).
-  const clearPromo = async () => {
-    if (!deliveryReady) return;
-    setPromoCode("");
-    setError("");
-    setApplyingPromo(true);
-    try {
-      const q = await quoteCart({
-        items: cartToItems(cart),
-        promoCode: undefined,
-        delivery: buildDelivery(),
-      });
-      setQuote(q);
-    } catch (e) {
-      setError(e instanceof AdmikApiError ? e.message : "Не удалось обновить итог");
-    } finally {
-      setApplyingPromo(false);
-    }
-  };
-
   const handleSubmit = async () => {
     if (!deliveryReady || !quote || !quote.fulfillable) return;
     // Нельзя оформлять, пока доставка не посчитана (явный available === false).
     if (quote.delivery?.available === false) return;
-    // Находка 19: поле промокода правили после применения, не нажав «Применить»
-    // заново — показанный итог посчитан по ДРУГОМУ коду. Не оформляем «вслепую»:
-    // требуем привести ввод в соответствие с применённым кодом (или очистить).
-    if (!isPromoInSync(promoCode, quote.promo)) return;
+    // Находка 19: код в store (введён в корзине) разошёлся с применённым сервером —
+    // например, протух за время между корзиной и оплатой. Показанный итог посчитан по
+    // другому коду, поэтому не оформляем «вслепую». Поля ввода здесь нет, снять код
+    // можно только в корзине — поэтому объясняем причину, а не молчим (иначе кнопка
+    // «Подтвердить заказ» выглядит сломанной).
+    if (!isPromoInSync(promoCode, quote.promo)) {
+      setError(
+        quote.promo?.reason ??
+          "Промокод больше недействителен. Вернитесь в корзину и уберите его.",
+      );
+      return;
+    }
     setError("");
     setLoading(true);
     try {
@@ -345,14 +308,9 @@ export default function CheckoutPage() {
   // отсутствует/undefined (старый контракт) — считаем расчёт доступным (мягкая
   // деградация). Нельзя платить за непосчитанную доставку → блокируем подтверждение.
   const deliveryUnavailable = quote?.delivery?.available === false;
-  // Находка 19: совпадает ли текущий ввод поля с применённым сервером кодом.
-  // Рассинхрон → показанный итог посчитан по другому коду: блокируем подтверждение
-  // и просим нажать «Применить» заново (или очистить поле).
-  const promoInSync = isPromoInSync(promoCode, quote?.promo);
-  const promoApplied = (quote?.promo?.applied ?? false) && promoInSync;
 
   return (
-    <div className="page-transition pt-16 md:pt-20 relative min-h-screen">
+    <div className="page-transition flush-footer pt-16 md:pt-20 relative">
       <div
         className="absolute inset-0 bg-cover bg-center opacity-[0.04] pointer-events-none"
         style={{ backgroundImage: "url(/images/checkout/workspace.webp)" }}
@@ -524,62 +482,6 @@ export default function CheckoutPage() {
               <OptionGroup title="Оплата" options={PAYMENT_METHODS} selected={paymentMethod}
                 onSelect={(m) => setPaymentMethod(m.id)} render={(m) => m.name} sub={(m) => m.description} />
 
-              <div>
-                <label htmlFor="promo-code" className="label-caps text-muted block mb-3">Промокод</label>
-                <div className="flex gap-3">
-                  <input
-                    id="promo-code"
-                    type="text"
-                    value={promoCode}
-                    onChange={(e) => setPromoCode(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        applyPromo();
-                      }
-                    }}
-                    placeholder="Введите промокод"
-                    autoCapitalize="characters"
-                    className="flex-1 border border-border px-4 py-3 text-sm uppercase tracking-wide focus:border-graphite outline-none transition-colors"
-                  />
-                  {/* На пустом поле «Применить» разблокирован, ЕСЛИ промокод уже
-                      применён — это снятие кода (пересчёт без скидки), #26. */}
-                  <Button variant="outline" size="md" disabled={applyingPromo || (promoCode.trim() === "" && !quote?.promo?.applied)} onClick={applyPromo}>
-                    {applyingPromo ? "Проверка..." : "Применить"}
-                  </Button>
-                </div>
-                {/* Статус из серверного quote.promo (anti-tamper) И только пока ввод
-                    совпадает с применённым кодом (находка 19): применён → подтверждаем. */}
-                {promoApplied && (
-                  <p className="text-[11px] text-muted mt-2">
-                    Промокод {quote?.promo?.code} применён.
-                  </p>
-                )}
-                {/* Снять применённый промокод одним кликом (#26). Показываем всегда,
-                    пока сервер считает код применённым — даже если поле уже изменили. */}
-                {quote?.promo?.applied && (
-                  <button
-                    type="button"
-                    onClick={clearPromo}
-                    disabled={applyingPromo}
-                    className="mt-2 text-[11px] text-muted underline hover:text-graphite transition-colors disabled:opacity-50"
-                  >
-                    Убрать промокод
-                  </button>
-                )}
-                {/* Поле правили после применения, не нажав «Применить» заново — итог
-                    на экране посчитан по другому коду. Просим переприменить/очистить. */}
-                {!promoInSync && (
-                  <p className="text-[11px] text-accent mt-2">
-                    Поле изменено — нажмите «Применить», чтобы пересчитать итог
-                    {promoCode.trim() === "" ? " (или подтвердите без промокода)" : ""}.
-                  </p>
-                )}
-                {promoInSync && !quote?.promo?.applied && promoCode.trim() !== "" && quote?.promo?.reason && (
-                  <p className="text-[11px] text-accent mt-2">{quote.promo.reason}</p>
-                )}
-              </div>
-
               <div className="bg-surface p-6 space-y-3">
                 <Row label="Товары" value={formatPrice(Number(quote?.itemsTotal ?? 0))} />
                 {Number(quote?.discountTotal ?? 0) > 0 && (
@@ -619,7 +521,7 @@ export default function CheckoutPage() {
               {error && <p className="text-sm text-accent">{error}</p>}
               <div className="flex gap-4">
                 <Button variant="outline" size="md" onClick={() => setStep(2)}>Назад</Button>
-                <Button variant="primary" size="lg" magnetic disabled={loading || !fulfillable || deliveryUnavailable || !promoInSync} onClick={handleSubmit} className="flex-1">
+                <Button variant="primary" size="lg" magnetic disabled={loading || !fulfillable || deliveryUnavailable} onClick={handleSubmit} className="flex-1">
                   {loading ? "Оформление..." : "Подтвердить заказ"}
                 </Button>
               </div>

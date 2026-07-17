@@ -22,7 +22,7 @@ const variants: Record<ButtonVariant, string> = {
 
 const sizes: Record<ButtonSize, string> = {
   sm: "px-6 py-2.5 text-[10px]",
-  md: "px-8 py-3.5 text-[10px]",
+  md: "px-5 py-3.5 text-[10px] sm:px-8",
   lg: "px-10 py-4 text-[10px] md:px-12 md:py-4",
 };
 
@@ -47,7 +47,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         whileTap={magnetic ? { opacity: 0.7 } : undefined}
         transition={{ duration: 0.4, ease: [0.22, 0.61, 0.36, 1] }}
         className={`
-          inline-flex items-center justify-center gap-2
+          inline-flex shrink-0 items-center justify-center gap-2
           uppercase tracking-[0.2em] font-normal
           transition-all duration-500
           disabled:opacity-30 disabled:cursor-not-allowed

@@ -26,20 +26,6 @@ export interface ResolvedHome {
   valuesStrip: { enabled: boolean; items: { title: string; text: string }[] };
   /** B3 — философия: надзаголовок/заголовок/абзац + ссылка. */
   philosophy: { eyebrow: string; title: string; text: string; linkLabel: string; linkHref: string };
-  /**
-   * Фото-отзывы сообщества «ВЫ + THE CASE» на главной. Показ (enabled) +
-   * eyebrow/title/text + фото (URL) + кнопка. По умолчанию СКРЫТ (opt-in, как
-   * valuesStrip). Пустой photos → витрина покажет плейсхолдеры «Ваше фото».
-   */
-  reviews: {
-    enabled: boolean;
-    eyebrow: string;
-    title: string;
-    text: string;
-    photos: string[];
-    ctaLabel: string;
-    ctaHref: string;
-  };
 }
 
 /**
@@ -89,18 +75,6 @@ export const HOME_FALLBACK: ResolvedHome = {
     text: 'Премиальная медицинская форма для тех, кто ценит эстетику, функциональность и уверенность в профессии.',
     linkLabel: 'О бренде',
     linkHref: '/#about',
-  },
-  // Фото-отзывы «ВЫ + THE CASE» по умолчанию СКРЫТЫ (opt-in). Тексты повторяют
-  // страницу /reviews; магазин переопределяет их в админке. Пустой photos →
-  // плейсхолдеры «Ваше фото» (как сейчас на /reviews).
-  reviews: {
-    enabled: false,
-    eyebrow: 'Сообщество',
-    title: 'ВЫ + THE CASE',
-    text: 'Врачи и медперсонал в форме THE CASE. Поделитесь своим фото — напишите нам в Telegram, и оно появится здесь.',
-    photos: [],
-    ctaLabel: 'Оставить отзыв',
-    ctaHref: '/reviews',
   },
 };
 
@@ -162,17 +136,6 @@ export function resolveHome(s: AdmikSettingsDto | null): ResolvedHome {
       text: clean(h.philosophy?.text) ?? HOME_FALLBACK.philosophy.text,
       linkLabel: clean(h.philosophy?.linkLabel) ?? HOME_FALLBACK.philosophy.linkLabel,
       linkHref: clean(h.philosophy?.linkHref) ?? HOME_FALLBACK.philosophy.linkHref,
-    },
-    reviews: {
-      // Показ управляется флагом из настроек (по умолчанию скрыто, opt-in). Тексты
-      // — пофилдовый фолбэк на дефолт витрины; photos — массив URL с фильтром пустых.
-      enabled: h.reviews?.enabled ?? HOME_FALLBACK.reviews.enabled,
-      eyebrow: clean(h.reviews?.eyebrow) ?? HOME_FALLBACK.reviews.eyebrow,
-      title: clean(h.reviews?.title) ?? HOME_FALLBACK.reviews.title,
-      text: clean(h.reviews?.text) ?? HOME_FALLBACK.reviews.text,
-      photos: (h.reviews?.photos ?? []).map((p) => (p ?? '').trim()).filter((p) => p.length > 0),
-      ctaLabel: clean(h.reviews?.ctaLabel) ?? HOME_FALLBACK.reviews.ctaLabel,
-      ctaHref: clean(h.reviews?.ctaHref) ?? HOME_FALLBACK.reviews.ctaHref,
     },
   };
 }

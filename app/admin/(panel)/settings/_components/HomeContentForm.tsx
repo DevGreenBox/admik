@@ -76,15 +76,6 @@ export function HomeContentForm({ home }: { home: EffectiveSettings['home'] }) {
   const [philText, setPhilText] = useState(home.philosophy.text ?? '');
   const [philLinkLabel, setPhilLinkLabel] = useState(home.philosophy.linkLabel ?? '');
   const [philLinkHref, setPhilLinkHref] = useState(home.philosophy.linkHref ?? '');
-  // reviews — фото-отзывы «ВЫ + THE CASE»: показ + тексты + фото (ключи) + кнопка.
-  const [reviewsEnabled, setReviewsEnabled] = useState(home.reviews.enabled);
-  const [reviewsEyebrow, setReviewsEyebrow] = useState(home.reviews.eyebrow ?? '');
-  const [reviewsTitle, setReviewsTitle] = useState(home.reviews.title ?? '');
-  const [reviewsText, setReviewsText] = useState(home.reviews.text ?? '');
-  const [reviewsPhotoKeys, setReviewsPhotoKeys] = useState((home.reviews.photoKeys ?? []).join('\n'));
-  const [reviewsCtaLabel, setReviewsCtaLabel] = useState(home.reviews.ctaLabel ?? '');
-  const [reviewsCtaHref, setReviewsCtaHref] = useState(home.reviews.ctaHref ?? '');
-
   function s(v: string): string | undefined {
     const t = v.trim();
     return t.length > 0 ? t : undefined;
@@ -126,15 +117,6 @@ export function HomeContentForm({ home }: { home: EffectiveSettings['home'] }) {
           text: s(philText),
           linkLabel: s(philLinkLabel),
           linkHref: s(philLinkHref),
-        },
-        reviews: {
-          enabled: reviewsEnabled,
-          eyebrow: s(reviewsEyebrow),
-          title: s(reviewsTitle),
-          text: s(reviewsText),
-          photoKeys: linesToArr(reviewsPhotoKeys),
-          ctaLabel: s(reviewsCtaLabel),
-          ctaHref: s(reviewsCtaHref),
         },
       },
     });
@@ -312,57 +294,6 @@ export function HomeContentForm({ home }: { home: EffectiveSettings['home'] }) {
                 placeholder="/#about" className={inputCls} />
             </div>
           </div>
-        </div>
-      </fieldset>
-
-      {/* Блок отзывов «ВЫ + THE CASE» — фото-отзывы сообщества на главной */}
-      <fieldset className="mb-6 rounded border border-gray-200 p-4">
-        <legend className="px-1 text-sm font-semibold text-gray-800">Блок отзывов «ВЫ + THE CASE»</legend>
-        <div className="grid grid-cols-1 gap-4">
-          <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
-            <input
-              type="checkbox"
-              checked={reviewsEnabled}
-              onChange={(e) => setReviewsEnabled(e.target.checked)}
-              className="h-4 w-4 rounded border-gray-300"
-            />
-            Показывать блок фото-отзывов на главной
-          </label>
-          <div>
-            <label htmlFor="home-reviews-eyebrow" className={labelCls}>Надзаголовок</label>
-            <input id="home-reviews-eyebrow" value={reviewsEyebrow} onChange={(e) => setReviewsEyebrow(e.target.value)}
-              placeholder="Сообщество" className={inputCls} />
-          </div>
-          <div>
-            <label htmlFor="home-reviews-title" className={labelCls}>Заголовок</label>
-            <input id="home-reviews-title" value={reviewsTitle} onChange={(e) => setReviewsTitle(e.target.value)}
-              placeholder="ВЫ + THE CASE" className={inputCls} />
-          </div>
-          <div>
-            <label htmlFor="home-reviews-text" className={labelCls}>Текст</label>
-            <textarea id="home-reviews-text" value={reviewsText} onChange={(e) => setReviewsText(e.target.value)}
-              rows={3} className={inputCls} />
-          </div>
-          <div>
-            <label htmlFor="home-reviews-photos" className={labelCls}>Фото отзывов (по одному адресу на строку)</label>
-            <textarea id="home-reviews-photos" value={reviewsPhotoKeys} onChange={(e) => setReviewsPhotoKeys(e.target.value)}
-              rows={3} className={inputCls} />
-            <ImageUploadButton label="Загрузить фото" onUploaded={(key) => setReviewsPhotoKeys((p) => (p ? `${p}\n${key}` : key))} />
-            <p className={hintCls}>Пусто — на витрине покажутся плейсхолдеры «Ваше фото».</p>
-          </div>
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <div>
-              <label htmlFor="home-reviews-cta-label" className={labelCls}>Текст кнопки</label>
-              <input id="home-reviews-cta-label" value={reviewsCtaLabel} onChange={(e) => setReviewsCtaLabel(e.target.value)}
-                placeholder="Оставить отзыв" className={inputCls} />
-            </div>
-            <div>
-              <label htmlFor="home-reviews-cta-href" className={labelCls}>Ссылка кнопки</label>
-              <input id="home-reviews-cta-href" value={reviewsCtaHref} onChange={(e) => setReviewsCtaHref(e.target.value)}
-                placeholder="/reviews" className={inputCls} />
-            </div>
-          </div>
-          <p className={hintCls}>Блок показывается на главной, только если включён флажок выше. Пустые поля — значения по умолчанию.</p>
         </div>
       </fieldset>
 

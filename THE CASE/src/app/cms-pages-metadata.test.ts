@@ -60,23 +60,3 @@ describe("#29 payment generateMetadata — SEO из CMS с фолбэком", ()
     expect(typeof m.description).toBe("string");
   });
 });
-
-describe("#29 reviews generateMetadata — SEO из CMS с фолбэком", () => {
-  it("берёт title/description из page.meta", async () => {
-    getCmsPage.mockResolvedValue(
-      page({ slug: "reviews", meta: meta({ title: "Отзывы клиентов", description: "Фотоотзывы" }) }),
-    );
-    const { generateMetadata } = await import("@/app/reviews/page");
-    const m = await generateMetadata();
-    expect(m.title).toBe("Отзывы клиентов");
-    expect(m.description).toBe("Фотоотзывы");
-  });
-
-  it("страницы нет (null) → статический фолбэк страницы", async () => {
-    getCmsPage.mockResolvedValue(null);
-    const { generateMetadata } = await import("@/app/reviews/page");
-    const m = await generateMetadata();
-    expect(m.title).toBe("ВЫ + THE CASE — отзывы");
-    expect(typeof m.description).toBe("string");
-  });
-});

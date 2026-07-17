@@ -59,15 +59,6 @@ function dto(over: Partial<AdmikSettingsDto> = {}): AdmikSettingsDto {
       delivery: { items: [] },
       valuesStrip: { enabled: false, items: [] },
       philosophy: { eyebrow: '', title: '', text: '', linkLabel: '', linkHref: '' },
-      reviews: {
-        enabled: false,
-        eyebrow: '',
-        title: '',
-        text: '',
-        photos: [],
-        ctaLabel: '',
-        ctaHref: '',
-      },
     },
     navigation: { header: [], footer: [] },
     ...over,
@@ -288,88 +279,6 @@ describe('resolveHome', () => {
       linkLabel: 'L',
       linkHref: '/x',
     });
-  });
-
-  // Блок фото-отзывов «ВЫ + THE CASE»: по умолчанию скрыт (opt-in), как valuesStrip.
-  it('null → блок отзывов скрыт (HOME_FALLBACK.reviews.enabled = false, title «ВЫ + THE CASE»)', () => {
-    expect(resolveHome(null).reviews.enabled).toBe(false);
-    expect(HOME_FALLBACK.reviews.enabled).toBe(false);
-    expect(HOME_FALLBACK.reviews.title).toBe('ВЫ + THE CASE');
-    expect(HOME_FALLBACK.reviews.photos).toEqual([]);
-  });
-
-  it('пустой reviews в настройках → фолбэк по полям (title «ВЫ + THE CASE»)', () => {
-    // dto().home.reviews имеет пустые eyebrow/title/text/ctaLabel/ctaHref и photos:[]
-    const h = resolveHome(dto());
-    expect(h.reviews).toEqual(HOME_FALLBACK.reviews);
-    expect(h.reviews.enabled).toBe(false);
-    expect(h.reviews.title).toBe(HOME_FALLBACK.reviews.title);
-    expect(h.reviews.photos).toEqual([]);
-  });
-
-  it('reviews enabled+поля+фото из настроек проброшены (переопределяют дефолт)', () => {
-    const s = dto({
-      home: {
-        ...dto().home,
-        reviews: {
-          enabled: true,
-          eyebrow: 'Наши клиенты',
-          title: 'ВЫ + ACME',
-          text: 'Реальные фото клиентов.',
-          photos: ['https://cdn/r1.webp', 'https://cdn/r2.webp'],
-          ctaLabel: 'Прислать фото',
-          ctaHref: '/contacts',
-        },
-      },
-    });
-    const h = resolveHome(s);
-    expect(h.reviews.enabled).toBe(true);
-    expect(h.reviews.eyebrow).toBe('Наши клиенты');
-    expect(h.reviews.title).toBe('ВЫ + ACME');
-    expect(h.reviews.text).toBe('Реальные фото клиентов.');
-    expect(h.reviews.photos).toEqual(['https://cdn/r1.webp', 'https://cdn/r2.webp']);
-    expect(h.reviews.ctaLabel).toBe('Прислать фото');
-    expect(h.reviews.ctaHref).toBe('/contacts');
-  });
-
-  it('reviews enabled:true, пустые тексты → фолбэк по полю, флаг уважается', () => {
-    const s = dto({
-      home: {
-        ...dto().home,
-        reviews: {
-          enabled: true,
-          eyebrow: '',
-          title: '',
-          text: '',
-          photos: [],
-          ctaLabel: '',
-          ctaHref: '',
-        },
-      },
-    });
-    const h = resolveHome(s);
-    expect(h.reviews.enabled).toBe(true); // флаг из настроек уважается
-    expect(h.reviews.title).toBe(HOME_FALLBACK.reviews.title); // пусто → фолбэк
-    expect(h.reviews.eyebrow).toBe(HOME_FALLBACK.reviews.eyebrow);
-    expect(h.reviews.photos).toEqual([]);
-  });
-
-  it('reviews.photos фильтрует пустые/пробельные строки', () => {
-    const s = dto({
-      home: {
-        ...dto().home,
-        reviews: {
-          enabled: true,
-          eyebrow: 'e',
-          title: 't',
-          text: 'x',
-          photos: ['https://cdn/ok.webp', '', '   '],
-          ctaLabel: 'c',
-          ctaHref: '/c',
-        },
-      },
-    });
-    expect(resolveHome(s).reviews.photos).toEqual(['https://cdn/ok.webp']);
   });
 
   // about: дефолт витрины без слова Fashion (клиент просил «Comfort + Medicine»).

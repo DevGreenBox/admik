@@ -176,7 +176,7 @@ export default function CartPage() {
                     onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); applyPromo(); } }}
                     placeholder="Введите промокод"
                     autoCapitalize="characters"
-                    className="flex-1 border border-border px-4 py-3 text-sm uppercase tracking-wide focus:border-graphite outline-none transition-colors"
+                    className="min-w-0 flex-1 border border-border px-4 py-3 text-sm uppercase tracking-wide focus:border-graphite outline-none transition-colors"
                   />
                   <Button variant="outline" size="md" disabled={applying || (promoInput.trim() === "" && discount === 0)} onClick={applyPromo}>
                     {applying ? "Проверка..." : "Применить"}

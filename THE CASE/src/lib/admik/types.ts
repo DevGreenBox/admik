@@ -309,19 +309,6 @@ export interface AdmikHomeDto {
     linkLabel: string;
     linkHref: string;
   };
-  /**
-   * Фото-отзывы «ВЫ + THE CASE»: показ (enabled) + eyebrow/title/text + кнопка.
-   * Фото приходят публичными URL (photos); по умолчанию блок скрыт.
-   */
-  reviews: {
-    enabled: boolean;
-    eyebrow: string;
-    title: string;
-    text: string;
-    photos: string[];
-    ctaLabel: string;
-    ctaHref: string;
-  };
 }
 
 export interface AdmikSettingsDto {
