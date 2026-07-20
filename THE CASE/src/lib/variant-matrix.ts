@@ -278,3 +278,29 @@ export function colorUnavailableLabel(option: ColorOption): string | null {
   if (option.available) return null;
   return `Цвет ${option.value} — нет в наличии`;
 }
+
+/** Как показывать цвет на карточке: селектором, статичной подписью или никак. */
+export type ColorDisplayMode =
+  | { mode: "selector" }
+  | { mode: "static"; value: string }
+  | { mode: "none" };
+
+/**
+ * Режим показа цвета (совместимость со «старой» раскладкой данных).
+ *
+ * Цвет как ВАРИАНТНАЯ ось появился в спринте B. У магазина, который ещё не
+ * перевёл каталог, цвет лежит атрибутом ТОВАРА — тогда вариантных опций нет,
+ * и блок цвета молча исчезал бы с карточки (регрессия, пойманная на проде).
+ *
+ * Товарный цвет НЕЛЬЗЯ подмешивать в опции: под него нет ни одного варианта,
+ * опция пришла бы с available=false, needsColor встал бы в true и кнопка
+ * «В корзину» заблокировалась бы навсегда. Поэтому фолбэк — только показ.
+ */
+export function colorDisplayMode(
+  colorOptions: readonly ColorOption[],
+  productColor: string | null | undefined,
+): ColorDisplayMode {
+  if (colorOptions.length > 0) return { mode: "selector" };
+  const value = (productColor ?? "").trim();
+  return value ? { mode: "static", value } : { mode: "none" };
+}

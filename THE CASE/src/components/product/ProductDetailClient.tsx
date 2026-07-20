@@ -12,6 +12,7 @@ import {
   clampQuantity,
   colorUnavailableLabel,
   listColors,
+  colorDisplayMode,
   listSizes,
   selectColor,
   selectSize,
@@ -53,6 +54,13 @@ export function ProductDetailClient({ product, related, sizeCharts }: ProductDet
   const colorOptions = useMemo(
     () => listColors(product.variants, product.colors),
     [product.variants, product.colors],
+  );
+
+  // Селектор, статичная подпись или ничего — решает чистая функция (покрыта
+  // тестами): у магазина, где цвет ещё атрибут товара, блок иначе исчезает.
+  const colorDisplay = useMemo(
+    () => colorDisplayMode(colorOptions, product.color),
+    [colorOptions, product.color],
   );
 
   const [selection, setSelection] = useState<ResolvedSelection<StorefrontVariant>>(() =>
@@ -209,9 +217,31 @@ export function ProductDetailClient({ product, related, sizeCharts }: ProductDet
               </div>
               <p className="body-editorial">{product.description || DEFAULT_DESCRIPTION}</p>
 
+              {/* Цвет, заведённый ещё атрибутом ТОВАРА (каталог не переведён на
+                  вариантные цвета): показываем подписью, как было до спринта B.
+                  В ось выбора не подмешиваем — под него нет вариантов, и кнопка
+                  «В корзину» заблокировалась бы навсегда (см. colorDisplayMode). */}
+              {colorDisplay.mode === "static" && (
+                <div>
+                  <p className="mb-4 text-[10px] uppercase tracking-[0.2em]">
+                    Цвет <span className="text-muted">: {colorDisplay.value}</span>
+                  </p>
+                  <span
+                    className="inline-block h-9 w-9 rounded-full border-2 border-border p-1"
+                    aria-label={colorDisplay.value}
+                    title={colorDisplay.value}
+                  >
+                    <span
+                      className="block h-full w-full rounded-full border border-border"
+                      style={{ backgroundColor: colorHex(colorDisplay.value, null) }}
+                    />
+                  </span>
+                </div>
+              )}
+
               {/* Цвет = вариантная ось: настоящий выбор свотчем (стиль — как в
                   фильтре каталога). Распроданный цвет дизейблится с причиной. */}
-              {colorOptions.length > 0 && (
+              {colorDisplay.mode === "selector" && (
                 <div>
                   <p className="mb-4 text-[10px] uppercase tracking-[0.2em]">
                     Цвет{" "}

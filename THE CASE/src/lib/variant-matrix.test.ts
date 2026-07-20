@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  colorDisplayMode,
   listColors,
   listSizes,
   hasColors,
@@ -320,5 +321,42 @@ describe("colorUnavailableLabel", () => {
     expect(colorUnavailableLabel({ value: "Чёрный", hex: null, available: false })).toBe(
       "Цвет Чёрный — нет в наличии",
     );
+  });
+});
+
+/**
+ * Режим показа цвета — защита от регрессии при переходе на вариантные цвета.
+ *
+ * До спринта B цвет жил АТРИБУТОМ ТОВАРА и рисовался подписью «Цвет: Белый».
+ * После перехода блок стал собираться из вариантных цветов, и у магазина, где
+ * цвет ещё заведён по-старому, он молча исчез с карточки — проверено на проде.
+ *
+ * Подсунуть товарный цвет в список опций НЕЛЬЗЯ: под него нет ни одного варианта,
+ * значит опция придёт с available=false, needsColor встанет в true и кнопка
+ * «В корзину» заблокируется навсегда. Поэтому фолбэк — ТОЛЬКО показ, не ось выбора.
+ */
+describe("variant-matrix — colorDisplayMode", () => {
+  const opt = (value: string) => ({ value, hex: null, available: true });
+
+  it("есть вариантные цвета → селектор", () => {
+    expect(colorDisplayMode([opt("Белый"), opt("Графит")], null)).toEqual({ mode: "selector" });
+  });
+
+  it("вариантных цветов нет, но у товара задан цвет → статичная подпись (как было до спринта B)", () => {
+    expect(colorDisplayMode([], "Белый")).toEqual({ mode: "static", value: "Белый" });
+  });
+
+  it("вариантные цвета важнее товарного — селектор, а не подпись", () => {
+    expect(colorDisplayMode([opt("Графит")], "Белый")).toEqual({ mode: "selector" });
+  });
+
+  it("цвета нет нигде → блок не рисуем", () => {
+    expect(colorDisplayMode([], null)).toEqual({ mode: "none" });
+    expect(colorDisplayMode([], undefined)).toEqual({ mode: "none" });
+    expect(colorDisplayMode([], "   ")).toEqual({ mode: "none" });
+  });
+
+  it("товарный цвет обрезается по краям", () => {
+    expect(colorDisplayMode([], "  Белый  ")).toEqual({ mode: "static", value: "Белый" });
   });
 });
