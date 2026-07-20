@@ -57,6 +57,26 @@ export interface PublicHomeDto {
   };
 }
 
+/**
+ * Публичная размерная сетка. Набор колонок ПРОИЗВОЛЕН (задаётся в админке),
+ * строка — плоский словарь columnKey → значение ячейки. `genders` — значения
+ * атрибута товара `gender`, к которым применима сетка; пустой массив = «всегда».
+ */
+export interface PublicSizeChartDto {
+  id: string;
+  title: string;
+  note?: string;
+  genders: string[];
+  columns: { key: string; label: string }[];
+  rows: Record<string, string>[];
+}
+
+/** Публичный блок размерных сеток: сетки + общая сноска под таблицей. */
+export interface PublicSizeChartsDto {
+  charts: PublicSizeChartDto[];
+  footnote?: string;
+}
+
 /** Публичный DTO настроек магазина (наружу витрине). */
 export interface PublicSettingsDto {
   branding: {
@@ -115,6 +135,11 @@ export interface PublicSettingsDto {
     header: { label: string; href: string }[];
     footer: { title: string; links: { label: string; href: string }[] }[];
   };
+  /**
+   * Размерные сетки магазина — публичные (показываются на карточке товара).
+   * Пустой charts = сеток нет, витрина не рисует блок «Размерная сетка».
+   */
+  sizeCharts: PublicSizeChartsDto;
 }
 
 /**
@@ -205,6 +230,20 @@ export function toPublicSettingsDto(
         title: c.title,
         links: c.links.map((l) => ({ label: l.label, href: l.href })),
       })),
+    },
+    // Размерные сетки публичны целиком (структура таблицы + сноска). Копируем
+    // значения, а не ссылки на объекты настроек, чтобы DTO нельзя было изменить
+    // «сквозь» кэш эффективных настроек.
+    sizeCharts: {
+      charts: eff.sizeCharts.charts.map((c) => ({
+        id: c.id,
+        title: c.title,
+        ...(c.note ? { note: c.note } : {}),
+        genders: [...c.genders],
+        columns: c.columns.map((col) => ({ key: col.key, label: col.label })),
+        rows: c.rows.map((r) => ({ ...r })),
+      })),
+      ...(eff.sizeCharts.footnote ? { footnote: eff.sizeCharts.footnote } : {}),
     },
   };
 }

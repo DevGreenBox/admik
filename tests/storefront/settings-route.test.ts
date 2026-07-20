@@ -20,6 +20,7 @@ function fakeEffective(): EffectiveSettings {
     home: HOME_DEFAULTS,
     navigation: { header: [], footer: [] },
     access: { singleUserMode: false },
+    sizeCharts: { charts: [] },
     branding: {
       shopName: 'The Case',
       logoUrl: null,

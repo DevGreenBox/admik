@@ -16,6 +16,7 @@ function makeEffective(): EffectiveSettings {
     home: HOME_DEFAULTS,
     navigation: { header: [], footer: [] },
     access: { singleUserMode: false },
+    sizeCharts: { charts: [] },
     branding: {
       shopName: 'Gang Auto',
       logoUrl: 'https://cdn/logo.png',
@@ -103,5 +104,49 @@ describe('storefront/settings-dto — toPublicSettingsDto', () => {
     expect(dto.contacts.phone).toBeNull();
     expect(dto.contacts.socials).toEqual([]);
     expect(dto.legalEntity.name).toBeNull();
+  });
+
+  it('sizeCharts попадают в публичный DTO целиком (белый список) и копируются по значению', () => {
+    const eff = makeEffective();
+    eff.sizeCharts = {
+      charts: [
+        {
+          id: 'women',
+          title: 'Женская',
+          note: 'рост 165-172',
+          genders: ['women', 'женский'],
+          columns: [
+            { key: 'size', label: 'Размер' },
+            { key: 'chest', label: 'Грудь' },
+          ],
+          rows: [{ size: '42 XS', chest: '84' }],
+        },
+      ],
+      footnote: 'Отклонение ±2 см.',
+    };
+
+    const dto = toPublicSettingsDto(eff);
+
+    expect(dto.sizeCharts.charts).toHaveLength(1);
+    expect(dto.sizeCharts.charts[0]).toEqual({
+      id: 'women',
+      title: 'Женская',
+      note: 'рост 165-172',
+      genders: ['women', 'женский'],
+      columns: [
+        { key: 'size', label: 'Размер' },
+        { key: 'chest', label: 'Грудь' },
+      ],
+      rows: [{ size: '42 XS', chest: '84' }],
+    });
+    expect(dto.sizeCharts.footnote).toBe('Отклонение ±2 см.');
+    // Копия, а не ссылка: правка DTO не должна портить кэш эффективных настроек.
+    expect(dto.sizeCharts.charts[0]!.rows[0]).not.toBe(eff.sizeCharts.charts[0]!.rows[0]);
+    expect(dto.sizeCharts.charts[0]!.genders).not.toBe(eff.sizeCharts.charts[0]!.genders);
+  });
+
+  it('без настроенных сеток DTO отдаёт пустой charts (платформенный дефолт)', () => {
+    const dto = toPublicSettingsDto(makeEffective());
+    expect(dto.sizeCharts).toEqual({ charts: [] });
   });
 });

@@ -4,28 +4,33 @@ import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Ruler } from "lucide-react";
+import { selectSizeCharts, getCell, type SizeChart } from "@/lib/size-table";
 
-const SIZE_TABLE = {
-  women: [
-    { size: "XS", chest: "80–84", waist: "60–64", hips: "86–90" },
-    { size: "S", chest: "84–88", waist: "64–68", hips: "90–94" },
-    { size: "M", chest: "88–92", waist: "68–72", hips: "94–98" },
-    { size: "L", chest: "92–96", waist: "72–76", hips: "98–102" },
-    { size: "XL", chest: "96–100", waist: "76–80", hips: "102–106" },
-  ],
-  men: [
-    { size: "S", chest: "88–92", waist: "76–80", hips: "92–96" },
-    { size: "M", chest: "92–96", waist: "80–84", hips: "96–100" },
-    { size: "L", chest: "96–100", waist: "84–88", hips: "100–104" },
-    { size: "XL", chest: "100–104", waist: "88–92", hips: "104–108" },
-    { size: "XXL", chest: "104–108", waist: "92–96", hips: "108–112" },
-  ],
-};
+/**
+ * Таблица размеров товара. Данные приходят ИЗ НАСТРОЕК магазина (`sizeCharts`),
+ * зашитых сеток здесь нет — колонки рендерятся из `chart.columns`, поэтому один
+ * компонент обслуживает любой ассортимент и любой магазин на платформе.
+ *
+ * Логика выбора сетки по полу живёт в чистом модуле `@/lib/size-table`
+ * (selectSizeCharts) и покрыта юнит-тестами; компонент только рендерит.
+ * Если подходящих сеток нет — не рендерится НИЧЕГО, включая кнопку.
+ */
+interface SizeGuideProps {
+  /** Сетки из настроек магазина (как есть, без предварительной фильтрации). */
+  charts: SizeChart[] | null | undefined;
+  /** Пол товара (произвольная строка из атрибутов); определяет выбор сетки. */
+  gender?: string | null;
+  /** Общая сноска под таблицей из настроек. */
+  footnote?: string;
+}
 
-export function SizeGuide({ gender }: { gender: "women" | "men" | "unisex" }) {
+export function SizeGuide({ charts, gender, footnote }: SizeGuideProps) {
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
-  const table = gender === "men" ? SIZE_TABLE.men : SIZE_TABLE.women;
+  const [activeId, setActiveId] = useState<string | null>(null);
+
+  const visible = selectSizeCharts(charts, gender);
+  const active = visible.find((c) => c.id === activeId) ?? visible[0] ?? null;
 
   // Портал нужен, чтобы fixed-модалка не зависела от трансформированных предков
   // (FadeIn/framer-motion на карточке товара) и центрировалась по вьюпорту,
@@ -41,6 +46,9 @@ export function SizeGuide({ gender }: { gender: "women" | "men" | "unisex" }) {
       document.body.style.overflow = prev;
     };
   }, [open]);
+
+  // Магазин не заполнил размерные сетки — таблицы (и кнопки) нет вовсе.
+  if (!active) return null;
 
   const modal = (
     <AnimatePresence>
@@ -63,41 +71,70 @@ export function SizeGuide({ gender }: { gender: "women" | "men" | "unisex" }) {
               <div className="flex justify-between items-start mb-6">
                 <div>
                   <div className="accent-line-sm mb-3" />
-                  <h3 className="heading-md">Таблица размеров</h3>
-                  <p className="text-[10px] text-muted mt-2 tracking-wide">Все измерения в см</p>
+                  <h3 className="heading-md">{active.title || "Таблица размеров"}</h3>
+                  {active.note && (
+                    <p className="text-[10px] text-muted mt-2 tracking-wide">{active.note}</p>
+                  )}
                 </div>
                 <button onClick={() => setOpen(false)} aria-label="Закрыть">
                   <X className="h-5 w-5" strokeWidth={1.5} />
                 </button>
               </div>
 
+              {/* Несколько сеток (женская/мужская/обувь…) — переключаются вкладками. */}
+              {visible.length > 1 && (
+                <div className="flex flex-wrap gap-2 mb-6">
+                  {visible.map((chart) => (
+                    <button
+                      key={chart.id}
+                      onClick={() => setActiveId(chart.id)}
+                      aria-pressed={chart.id === active.id}
+                      className={
+                        chart.id === active.id
+                          ? "border border-graphite px-3 py-2 text-[10px] uppercase tracking-[0.12em]"
+                          : "border border-border px-3 py-2 text-[10px] uppercase tracking-[0.12em] text-muted hover:text-graphite transition-colors"
+                      }
+                    >
+                      {chart.title}
+                    </button>
+                  ))}
+                </div>
+              )}
+
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border">
-                      {["Размер", "Грудь", "Талия", "Бёдра"].map((h) => (
-                        <th key={h} className="text-left py-3 text-[10px] uppercase tracking-[0.12em] text-muted font-normal">
-                          {h}
+                      {active.columns.map((col) => (
+                        <th
+                          key={col.key}
+                          className="text-left py-3 text-[10px] uppercase tracking-[0.12em] text-muted font-normal"
+                        >
+                          {col.label}
                         </th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {table.map((row) => (
-                      <tr key={row.size} className="border-b border-border/50">
-                        <td className="py-3 font-medium">{row.size}</td>
-                        <td className="py-3 text-muted">{row.chest}</td>
-                        <td className="py-3 text-muted">{row.waist}</td>
-                        <td className="py-3 text-muted">{row.hips}</td>
+                    {active.rows.map((row, i) => (
+                      <tr key={i} className="border-b border-border/50">
+                        {active.columns.map((col, ci) => (
+                          <td
+                            key={col.key}
+                            className={ci === 0 ? "py-3 font-medium" : "py-3 text-muted"}
+                          >
+                            {getCell(row, col.key)}
+                          </td>
+                        ))}
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
 
-              <p className="text-[10px] text-muted mt-6 leading-relaxed">
-                Допустимое отклонение ±2 см. Для точного подбора сравните с вашей любимой одеждой аналогичного типа.
-              </p>
+              {footnote && (
+                <p className="text-[10px] text-muted mt-6 leading-relaxed">{footnote}</p>
+              )}
             </motion.div>
           </motion.div>
         )}

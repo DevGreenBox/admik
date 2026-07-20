@@ -8,6 +8,7 @@ import {
   type StorefrontProduct,
 } from "@/lib/admik";
 import { ProductDetailClient } from "@/components/product/ProductDetailClient";
+import { getStoreSettings } from "@/lib/store-settings";
 
 export const dynamic = "force-dynamic";
 
@@ -62,5 +63,16 @@ export default async function ProductPage({
     related = [];
   }
 
-  return <ProductDetailClient product={product} related={related} />;
+  // Размерные сетки едут в общих настройках магазина. getStoreSettings мемоизирован
+  // через react cache() — layout уже дёрнул его в этом же рендере, так что ОТДЕЛЬНОГО
+  // сетевого запроса за таблицей не возникает (витрина force-dynamic).
+  const settings = await getStoreSettings();
+
+  return (
+    <ProductDetailClient
+      product={product}
+      related={related}
+      sizeCharts={settings?.sizeCharts}
+    />
+  );
 }

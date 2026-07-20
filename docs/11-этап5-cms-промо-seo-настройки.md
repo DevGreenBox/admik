@@ -333,6 +333,14 @@ canonical/sitemap/og:url. **Никаких `process.env`-доменов в пр�
 - `/admin/settings/seo` — форма (site_name, site_url, title_template, default_description,
   default_og_image, twitter_site, robots_extra, чекбокс `noindex_site` для staging). Guard
   `settings.manage`.
+- `/admin/settings/size-charts` — редактор размерных сеток (ключ настроек `size_charts`). Guard
+  `settings.manage`, **core-раздел без гейта по модулю** (иначе self-lock раздела настроек).
+  Произвольное число сеток; у каждой — `id`/`title`/`note`, список `genders` (пусто = «подходит
+  всегда»), ПРОИЗВОЛЬНЫЙ набор колонок (`key`/`label`) и строки-ячейки; плюс общая `footnote`.
+  Ничего не зашито в код — новый магазин заводит свои сетки настройкой. Ссылка на раздел — из
+  `/admin/settings` (секция «Размерные сетки») + кнопка сброса к дефолту (`{ charts: [] }`).
+  Сборка значения — чистая `buildSizeChartsPayload` (`lib/settings/size-charts-form.ts`,
+  тест `tests/settings/size-charts-form.test.ts`); мутация — `updateSizeChartsAction`.
 - **`<SeoFieldset>`** — один переиспользуемый компонент для всех 4 сущностей: `seoTitle`, `seoDescription`
   (с превью-сниппетом Google), `ogTitle/ogDescription/ogImage`, `canonicalUrl` (плейсхолдер = автоген),
   чекбокс `noindex`. Встраивается в формы товара/категории/бренда (`catalog.write`) и CMS-страницы

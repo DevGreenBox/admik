@@ -8,6 +8,8 @@
  * См. docs/13-сращивание-the-case.md (§3 контракт данных).
  */
 
+import type { SizeChartsSettings } from '@/lib/size-table';
+
 // ---------------------------------------------------------------------------
 // DTO бэкенда Admik (как отдаёт /api/storefront/v1).
 // ---------------------------------------------------------------------------
@@ -363,6 +365,11 @@ export interface AdmikSettingsDto {
     header: { label: string; href: string }[];
     footer: { title: string; links: { label: string; href: string }[] }[];
   };
+  /** Размерные сетки (настройка `size_charts`). Опционально: бэкенд магазина
+   *  может не отдавать поле — тогда undefined и витрина не рендерит таблицу
+   *  размеров вовсе (никаких зашитых сеток). Колонки произвольны — см.
+   *  `@/lib/size-table` (SizeChartsSettings — то же самое поле «один в один»). */
+  sizeCharts?: SizeChartsSettings | null;
 }
 
 // ---------------------------------------------------------------------------

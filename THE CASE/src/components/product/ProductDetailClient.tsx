@@ -10,6 +10,7 @@ import { variantUnavailableLabel } from "@/lib/variant-availability";
 import { colorHex } from "@/lib/color-swatch";
 import { useStore, useHydrated } from "@/lib/store";
 import type { StorefrontProduct, StorefrontVariant } from "@/lib/admik";
+import type { SizeChartsSettings } from "@/lib/size-table";
 import { Button } from "@/components/ui/Button";
 import { FadeIn } from "@/components/ui/Animations";
 import { PriceDisplay } from "@/components/ui/PriceDisplay";
@@ -22,6 +23,9 @@ import { HEADER_OFFSET } from "@/components/layout/Header";
 interface ProductDetailClientProps {
   product: StorefrontProduct;
   related: StorefrontProduct[];
+  /** Размерные сетки из настроек магазина (settings.sizeCharts). Приходят с
+   *  сервера вместе со страницей — отдельного запроса за таблицей нет. */
+  sizeCharts?: SizeChartsSettings | null;
 }
 
 // Дефолты «Состав и уход» / описания (правки клиента): показываются, если у
@@ -34,7 +38,7 @@ const DEFAULT_CARE =
   "Не подвергать химической чистке и не отбеливать. Гладить с изнаночной стороны при температуре не выше 110 °С.";
 
 
-export function ProductDetailClient({ product, related }: ProductDetailClientProps) {
+export function ProductDetailClient({ product, related, sizeCharts }: ProductDetailClientProps) {
   const [selectedVariant, setSelectedVariant] = useState<StorefrontVariant | null>(null);
   const [quantity, setQuantity] = useState(1);
   const [added, setAdded] = useState(false);
@@ -188,7 +192,11 @@ export function ProductDetailClient({ product, related }: ProductDetailClientPro
                     <p className="text-[10px] uppercase tracking-[0.2em]">
                       Размер {!selectedVariant && <span className="text-muted">*</span>}
                     </p>
-                    <SizeGuide gender={product.gender} />
+                    <SizeGuide
+                      charts={sizeCharts?.charts}
+                      gender={product.gender}
+                      footnote={sizeCharts?.footnote}
+                    />
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {product.variants.map((variant) => {
@@ -219,6 +227,19 @@ export function ProductDetailClient({ product, related }: ProductDetailClientPro
                       );
                     })}
                   </div>
+                </div>
+              )}
+
+              {/* Товар без вариантов тоже должен показывать таблицу размеров: у него
+                  нет блока «Размер», где живёт кнопка, поэтому рендерим её отдельно.
+                  Компонент сам ничего не отрисует, если сеток в настройках нет. */}
+              {!hasVariants && (
+                <div>
+                  <SizeGuide
+                    charts={sizeCharts?.charts}
+                    gender={product.gender}
+                    footnote={sizeCharts?.footnote}
+                  />
                 </div>
               )}
 
