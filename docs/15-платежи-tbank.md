@@ -109,10 +109,60 @@ if (m.isMock) {
 }
 ```
 
-Источник истины — `manager.isMock` (эквивалент `isTbankMock()` / пустой `TBANK_PASSWORD`).
-`client` в mock-режиме НЕ инстанцируется (обращение кидает `TbankError` — баг вызывающего). Транспорт
-остаётся чистым (без веток «если mock»), mock-данные живут в `lib/payments/tbank/mock/*`. Это полностью
-повторяет решение СДЭК (см. `lib/cdek/client.ts` шапку «АРХИТЕКТУРНОЕ РЕШЕНИЕ» и `manager.ts`).
+Источник истины — `manager.isMock`. `client` в mock-режиме НЕ инстанцируется (обращение кидает
+`TbankError` — баг вызывающего). Транспорт остаётся чистым (без веток «если mock»), mock-данные
+живут в `lib/payments/tbank/mock/*`. Это полностью повторяет решение СДЭК (см. `lib/cdek/client.ts`
+шапку «АРХИТЕКТУРНОЕ РЕШЕНИЕ» и `manager.ts`).
+
+#### Fail-closed: mock в production запрещён (закрыта находка #2 аудита, 2026-07-20)
+
+**Чем был опасен fail-open.** В mock-режиме `confirmMockPayment` доводит заказ до
+`payment_status='paid'` тем же атомарным путём, что и настоящий webhook, а cron
+`reconcile-pending` через `mockGetState` возвращает `CONFIRMED` и массово метит `pending`-заказы
+оплаченными. Значит **потерянный при ротации или не проброшенный в контейнер `TBANK_PASSWORD`
+молча** превращал боевой магазин в демо-стенд: покупатель жмёт «Оплатить (демо)» → заказ
+`paid` → товар уходит в отгрузку без единого списания. Единственным следом был `console.warn`.
+
+**Как теперь.** Признак mock вычисляется **только** в `resolveTbankMock(config)`:
+
+```ts
+export function resolveTbankMock(config: TbankConfig): boolean {
+  const mock = !config.terminalKey || !config.password;
+  if (mock && !config.mockAllowed) throw new Error(TBANK_MOCK_IN_PRODUCTION_ERROR);
+  return mock;
+}
+// mockAllowed = NODE_ENV !== 'production' || TBANK_ALLOW_MOCK   (getTbankConfig)
+```
+
+| Окружение | Ключи заданы | `TBANK_ALLOW_MOCK` | Результат |
+|---|---|---|---|
+| dev / CI | нет | — | mock (свободно) |
+| production | **да** | — | боевой режим |
+| production | нет | `true` | mock (легальный демо-стенд, осознанное решение человека) |
+| production | нет | не задан / `false` | **исключение** `TBANK_MOCK_IN_PRODUCTION_ERROR` |
+
+Текст ошибки вынесен в константу и объясняет и причину, и починку — его читает администратор на
+проде. Бросает **любой** вход в платёжный контур, включая `getTbankManager()` (он трогает `isMock`
+при инициализации).
+
+> ### ⚠️ Урок: защита стояла в функции, через которую боевой трафик не идёт
+>
+> Первая версия фикса поставила проверку в **`isTbankMock()`**. А боевой путь оплаты
+> (`lib/payments/tbank/service.ts`) спрашивает **`TbankManager.isMock`** — вторую ветку, которая
+> считала признак **независимо**. Комментарии называли их эквивалентными, и они разошлись:
+> защита на боевом пути не срабатывала вообще.
+>
+> Обе ветки сведены в `resolveTbankMock`. **Правило на будущее:** прежде чем чинить защиту —
+> найдите ВСЕ места, где вычисляется тот же признак, и сведите их в одну функцию. Комментарий
+> «здесь то же самое» инвариантом не является. В тот же день тот же класс бага нашёлся в
+> `extractIp` вебхуков (ADR-020).
+>
+> Второй приём из этого фикса: признак `mockAllowed` едет **в конфиге**, а не читается из
+> `process.env` по месту — так его нельзя обойти ни одним потребителем, и инжектированный конфиг в
+> тестах ведёт себя ровно как боевой.
+
+**Тесты:** `tests/payments/tbank/config.test.ts`, `tests/payments/tbank/manager.test.ts` (обе
+ветки проверяются отдельно — именно потому, что однажды разошлись). ADR-021.
 
 ### 2.2 Отличия от СДЭК (важно учесть)
 
@@ -124,9 +174,17 @@ if (m.isMock) {
   **проверка `Token` в теле** (HMAC-подобная подпись на `Password`). IP-whitelist оставляем как
   доп. слой (опц., `TBANK_WEBHOOK_IPS`), но **главная** проверка — `Token`.
   **SECURITY (волна 4, баг B):** IP-whitelist аутентифицирует запрос **только за доверенным прокси**
-  (`TBANK_WEBHOOK_TRUST_PROXY=true`). Без trustProxy (дефолт) `extractIp` возвращает `''` сразу, НЕ
-  читая клиент-контролируемые `X-Forwarded-For`/`X-Real-IP`, — иначе подделкой заголовка из whitelist
-  атакующий обошёл бы IP-гейт. Эталон — порт CDEK-webhook (`extractIp` там тоже `if (!trustProxy) return ''`).
+  (`TBANK_WEBHOOK_TRUST_PROXY=true`). Без trustProxy (дефолт) извлечение IP возвращает `''` сразу, НЕ
+  читая клиент-контролируемые заголовки, — иначе подделкой заголовка из whitelist атакующий обошёл
+  бы IP-гейт.
+  **SECURITY (аудит 2026-07-18, #1/#3; исправлено 2026-07-20):** оба вебхука (Т-Банк и СДЭК) держали
+  по **своей копии** `extractIp` с **обратным** приоритетом заголовков — leftmost `X-Forwarded-For`
+  первым, `X-Real-IP` лишь fallback. Leftmost XFF подконтролен клиенту (прокси только **дописывает**
+  реальный IP справа), поэтому при `trustProxy=true` whitelist обходился заголовком
+  `X-Forwarded-For: <IP из whitelist>`. Копии сведены к общей `extractWebhookIp(headers, trustProxy)`
+  (`lib/server/request-ip.ts`), приоритет источников задаётся в одном месте — `normalizeClientIp`
+  (`X-Real-IP`, перезаписываемый Caddy, → fallback XFF), кандидат валидируется `isIP()`. Подробности
+  и обязательный порядок выкатки — **ADR-020**, `docs/02` «Эксплуатационные инварианты».
 - **Связь с заказом:** `Init.OrderId` = `orders.number` (человекочитаемый, уникальный), `Init.Amount` =
   `grand_total` в копейках. `PaymentId` Т-Банка сохраняем в `orders.payment_ref` (или в отдельную таблицу
   `tbank_payments`, см. §4.4).
@@ -152,10 +210,15 @@ if (m.isMock) {
 | `TBANK_SUCCESS_URL` | url, optional | редирект витрины при успехе |
 | `TBANK_FAIL_URL` | url, optional | редирект витрины при отказе |
 | `TBANK_WEBHOOK_IPS` | csv, optional | доп. IP-whitelist webhook (главная защита — Token); пустой допустим |
-| `TBANK_WEBHOOK_TRUST_PROXY` | bool, дефолт `false` | брать IP из `X-Forwarded-For` (за Caddy) |
+| `TBANK_WEBHOOK_TRUST_PROXY` | bool, дефолт `false` | запрос приходит через наш доверенный прокси → можно читать IP из заголовков (`extractWebhookIp`: приоритет `X-Real-IP`, XFF — fallback; при `false` возвращается `''` без чтения заголовков). См. ADR-020 |
 | `TBANK_REDIRECT_DUE_MIN` | int, дефолт напр. `60` | срок жизни ссылки/QR (мин) → `Init.RedirectDueDate` |
+| **`TBANK_ALLOW_MOCK`** | enum `true`/`false`/`1`/`0`, дефолт `false` | **ЯВНОЕ** разрешение mock-оплаты в production (легальный демо-стенд). Вне production не нужен. Без него production без боевых ключей **бросает** — см. §2.1 |
 
-> `isTbankMock()` = `true`, если пуст `TBANK_TERMINAL_KEY` **или** `TBANK_PASSWORD` (порт `isCdekMock`).
+> ⚠️ **`TBANK_ALLOW_MOCK` пока отсутствует в `.env.example`** — на боевом/демо-стенде задаётся
+> вручную в `.env` на сервере, после правки `docker compose restart app`.
+
+> `isTbankMock()` = `true`, если пуст `TBANK_TERMINAL_KEY` **или** `TBANK_PASSWORD` (порт `isCdekMock`),
+> **но в production без `TBANK_ALLOW_MOCK=true` вместо `true` бросает исключение** (§2.1, ADR-021).
 > Тестовый контур: `TBANK_BASE_URL=https://rest-api-test.tinkoff.ru/v2` + тестовые `TerminalKey`/`Password`
 > из ЛК (тестовый терминал). Для тестовой среды нужно добавить IP в whitelist тестовой среды через чат
 > в ЛК Т-Бизнес (**уточнить при подключении**).
@@ -165,9 +228,11 @@ if (m.isMock) {
 ```dotenv
 # -----------------------------------------------------------------------------
 # Т-БАНК ИНТЕРНЕТ-ЭКВАЙРИНГ (Этап 7, docs/15). ТРИ режима по заполненности ключей:
-#   1) MOCK (по умолчанию): TBANK_TERMINAL_KEY/TBANK_PASSWORD ПУСТЫ → сеть не дёргается,
-#      Init возвращает фейковый PaymentId + внутренний PaymentURL (demo-страница оплаты).
-#      Для CI/demo — заказ оформляется и «оплачивается» без боевого терминала.
+#   1) MOCK (по умолчанию ВНЕ production): TBANK_TERMINAL_KEY/TBANK_PASSWORD ПУСТЫ →
+#      сеть не дёргается, Init возвращает фейковый PaymentId + внутренний PaymentURL
+#      (demo-страница оплаты). Для CI/demo — заказ оформляется и «оплачивается» без
+#      боевого терминала. В production такой режим ЗАПРЕЩЁН (заказы стали бы «оплачены»
+#      бесплатно) и требует явного TBANK_ALLOW_MOCK=true — иначе приложение бросает.
 #   2) ТЕСТОВЫЙ КОНТУР (sandbox): TBANK_BASE_URL=https://rest-api-test.tinkoff.ru/v2
 #      + тестовые TerminalKey/Password из ЛК Т-Бизнес (тестовый терминал). Тестовая
 #      карта 4300 0000 0000 0777 / 11/22 / 123. IP добавить в whitelist тестовой среды.

@@ -636,10 +636,18 @@ export class PrintService {
    **обязателен** и сверяется ПЕРВЫМ (constant-time, `safeEqual` из `lib/storefront/order-dto.ts`).
    Неверный/отсутствующий ключ → `401` (жёсткий отказ; IP-слой НЕ перекрывает неверный секрет).
 2. **IP-whitelist — ДОП. слой, ТОЛЬКО за доверенным прокси.** `CDEK_WEBHOOK_IPS` (IP/CIDR).
-   **SECURITY:** IP берём из соединения, а **не** из `X-Forwarded-For`/`X-Real-IP` — эти заголовки
-   клиент-контролируемые и доверяются ТОЛЬКО при `CDEK_WEBHOOK_TRUST_PROXY=true` (за Caddy, который
-   пробрасывает реальный IP). Без `trustProxy` источник IP пустой → подделка заголовка обхода не даёт.
-   Непустой список + IP вне диапазона → `403`.
+   **SECURITY:** заголовкам с IP веры нет, пока не подтверждено, что запрос пришёл через **наш**
+   прокси: они доверяются ТОЛЬКО при `CDEK_WEBHOOK_TRUST_PROXY=true` (за Caddy, который
+   перезаписывает `X-Real-IP` реальным IP пира). Без `trustProxy` источник IP пустой → подделка
+   заголовка обхода не даёт. Непустой список + IP вне диапазона → `403`.
+   **SECURITY (аудит 2026-07-18, #1/#3; исправлено 2026-07-20):** собственная копия `extractIp` в
+   этом роуте брала **leftmost `X-Forwarded-For`** первым, а `X-Real-IP` — лишь fallback. Leftmost
+   XFF подконтролен клиенту (прокси только **дописывает** реальный IP справа), поэтому при
+   `trustProxy=true` whitelist обходился заголовком `X-Forwarded-For: <IP из whitelist>`, а
+   спуфнутый IP ещё и уезжал в `cdek_status_log.ip` (отравление аудита). Копия удалена: роут зовёт
+   общую `extractWebhookIp(headers, trustProxy)` (`lib/server/request-ip.ts`), приоритет —
+   `X-Real-IP`, кандидат валидируется `isIP()`. См. **ADR-020** и `docs/02` «Эксплуатационные
+   инварианты» (порядок выкатки: Caddyfile строго перед кодом).
 3. **Пустой whitelist** разрешён (bypass с warn) **ТОЛЬКО в mock-режиме** (нет боевых
    `CDEK_ACCOUNT`/`CDEK_SECRET`, `isCdekMock()` — edu/CI-контур). **SECURITY:** bypass завязан на
    `isMock`, а **не** на `CDEK_TEST_MODE` — боевой test-контур (реальные ключи + `CDEK_TEST_MODE=true`)

@@ -88,7 +88,7 @@
 
 | Скилл | Назначение | ⚠️ |
 |---|---|---|
-| **gate** | Полный код-гейт перед коммитом (typecheck/lint/vitest/миграции/security). | |
+| **gate** | Полный код-гейт перед коммитом (typecheck/lint/vitest/миграции/security + `scripts/check-caddy-real-ip.sh` — доверенный `X-Real-IP` у каждого `reverse_proxy`, ADR-020). | |
 | **deploy-stand** | Деплой на стенд + health-gate + откат (живая проверка). | ⚠️ |
 | **new-shop** | Онбординг нового магазина-инстанса (мультитенантность). | |
 | **audit-cycle** | Один цикл адверсариального аудита (owner-gated, кампания сошлась). | |
