@@ -645,7 +645,11 @@ export function ProductForm({
         ) : null}
 
         {section === 'variants' && isEdit ? (
-          <VariantsSection product={product!} />
+          <VariantsSection
+            product={product!}
+            attributes={attributes}
+            attributeValues={attributeValues}
+          />
         ) : null}
         {section === 'attributes' && isEdit ? (
           <AttributesSection

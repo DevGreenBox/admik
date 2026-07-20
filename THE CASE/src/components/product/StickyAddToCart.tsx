@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/Button";
 interface StickyAddToCartProps {
   name: string;
   price: number;
+  /** Выбранный цвет (метка справочника) — null, если цвета у товара нет/не выбран. */
+  selectedColor: string | null;
   selectedSize: string | null;
   /** Готовая подпись кнопки (та же логика, что у основной кнопки карточки). */
   ctaLabel: string;
@@ -18,6 +20,7 @@ interface StickyAddToCartProps {
 export function StickyAddToCart({
   name,
   price,
+  selectedColor,
   selectedSize,
   ctaLabel,
   onAddToCart,
@@ -48,6 +51,11 @@ export function StickyAddToCart({
               <p className="text-[11px] uppercase tracking-[0.12em] truncate">{name}</p>
               <p className="text-sm mt-0.5">
                 {formatPrice(price)}
+                {selectedColor && (
+                  <span className="text-muted ml-3 text-[10px] uppercase tracking-wider">
+                    · {selectedColor}
+                  </span>
+                )}
                 {selectedSize && (
                   <span className="text-muted ml-3 text-[10px] uppercase tracking-wider">
                     · {selectedSize}

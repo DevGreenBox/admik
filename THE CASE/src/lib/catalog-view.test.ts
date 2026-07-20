@@ -48,6 +48,7 @@ function mk(over: Partial<StorefrontProduct>): StorefrontProduct {
     categories: over.categories ?? [],
     gender: over.gender ?? "unisex",
     color: over.color ?? "",
+    colors: over.colors ?? [],
     composition: over.composition ?? "",
     care: over.care ?? "",
     features: over.features ?? [],

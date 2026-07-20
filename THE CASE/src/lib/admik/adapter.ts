@@ -5,6 +5,7 @@
  * атрибутов — docs/13-сращивание-the-case.md §3.
  */
 
+import { listColors } from '@/lib/variant-matrix';
 import type {
   AdmikProductDetailDto,
   AdmikProductListItemDto,
@@ -115,11 +116,23 @@ export function variantSize(v: AdmikVariantDto): string {
   return readAttrString(v.attributes, ['size', 'размер']) || v.name?.trim() || v.sku;
 }
 
+/**
+ * Цвет варианта: явное поле DTO (вариантный EAV) → фолбэк на вариантный
+ * attributes_cache. null — цвет у варианта не заведён.
+ */
+export function variantColor(v: AdmikVariantDto): string | null {
+  const explicit = (v.color ?? '').trim();
+  if (explicit) return explicit;
+  return readAttrString(v.attributes, ['color', 'цвет']) || null;
+}
+
 export function toStorefrontVariant(v: AdmikVariantDto): StorefrontVariant {
   return {
     id: v.id,
     sku: v.sku,
     size: variantSize(v),
+    color: variantColor(v),
+    colorHex: (v.colorHex ?? '').trim() || null,
     price: parseMoney(v.price),
     inStock: v.inStock,
     availableQty: Math.max(0, Math.trunc(v.availableQty ?? 0)),
@@ -165,6 +178,8 @@ export function fromListItem(dto: AdmikProductListItemDto): StorefrontProduct {
     // Фасеты: gender резолвим той же логикой, что и в detail (из строки атрибута).
     gender: resolveGender({ gender: dto.gender ?? '' }),
     color: (dto.color ?? '').trim(),
+    // В списке вариантов нет — цвет товара один, фасетный (hex не приходит).
+    colors: (dto.color ?? '').trim() ? [{ value: (dto.color as string).trim(), hex: null }] : [],
     composition: '',
     care: '',
     features: [],
@@ -201,11 +216,16 @@ export function fromDetail(dto: AdmikProductDetailDto): StorefrontProduct {
     categories: dto.categories,
     gender: resolveGender(dto.attributes, dto.categories),
     color: readAttrString(dto.attributes, ['color', 'цвет']),
+    // Цвета = вариантная ось. Порядок задаёт `dto.colors` (если бэкенд отдал),
+    // дальше — порядок появления у вариантов; листинг уникализирует и добирает hex.
+    colors: listColors(variants, dto.colors ?? []).map((c) => ({ value: c.value, hex: c.hex })),
     composition: readAttrString(dto.attributes, ['composition', 'состав']),
     care: readAttrString(dto.attributes, ['care', 'уход']),
     features: readFeatures(dto.attributes),
     description: dto.description,
     variants,
-    sizes: variants.map((v) => v.size),
+    // Уникально: при матрице цвет×размер метки размеров повторяются у вариантов
+    // разных цветов, а `sizes` — это ось размеров товара (и фасет каталога).
+    sizes: [...new Set(variants.map((v) => v.size))],
   };
 }

@@ -282,6 +282,53 @@ export type VariantUpdateInput = z.infer<typeof VariantUpdateSchema>;
 export const VariantIdSchema = z.object({ id: uuidSchema });
 
 /**
+ * Матрица «цвет × размер» (спринт B): одна операция вместо N*M вызовов
+ * createVariant.
+ *
+ * `sizes` — метки РАЗМЕРА, они же будущие product_variants.name (цвет в имя не
+ * подмешивается: фасет размеров каталога сравнивает метки точной строкой).
+ * `colors` — СПИСОК ID значений справочника «Цвет» (attribute_values.id),
+ * которые лягут в вариантный EAV. Пустой `colors` = матрица вырождается в
+ * плоский список размеров, справочник цвета при этом не нужен.
+ *
+ * ПОЧЕМУ ТОЛЬКО ID, БЕЗ ПОДПИСИ: подпись цвета участвует в артикуле варианта и
+ * в записи аудита, то есть в данных, которые потом читают как факт. Раньше
+ * схема принимала пару {valueId, value} и подпись бралась от клиента: аудит
+ * batch-действия фиксировал утверждение актора, а не состояние справочника.
+ * Теперь action добирает `attribute_values.value` сам (и заодно проверяет
+ * принадлежность значения справочнику «Цвет» — FK в БД несоставной и такую
+ * принадлежность не гарантирует).
+ *
+ * `colorAttributeId` необязателен: если не передан, action сам находит
+ * справочник «Цвет» по имени/коду (attributes.is_variant в реальных данных
+ * обычно не проставлен, полагаться на флаг нельзя). Переданный явно —
+ * проверяется как ЦВЕТОВОЙ справочник (lib/catalog/color.ts), иначе клиент мог
+ * бы указать любой словарь и получить в цветовом EAV чужие значения.
+ *
+ * Потолок ячеек — защита от вставочного шторма: без него 50×50 дало бы 2500
+ * INSERT в одной транзакции и залипшую блокировку таблицы.
+ */
+const MATRIX_MAX_CELLS = 200;
+
+export const VariantMatrixSchema = z
+  .object({
+    productId: uuidSchema,
+    colorAttributeId: uuidSchema.nullish(),
+    colors: z.array(uuidSchema).max(64).optional().default([]),
+    sizes: z.array(z.string().trim().min(1).max(255)).min(1).max(64),
+    /** Гасить активные варианты вне матрицы (по умолчанию — нет). */
+    deactivateMissing: z.boolean().optional().default(false),
+  })
+  .refine(
+    (v) => Math.max(v.colors.length, 1) * v.sizes.length <= MATRIX_MAX_CELLS,
+    {
+      message: `слишком большая матрица: не более ${MATRIX_MAX_CELLS} ячеек за раз`,
+      path: ['sizes'],
+    },
+  );
+export type VariantMatrixInput = z.infer<typeof VariantMatrixSchema>;
+
+/**
  * Переупорядочивание вариантов товара (зеркало MediaReorderSchema, но без
  * primaryId — у вариантов нет «главного»). Индекс id в массиве `order` → значение
  * sort (нормализует существующие sort=0 в 0..n-1). Минимум один id.
@@ -361,13 +408,41 @@ export const AttributeUpdateSchema = z.object({
 });
 export type AttributeUpdateInput = z.infer<typeof AttributeUpdateSchema>;
 
+/**
+ * HEX-код цвета значения справочника (attribute_values.color_hex, миграция
+ * 0036). Зеркало CHECK-ограничения attribute_values_color_hex_chk: формат
+ * '#RRGGBB' в любом регистре. null — цвет без hex (витрина отрисует текстом).
+ */
+const colorHexSchema = z
+  .string()
+  .trim()
+  .regex(/^#[0-9A-Fa-f]{6}$/, 'формат HEX: #RRGGBB, например #FFFFFF');
+
 export const AttributeValueSchema = z.object({
   attributeId: uuidSchema,
   value: z.string().trim().min(1).max(255),
   slug: slugSchema.nullish(),
   sort: z.number().int().min(0).optional().default(0),
+  colorHex: colorHexSchema.nullish(),
 });
 export type AttributeValueInput = z.infer<typeof AttributeValueSchema>;
+
+/**
+ * Правка существующего значения словаря. Отдельная схема от AttributeValueSchema:
+ * там attributeId обязателен (значение создаётся В справочнике), здесь меняются
+ * только поля самого значения. `colorHex: null` — осознанная очистка hex,
+ * `colorHex: undefined` — «не трогать» (различие важно для хендлера).
+ */
+export const AttributeValueUpdateSchema = z.object({
+  id: uuidSchema,
+  value: z.string().trim().min(1).max(255).optional(),
+  slug: slugSchema.nullish(),
+  sort: z.number().int().min(0).optional(),
+  colorHex: colorHexSchema.nullish(),
+});
+export type AttributeValueUpdateInput = z.infer<
+  typeof AttributeValueUpdateSchema
+>;
 
 /** Удаление значения из словаря характеристики (по id). */
 export const AttributeValueDeleteSchema = z.object({ id: uuidSchema });

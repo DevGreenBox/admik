@@ -6,13 +6,20 @@ import { useState } from 'react';
 import type { Attribute, AttributeValue, ProductDetail } from '@/lib/catalog/types';
 
 import { setProductAttributesAction } from './form-actions';
+import { buildProductAttributeItems } from './attributes-payload';
 import { errorMessage } from './action-result';
 import type { ActionResult } from '@/lib/server/action';
 
 /**
  * Секция «Характеристики» (EAV, docs/05 §5.3). Форма строится ИЗ метаданных
  * attributes (тип/единица/обязательность) — без хардкода под магазин.
- * Сохранение — setProductAttributes (полная замена привязок уровня товара).
+ *
+ * Сохранение — setProductAttributes, операция ПОЛНОЙ ЗАМЕНЫ: она безусловно
+ * сносит привязки уровня товара и привязки перечисленных вариантов. Поэтому
+ * форма обязана слать ПОЛНЫЙ набор — уровень товара (из полей формы) ПЛЮС
+ * вариантный уровень (пас-сквозь текущего состояния: цвет варианта задаётся в
+ * секции «Варианты» и здесь не редактируется, но обязан доехать до сервера).
+ * Сборка — чистый buildProductAttributeItems, покрытый юнит-тестом.
  */
 type Fail = Extract<ActionResult<unknown>, { ok: false }>;
 
@@ -31,10 +38,13 @@ export function AttributesSection({
   const [success, setSuccess] = useState(false);
   const [pending, setPending] = useState(false);
 
-  // Текущее значение каждого атрибута уровня товара (variantId IS NULL).
+  // Форма редактирует ТОЛЬКО уровень товара (variantId IS NULL): у варианта
+  // тот же атрибут может иметь своё значение, и смешивать их в одном поле
+  // нельзя. Вариантные привязки не отбрасываются — они переносятся в payload
+  // при сохранении (см. buildProductAttributeItems).
   const initial: Record<string, string> = {};
   for (const pa of product.attributes) {
-    if (pa.variantId) continue;
+    if (pa.variantId !== null) continue;
     initial[pa.attributeId] = pa.valueText ?? pa.valueId ?? '';
   }
   const [values, setValues] = useState<Record<string, string>>(initial);
@@ -48,16 +58,11 @@ export function AttributesSection({
     setError(null);
     setSuccess(false);
 
-    const items = attributes
-      .map((attr) => {
-        const raw = values[attr.id]?.trim();
-        if (!raw) return null;
-        // select хранит valueId, прочие типы — valueText (упрощённо: текстовый ввод).
-        return attr.type === 'select'
-          ? { attributeId: attr.id, valueId: raw }
-          : { attributeId: attr.id, valueText: raw };
-      })
-      .filter((x): x is NonNullable<typeof x> => x !== null);
+    const items = buildProductAttributeItems({
+      attributes,
+      values,
+      existing: product.attributes,
+    });
 
     const result = await setProductAttributesAction({ productId: product.id, items });
     setPending(false);

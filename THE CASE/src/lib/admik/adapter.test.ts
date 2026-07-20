@@ -214,3 +214,116 @@ describe('fromDetail', () => {
     expect(p.imageUrl).toBe('https://cdn.example/1.webp');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Цвет как вариант (спринт B): variant.color/colorHex + product.colors.
+// ---------------------------------------------------------------------------
+
+describe('цвет варианта (color/colorHex)', () => {
+  it('toStorefrontVariant протаскивает цвет и hex из DTO', () => {
+    const v = toStorefrontVariant(variant({ color: 'Белый', colorHex: '#ffffff' }));
+    expect(v.color).toBe('Белый');
+    expect(v.colorHex).toBe('#ffffff');
+  });
+
+  it('цвета нет → null (а не пустая строка/undefined-мусор)', () => {
+    const v = toStorefrontVariant(variant());
+    expect(v.color).toBeNull();
+    expect(v.colorHex).toBeNull();
+  });
+
+  it('фолбэк: цвет из вариантного attributes_cache, если поля color нет', () => {
+    const v = toStorefrontVariant(variant({ attributes: { size: 'M', 'Цвет': 'Графит' } }));
+    expect(v.color).toBe('Графит');
+  });
+
+  it('размер НЕ подменяется цветом (v.name остаётся меткой размера)', () => {
+    const v = toStorefrontVariant(
+      variant({ name: '42 / XS', attributes: {}, color: 'Белый' }),
+    );
+    expect(v.size).toBe('42 / XS');
+  });
+});
+
+describe('fromDetail: colors', () => {
+  const base: AdmikProductDetailDto = {
+    id: '123e4567-e89b-42d3-a456-426614174000',
+    slug: 'p',
+    sku: 'P-1',
+    name: 'P',
+    description: '',
+    price: '100.00',
+    compareAtPrice: null,
+    discountPct: null,
+    onSale: false,
+    isNew: false,
+    isFeatured: false,
+    brand: null,
+    categories: [],
+    attributes: {},
+    variants: [],
+    media: [],
+    inStock: true,
+    availableQty: 1,
+    meta: {
+      title: 'P',
+      description: null,
+      canonical: null,
+      ogTitle: 'P',
+      ogDescription: null,
+      ogImageUrl: null,
+      noindex: false,
+    },
+  };
+
+  it('уникальные цвета вариантов с hex', () => {
+    const p = fromDetail({
+      ...base,
+      variants: [
+        variant({ id: 'w-s', name: 'S', attributes: { size: 'S' }, color: 'Белый', colorHex: '#ffffff' }),
+        variant({ id: 'w-m', name: 'M', attributes: { size: 'M' }, color: 'Белый', colorHex: '#ffffff' }),
+        variant({ id: 'b-m', name: 'M', attributes: { size: 'M' }, color: 'Чёрный', colorHex: '#111111' }),
+      ],
+    });
+    expect(p.colors).toEqual([
+      { value: 'Белый', hex: '#ffffff' },
+      { value: 'Чёрный', hex: '#111111' },
+    ]);
+  });
+
+  it('цвета не заведены → пустой массив', () => {
+    expect(fromDetail(base).colors).toEqual([]);
+    expect(
+      fromDetail({ ...base, variants: [variant({ id: 'a', attributes: { size: 'M' } })] }).colors,
+    ).toEqual([]);
+  });
+
+  it('объявленный список товара задаёт порядок цветов', () => {
+    const p = fromDetail({
+      ...base,
+      colors: [
+        { value: 'Чёрный', hex: '#111111' },
+        { value: 'Белый', hex: '#ffffff' },
+      ],
+      variants: [
+        variant({ id: 'w', name: 'S', attributes: { size: 'S' }, color: 'Белый' }),
+        variant({ id: 'b', name: 'S', attributes: { size: 'S' }, color: 'Чёрный' }),
+      ],
+    });
+    expect(p.colors.map((c) => c.value)).toEqual(['Чёрный', 'Белый']);
+    expect(p.colors[1].hex).toBe('#ffffff');
+  });
+
+  it('матрица цвет×размер: sizes без дублей', () => {
+    const p = fromDetail({
+      ...base,
+      variants: [
+        variant({ id: 'w-s', name: 'S', attributes: { size: 'S' }, color: 'Белый' }),
+        variant({ id: 'w-m', name: 'M', attributes: { size: 'M' }, color: 'Белый' }),
+        variant({ id: 'b-s', name: 'S', attributes: { size: 'S' }, color: 'Чёрный' }),
+        variant({ id: 'b-m', name: 'M', attributes: { size: 'M' }, color: 'Чёрный' }),
+      ],
+    });
+    expect(p.sizes).toEqual(['S', 'M']);
+  });
+});

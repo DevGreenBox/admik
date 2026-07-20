@@ -11,6 +11,7 @@ import {
   updateVariant,
   deleteVariant,
   reorderVariant,
+  applyVariantMatrix,
   setProductAttributes,
   attachMedia,
   deleteMedia,
@@ -75,6 +76,25 @@ export async function updateVariantAction(input: unknown): Promise<ActionResult<
 export async function deleteVariantAction(input: unknown): Promise<ActionResult<{ id: string }>> {
   return deleteVariant(input);
 }
+/**
+ * Матрица «цвет × размер» — ОДИН вызов вместо N*M createVariant (одна
+ * транзакция, один аудит, одна ревалидация на стороне action).
+ */
+export async function applyVariantMatrixAction(
+  input: unknown,
+): Promise<
+  ActionResult<{
+    productId: string;
+    created: number;
+    activated: number;
+    deactivated: number;
+    /** Ячейки, которым не нашлось свободного артикула (см. applyVariantMatrix). */
+    skipped: number;
+  }>
+> {
+  return applyVariantMatrix(input);
+}
+
 export async function reorderVariantAction(
   input: unknown,
 ): Promise<ActionResult<{ productId: string }>> {

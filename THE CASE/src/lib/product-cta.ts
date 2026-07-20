@@ -15,6 +15,11 @@ export interface ProductCtaState {
   hasAvailableVariants: boolean;
   /** Выбран конкретный вариант (размер). */
   hasSelectedVariant: boolean;
+  /**
+   * У товара есть ось цвета, и цвет ещё не выбран. Опционально (по умолчанию
+   * false) — товары без цветовой оси ведут себя как прежде.
+   */
+  needsColor?: boolean;
 }
 
 export function productCtaLabel(s: ProductCtaState): string {
@@ -22,6 +27,9 @@ export function productCtaLabel(s: ProductCtaState): string {
   // Нечего купить: либо простой товар не в наличии, либо все размеры распроданы.
   if (!s.hasVariants && !s.canBuySimple) return "Нет в наличии";
   if (s.hasVariants && !s.hasAvailableVariants) return "Нет в наличии";
+  // Матрица цвет×размер: без цвета вариант не определить даже с выбранным
+  // размером — просим сначала цвет.
+  if (s.needsColor) return "Выберите цвет";
   // Есть что выбрать, но размер ещё не выбран.
   if (s.hasVariants && !s.hasSelectedVariant) return "Выберите размер";
   return "В корзину";

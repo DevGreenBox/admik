@@ -32,6 +32,7 @@ function product(over: Partial<StorefrontProduct> = {}): StorefrontProduct {
     categories: [],
     gender: 'unisex',
     color: '',
+    colors: [],
     composition: '',
     care: '',
     features: [],

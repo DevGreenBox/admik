@@ -109,6 +109,11 @@ export default function CartPage() {
                           {item.name}
                         </h3>
                       </Link>
+                      {item.color && (
+                        <p className="text-[10px] text-muted mt-1">
+                          Цвет: {item.color}
+                        </p>
+                      )}
                       {item.size && (
                         <p className="text-[10px] text-muted mt-1">
                           Размер: {item.size}

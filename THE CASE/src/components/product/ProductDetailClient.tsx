@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { Heart, Minus, Plus } from "lucide-react";
 import { formatPrice } from "@/lib/format";
@@ -8,6 +8,15 @@ import { productCtaLabel } from "@/lib/product-cta";
 import { brandLabel } from "@/lib/brand-label";
 import { variantUnavailableLabel } from "@/lib/variant-availability";
 import { colorHex } from "@/lib/color-swatch";
+import {
+  clampQuantity,
+  colorUnavailableLabel,
+  listColors,
+  listSizes,
+  selectColor,
+  selectSize,
+  type ResolvedSelection,
+} from "@/lib/variant-matrix";
 import { useStore, useHydrated } from "@/lib/store";
 import type { StorefrontProduct, StorefrontVariant } from "@/lib/admik";
 import type { SizeChartsSettings } from "@/lib/size-table";
@@ -39,9 +48,39 @@ const DEFAULT_CARE =
 
 
 export function ProductDetailClient({ product, related, sizeCharts }: ProductDetailClientProps) {
-  const [selectedVariant, setSelectedVariant] = useState<StorefrontVariant | null>(null);
+  // Оси выбора: цвет × размер. Вся логика — в чистом модуле variant-matrix
+  // (покрыт юнит-тестами), здесь только разметка и состояние.
+  const colorOptions = useMemo(
+    () => listColors(product.variants, product.colors),
+    [product.variants, product.colors],
+  );
+
+  const [selection, setSelection] = useState<ResolvedSelection<StorefrontVariant>>(() =>
+    // Цвет один — выбирать нечего, ставим его сразу (иначе кнопка размера
+    // не смогла бы разрешить вариант, а свотч выглядел бы «не выбран»).
+    colorOptions.length === 1
+      ? selectColor(product.variants, { color: null, size: null }, colorOptions[0].value)
+      : { color: null, size: null, variant: null },
+  );
   const [quantity, setQuantity] = useState(1);
   const [added, setAdded] = useState(false);
+
+  const selectedVariant = selection.variant;
+  // Размеры — в разрезе выбранного цвета: комбинация, которой нет или которой
+  // нет в наличии, приходит сюда с available = false и дизейблится.
+  const sizeOptions = useMemo(
+    () => listSizes(product.variants, selection.color),
+    [product.variants, selection.color],
+  );
+
+  /** Применяет новый выбор: сбрасывает «Добавлено» и синхронизирует количество. */
+  const applySelection = (next: ResolvedSelection<StorefrontVariant>) => {
+    setSelection(next);
+    setAdded(false);
+    // Смена цвета может обнулить выбранный вариант (размера нет в новом цвете) —
+    // тогда количество возвращается к 1, иначе режется по остатку нового варианта.
+    setQuantity((q) => clampQuantity(q, next.variant));
+  };
 
   const addToCart = useStore((s) => s.addToCart);
   const toggleWishlist = useStore((s) => s.toggleWishlist);
@@ -56,13 +95,17 @@ export function ProductDetailClient({ product, related, sizeCharts }: ProductDet
   const hasVariants = product.variants.length > 0;
   // Бренд товара (C23) — плейн-текст над названием; null, если бренд не задан.
   const brand = brandLabel(product);
-  const selectedSize = selectedVariant?.size ?? null;
+  const selectedSize = selection.size;
   // Есть ли хоть один размер в наличии (иначе кнопка должна честно сказать
   // «Нет в наличии», а не «Выберите размер» — выбирать нечего).
   const hasAvailableVariants = product.variants.some((v) => v.inStock);
   // Товар БЕЗ вариантов (один SKU): покупаем по productId, если есть остаток.
   const canBuySimple = !hasVariants && product.inStock && Boolean(product.id);
-  const canBuy = hasVariants ? Boolean(selectedVariant) : canBuySimple;
+  // Вариант мог разрешиться в распроданную комбинацию (единственное совпадение
+  // пары цвет×размер) — покупку в этом случае не открываем.
+  const canBuy = hasVariants
+    ? Boolean(selectedVariant && selectedVariant.inStock && selectedVariant.availableQty > 0)
+    : canBuySimple;
   // Единая подпись кнопки покупки — общая для основной и плавающей кнопки.
   const ctaLabel = productCtaLabel({
     added,
@@ -70,6 +113,7 @@ export function ProductDetailClient({ product, related, sizeCharts }: ProductDet
     canBuySimple,
     hasAvailableVariants,
     hasSelectedVariant: Boolean(selectedVariant),
+    needsColor: colorOptions.length > 0 && selection.color === null,
   });
 
   // Цена к покупке: выбранного варианта, иначе базовая товара. Используется и в
@@ -102,6 +146,8 @@ export function ProductDetailClient({ product, related, sizeCharts }: ProductDet
           slug: product.slug,
           name: product.name,
           size: selectedVariant.size,
+          // Опционально: у товара без цветовой оси поля просто не будет.
+          color: selectedVariant.color ?? undefined,
           price: selectedVariant.price,
           imageUrl: product.imageUrl,
           available: selectedVariant.availableQty,
@@ -163,24 +209,46 @@ export function ProductDetailClient({ product, related, sizeCharts }: ProductDet
               </div>
               <p className="body-editorial">{product.description || DEFAULT_DESCRIPTION}</p>
 
-              {/* Цвет (Мадина №6): свотч-образец. Показываем, когда у товара задан
-                  атрибут цвета. Один цвет на товар → один активный свотч. */}
-              {product.color && (
+              {/* Цвет = вариантная ось: настоящий выбор свотчем (стиль — как в
+                  фильтре каталога). Распроданный цвет дизейблится с причиной. */}
+              {colorOptions.length > 0 && (
                 <div>
                   <p className="mb-4 text-[10px] uppercase tracking-[0.2em]">
-                    Цвет: <span className="text-muted">{product.color}</span>
+                    Цвет{" "}
+                    {selection.color ? (
+                      <span className="text-muted">: {selection.color}</span>
+                    ) : (
+                      <span className="text-muted">*</span>
+                    )}
                   </p>
-                  <div className="flex flex-wrap gap-3">
-                    <span
-                      aria-label={product.color}
-                      title={product.color}
-                      className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-graphite"
-                    >
-                      <span
-                        className="h-6 w-6 rounded-full border border-border"
-                        style={{ backgroundColor: colorHex(product.color) }}
-                      />
-                    </span>
+                  <div className="flex flex-wrap gap-3" role="group" aria-label="Цвет">
+                    {colorOptions.map((option) => {
+                      const on = option.value === selection.color;
+                      // Причина недоступности — в title + aria-label: приглушённая
+                      // кнопка иначе озвучивается лишь как «dimmed» (ср. C28).
+                      const reason = colorUnavailableLabel(option);
+                      return (
+                        <button
+                          key={option.value}
+                          type="button"
+                          disabled={!option.available}
+                          aria-pressed={on}
+                          aria-label={reason ?? option.value}
+                          title={reason ?? option.value}
+                          onClick={() =>
+                            applySelection(selectColor(product.variants, selection, option.value))
+                          }
+                          className={`flex h-9 w-9 items-center justify-center rounded-full border-2 transition-colors duration-500 disabled:opacity-30 disabled:cursor-not-allowed ${
+                            on ? "border-graphite" : "border-border hover:border-graphite"
+                          }`}
+                        >
+                          <span
+                            className="h-6 w-6 rounded-full border border-border"
+                            style={{ backgroundColor: colorHex(option.value, option.hex) }}
+                          />
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -190,7 +258,7 @@ export function ProductDetailClient({ product, related, sizeCharts }: ProductDet
                 <div>
                   <div className="flex items-center justify-between mb-4">
                     <p className="text-[10px] uppercase tracking-[0.2em]">
-                      Размер {!selectedVariant && <span className="text-muted">*</span>}
+                      Размер {!selection.size && <span className="text-muted">*</span>}
                     </p>
                     <SizeGuide
                       charts={sizeCharts?.charts}
@@ -198,31 +266,35 @@ export function ProductDetailClient({ product, related, sizeCharts }: ProductDet
                       footnote={sizeCharts?.footnote}
                     />
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    {product.variants.map((variant) => {
+                  <div className="flex flex-wrap gap-2" role="group" aria-label="Размер">
+                    {sizeOptions.map((option) => {
                       // C28: причина недоступности размера → title + aria-label, чтобы
                       // приглушённая кнопка озвучивалась скринридером не просто как
                       // «dimmed», а с причиной (title один не закрывает touch-устройства).
-                      const reason = variantUnavailableLabel(variant);
+                      // Доступность считается в паре с выбранным цветом.
+                      const reason = variantUnavailableLabel({
+                        size: option.size,
+                        inStock: option.available,
+                      });
+                      const on = option.size === selection.size;
                       return (
                         <button
-                          key={variant.id}
-                          disabled={!variant.inStock}
+                          key={option.size}
+                          type="button"
+                          disabled={!option.available}
+                          aria-pressed={on}
                           title={reason ?? undefined}
                           aria-label={reason ?? undefined}
-                          onClick={() => {
-                            setSelectedVariant(variant);
-                            setAdded(false);
-                            // Не оставляем количество больше остатка нового размера.
-                            setQuantity((q) => Math.min(q, Math.max(1, variant.availableQty)));
-                          }}
+                          onClick={() =>
+                            applySelection(selectSize(product.variants, selection, option.size))
+                          }
                           className={`min-w-[48px] px-4 py-3 text-[10px] uppercase tracking-[0.15em] border transition-all duration-500 disabled:opacity-30 disabled:cursor-not-allowed disabled:line-through ${
-                            selectedVariant?.id === variant.id
+                            on
                               ? "border-graphite bg-graphite text-white"
                               : "border-border hover:border-graphite"
                           }`}
                         >
-                          {variant.size}
+                          {option.size}
                         </button>
                       );
                     })}
@@ -322,6 +394,7 @@ export function ProductDetailClient({ product, related, sizeCharts }: ProductDet
       <StickyAddToCart
         name={product.name}
         price={activePrice}
+        selectedColor={selection.color}
         selectedSize={selectedSize}
         ctaLabel={ctaLabel}
         onAddToCart={handleAddToCart}

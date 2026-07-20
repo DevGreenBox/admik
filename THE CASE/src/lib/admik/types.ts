@@ -39,6 +39,11 @@ export interface AdmikVariantDto {
   onSale: boolean;
   /** Денормализованные атрибуты варианта (напр. { size: "M" }). */
   attributes: Record<string, unknown>;
+  /** Значение цвета варианта (вариантный EAV Admik), напр. «Белый». Опционально:
+   *  старый бэкенд поля не отдаёт → цвет берётся из attributes или отсутствует. */
+  color?: string | null;
+  /** «#RRGGBB» из справочника (attribute_values.color_hex), если задан. */
+  colorHex?: string | null;
   inStock: boolean;
   /** Доступно к заказу (quantity − reserved, ≥0). Лимит счётчика в корзине. */
   availableQty: number;
@@ -81,6 +86,10 @@ export interface AdmikProductDetailDto {
   brand: AdmikBrandDto | null;
   categories: string[];
   attributes: Record<string, unknown>;
+  /** Уникальные цвета товара в порядке появления у вариантов (пустой массив —
+   *  цвета не заведены). Опционально: старый бэкенд поля не отдаёт → витрина
+   *  выводит цвета из самих вариантов. */
+  colors?: { value: string; hex?: string | null }[];
   variants: AdmikVariantDto[];
   media: AdmikMediaDto[];
   inStock: boolean;
@@ -429,8 +438,14 @@ export interface StorefrontVariant {
   /** uuid варианта — ключ для cart/quote и orders. */
   id: string;
   sku: string;
-  /** Метка размера для UI (из attributes.size, иначе sku). */
+  /** Метка размера для UI (из attributes.size, иначе имя варианта, иначе sku).
+   *  ВАЖНО: имя варианта остаётся меткой РАЗМЕРА («42 / XS»), цвет в него не
+   *  пишется — иначе рассыпется фасет размеров каталога. */
   size: string;
+  /** Значение цвета варианта («Белый»); null — цвет у товара не заведён. */
+  color?: string | null;
+  /** «#RRGGBB» из справочника Admik; null → свотч красится фолбэком палитры. */
+  colorHex?: string | null;
   price: number;
   inStock: boolean;
   /** Доступно к заказу (≥0) — лимит счётчика количества в корзине. */
@@ -461,7 +476,12 @@ export interface StorefrontProduct {
   categories: string[];
   // --- поля, выводимые из атрибутов (контракт docs/13 §3.2) ---
   gender: 'women' | 'men' | 'unisex';
+  /** Цвет уровня товара (фасет каталога). Для выбора цвета на карточке —
+   *  `colors` ниже (цвет как вариант). */
   color: string;
+  /** Уникальные цвета товара в порядке появления у вариантов; [] — цвета не
+   *  заведены (карточка не показывает выбор цвета). */
+  colors: { value: string; hex?: string | null }[];
   composition: string;
   care: string;
   features: string[];

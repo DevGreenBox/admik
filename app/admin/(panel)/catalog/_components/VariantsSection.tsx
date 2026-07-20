@@ -1,15 +1,28 @@
 'use client';
 
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 
-import type { ProductDetail, ProductVariant } from '@/lib/catalog/types';
+import type {
+  Attribute,
+  AttributeValue,
+  ProductDetail,
+  ProductVariant,
+} from '@/lib/catalog/types';
+import { isColorAttribute } from '@/lib/catalog/color';
+import {
+  parseMatrixList,
+  planVariantMatrix,
+  type ExistingMatrixVariant,
+} from '@/lib/catalog/variant-matrix';
 
 import {
   createVariantAction,
   updateVariantAction,
   deleteVariantAction,
   reorderVariantAction,
+  applyVariantMatrixAction,
 } from './form-actions';
 import {
   buildVariantCreateInput,
@@ -26,6 +39,18 @@ import type { ActionResult } from '@/lib/server/action';
  *
  * Сборка payload форм — чистый модуль variant-payload (нормализация денег/габаритов
  * общая для добавления и редактирования, покрыта юнит-тестами).
+ *
+ * МАТРИЦА «ЦВЕТ × РАЗМЕР» (спринт B). Идентичность варианта распределена:
+ * РАЗМЕР — это product_variants.name, ЦВЕТ — вариантная привязка EAV
+ * (product_attributes.variant_id → attribute_values). Поэтому поле варианта
+ * называется «Размер», а не «Размер / название»: писать в name «Белый / 42»
+ * НЕЛЬЗЯ — фасет размеров каталога сравнивает метки точной строкой и
+ * рассинхронизировался бы со списком товаров.
+ *
+ * Раскладка матрицы (что создать / включить / погасить) считается чистой
+ * функцией planVariantMatrix — тем же кодом, что и на сервере, поэтому предпросмотр
+ * «будет создано N» не расходится с фактическим результатом. Применение — ОДИН
+ * вызов applyVariantMatrix (одна транзакция, один аудит), а не N*M createVariant.
  */
 type Fail = Extract<ActionResult<unknown>, { ok: false }>;
 
@@ -59,15 +84,137 @@ function formFromVariant(v: ProductVariant): VariantFormValues {
   };
 }
 
-export function VariantsSection({ product }: { product: ProductDetail }) {
+export function VariantsSection({
+  product,
+  attributes = [],
+  attributeValues = {},
+}: {
+  product: ProductDetail;
+  /** Справочник характеристик — чтобы найти «Цвет» для оси матрицы. */
+  attributes?: Attribute[];
+  /** Значения словарей по attribute_id — источник цветов матрицы. */
+  attributeValues?: Record<string, AttributeValue[]>;
+}) {
   const router = useRouter();
   const [error, setError] = useState<Fail | null>(null);
+  /** Не-ошибочное предупреждение (напр. пропущенные ячейки матрицы). */
+  const [notice, setNotice] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
   // Форма добавления.
   const [form, setForm] = useState<VariantFormValues>(EMPTY_FORM);
   const setField = (k: keyof VariantFormValues, v: string) =>
     setForm((f) => ({ ...f, [k]: v }));
+
+  // --- Матрица «цвет × размер» -------------------------------------------
+  // Справочник «Цвет» ищем по имени/коду (lib/catalog/color), а НЕ по флагу
+  // attributes.is_variant: в реальных данных он почти всегда не проставлен.
+  const colorAttribute = useMemo(
+    () => attributes.find((a) => isColorAttribute(a) && a.type === 'select') ?? null,
+    [attributes],
+  );
+  const colorValues: AttributeValue[] = useMemo(
+    () => (colorAttribute ? (attributeValues[colorAttribute.id] ?? []) : []),
+    [colorAttribute, attributeValues],
+  );
+  const colorById = useMemo(() => {
+    const map = new Map<string, AttributeValue>();
+    for (const v of colorValues) map.set(v.id, v);
+    return map;
+  }, [colorValues]);
+
+  // Текущий цвет каждого варианта — из вариантных привязок EAV.
+  const variantColorId = useMemo(() => {
+    const map = new Map<string, string>();
+    if (!colorAttribute) return map;
+    for (const pa of product.attributes) {
+      if (pa.variantId && pa.attributeId === colorAttribute.id && pa.valueId) {
+        map.set(pa.variantId, pa.valueId);
+      }
+    }
+    return map;
+  }, [product.attributes, colorAttribute]);
+
+  const [pickedColors, setPickedColors] = useState<string[]>([]);
+  const [sizesText, setSizesText] = useState('');
+  const [deactivateMissing, setDeactivateMissing] = useState(false);
+
+  function toggleColor(id: string) {
+    setPickedColors((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+  }
+
+  // Предпросмотр считается ТЕМ ЖЕ planVariantMatrix, что и сервер, поэтому
+  // «будет создано N» гарантированно совпадает с результатом применения.
+  const existingForPlan: ExistingMatrixVariant[] = product.variants.map((v) => ({
+    id: v.id,
+    name: v.name,
+    colorValueId: variantColorId.get(v.id) ?? null,
+    isActive: v.isActive,
+  }));
+  const plan = useMemo(
+    () =>
+      planVariantMatrix({
+        colors: pickedColors.map((id) => ({
+          valueId: id,
+          value: colorById.get(id)?.value ?? '',
+        })),
+        sizes: parseMatrixList(sizesText),
+        existing: existingForPlan,
+        deactivateMissing,
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [pickedColors, sizesText, deactivateMissing, colorById, product.variants, variantColorId],
+  );
+
+  /** Свотч + подпись цвета варианта; «—» если цвет не заведён. */
+  function colorLabel(v: ProductVariant) {
+    const value = colorById.get(variantColorId.get(v.id) ?? '');
+    if (!value) return <span className="text-gray-300">—</span>;
+    return (
+      <span className="inline-flex items-center gap-1.5">
+        <span
+          aria-hidden="true"
+          className="inline-block h-3.5 w-3.5 rounded-full border border-gray-300"
+          style={value.colorHex ? { backgroundColor: value.colorHex } : undefined}
+        />
+        <span className="text-xs">{value.value}</span>
+      </span>
+    );
+  }
+
+  async function applyMatrix() {
+    setPending(true);
+    setError(null);
+    setNotice(null);
+    // Отправляем ТОЛЬКО id значений справочника: подпись цвета (она уходит в
+    // артикул и в аудит) действие берёт из attribute_values само — клиентской
+    // подписи оно не доверяет.
+    const result = await applyVariantMatrixAction({
+      productId: product.id,
+      colorAttributeId: colorAttribute?.id,
+      colors: pickedColors,
+      sizes: parseMatrixList(sizesText),
+      deactivateMissing,
+    });
+    setPending(false);
+    if (result.ok) {
+      setSizesText('');
+      setPickedColors([]);
+      setDeactivateMissing(false);
+      // Ячейка без свободного артикула пропускается (транзакция из-за неё не
+      // откатывается) — но редактор должен об этом узнать, а не гадать.
+      if (result.data.skipped > 0) {
+        setNotice(
+          `Создано вариантов: ${result.data.created}. Пропущено из-за занятого артикула: ${result.data.skipped} — задайте им артикул вручную.`,
+        );
+      }
+      router.refresh();
+    } else {
+      setError(result);
+    }
+  }
 
   // Инлайн-редактирование: id редактируемой строки + её черновик.
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -147,11 +294,21 @@ export function VariantsSection({ product }: { product: ProductDetail }) {
         </div>
       ) : null}
 
+      {notice ? (
+        <div
+          role="status"
+          className="mb-3 rounded border border-amber-200 bg-amber-50 p-2 text-sm text-amber-800"
+        >
+          {notice}
+        </div>
+      ) : null}
+
       <div className="overflow-x-auto rounded-lg border border-gray-200">
         <table className="min-w-full divide-y divide-gray-200 text-sm">
           <thead className="bg-gray-50 text-left text-gray-500">
             <tr>
-              <th scope="col" className="px-3 py-2 font-medium">Размер / название</th>
+              <th scope="col" className="px-3 py-2 font-medium">Размер</th>
+              <th scope="col" className="px-3 py-2 font-medium">Цвет</th>
               <th scope="col" className="px-3 py-2 font-medium">Артикул</th>
               <th scope="col" className="px-3 py-2 font-medium">Своя цена</th>
               <th scope="col" className="px-3 py-2 font-medium">Цена «было»</th>
@@ -164,7 +321,7 @@ export function VariantsSection({ product }: { product: ProductDetail }) {
           <tbody className="divide-y divide-gray-100">
             {product.variants.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-3 py-4 text-center text-gray-400">
+                <td colSpan={9} className="px-3 py-4 text-center text-gray-400">
                   Вариантов пока нет.
                 </td>
               </tr>
@@ -173,8 +330,14 @@ export function VariantsSection({ product }: { product: ProductDetail }) {
                 editingId === v.id ? (
                   <tr key={v.id} className="bg-amber-50/40">
                     <td className="px-3 py-2">
-                      <input aria-label="Размер / название" value={editForm.name}
+                      <input aria-label="Размер" value={editForm.name}
                         onChange={(e) => setEditField('name', e.target.value)} className={inputCls} />
+                    </td>
+                    <td className="px-3 py-2 text-xs text-gray-500">
+                      {/* Цвет — вариантный EAV, отдельная сущность: правится матрицей,
+                          а не инлайн-формой варианта (иначе легко получить два цвета
+                          у одного варианта). */}
+                      {colorLabel(v)}
                     </td>
                     <td className="px-3 py-2">
                       <input aria-label="Артикул" value={editForm.sku}
@@ -221,6 +384,7 @@ export function VariantsSection({ product }: { product: ProductDetail }) {
                 ) : (
                   <tr key={v.id}>
                     <td className="px-3 py-2 text-gray-700">{v.name || '—'}</td>
+                    <td className="px-3 py-2 text-gray-700">{colorLabel(v)}</td>
                     <td className="px-3 py-2"><code className="text-xs">{v.sku}</code></td>
                     <td className="px-3 py-2 text-gray-700">{v.priceOverride ?? '—'}</td>
                     <td className="px-3 py-2 text-gray-700">{v.compareAtPrice ?? '—'}</td>
@@ -265,17 +429,118 @@ export function VariantsSection({ product }: { product: ProductDetail }) {
         </table>
       </div>
 
+
+      {/* --- Матрица «цвет × размер» ------------------------------------- */}
+      <div className="mt-4 rounded-lg border border-gray-200 bg-white p-4">
+        <h3 className="text-sm font-semibold text-gray-800">Матрица «цвет × размер»</h3>
+        {!colorAttribute ? (
+          <p className="mt-2 text-xs text-gray-500">
+            Справочник цвета не найден. Чтобы вести цвет как вариант, заведите в{' '}
+            <Link href="/admin/catalog/attributes" className="text-blue-700 hover:underline">
+              характеристиках
+            </Link>{' '}
+            характеристику с названием «Цвет» типа «Список значений (select)» и
+            добавьте в её словарь цвета с HEX. Пока справочника нет, матрица создаёт
+            только размеры.
+          </p>
+        ) : colorValues.length === 0 ? (
+          <p className="mt-2 text-xs text-gray-500">
+            В словаре «{colorAttribute.name}» пока нет значений —{' '}
+            <Link
+              href={`/admin/catalog/attributes/${colorAttribute.id}`}
+              className="text-blue-700 hover:underline"
+            >
+              добавьте цвета
+            </Link>
+            . Без них матрица создаст только размеры.
+          </p>
+        ) : (
+          <fieldset className="mt-3">
+            <legend className="text-xs font-medium text-gray-600">Цвета</legend>
+            <div className="mt-1 flex flex-wrap gap-x-4 gap-y-2">
+              {colorValues.map((cv) => (
+                <label key={cv.id} className="inline-flex items-center gap-2 text-sm text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={pickedColors.includes(cv.id)}
+                    onChange={() => toggleColor(cv.id)}
+                    className="rounded border-gray-300"
+                  />
+                  <span
+                    aria-hidden="true"
+                    className="inline-block h-4 w-4 rounded-full border border-gray-300"
+                    style={cv.colorHex ? { backgroundColor: cv.colorHex } : undefined}
+                  />
+                  {cv.value}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        )}
+
+        <div className="mt-3">
+          <label htmlFor="matrix-sizes" className="block text-xs font-medium text-gray-600">
+            Размеры (через запятую или с новой строки)
+          </label>
+          <textarea
+            id="matrix-sizes"
+            rows={2}
+            value={sizesText}
+            onChange={(e) => setSizesText(e.target.value)}
+            placeholder="42, 44, 46, 48"
+            className="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
+          />
+          <p className="mt-1 text-xs text-gray-500">
+            Размер попадёт в название варианта. Цвет в название НЕ добавляется — он
+            хранится отдельно, иначе сломается фильтр по размеру в каталоге.
+          </p>
+        </div>
+
+        <label className="mt-3 inline-flex items-start gap-2 text-xs text-gray-600">
+          <input
+            type="checkbox"
+            checked={deactivateMissing}
+            onChange={(e) => setDeactivateMissing(e.target.checked)}
+            className="mt-0.5 rounded border-gray-300"
+          />
+          <span>
+            Отключить варианты вне матрицы. Варианты не удаляются никогда: их
+            хранят оформленные заказы — только снимаются с продажи.
+          </span>
+        </label>
+
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => void applyMatrix()}
+            disabled={pending || plan.create.length + plan.activate.length + plan.deactivate.length === 0}
+            className="rounded bg-gray-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-gray-700 disabled:opacity-50"
+          >
+            {pending ? 'Применение…' : 'Применить матрицу'}
+          </button>
+          <p role="status" className="text-xs text-gray-600">
+            {parseMatrixList(sizesText).length === 0
+              ? 'Укажите размеры — появится предпросмотр.'
+              : `Будет создано: ${plan.create.length}` +
+                `; уже есть: ${plan.keep.length}` +
+                `; включить обратно: ${plan.activate.length}` +
+                `; отключить: ${plan.deactivate.length}.`}
+          </p>
+        </div>
+      </div>
+
       <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
         <h3 className="text-sm font-semibold text-gray-800">Добавить вариант</h3>
         <p className="mt-1 text-xs text-gray-500">
-          Вариант — это размер/цвет товара (напр. «48» или «M»). Укажите название и,
-          при необходимости, свою цену. Остаток варианта задаётся в таблице ниже.
+          Вариант — это одна позиция товара. В поле «Размер» пишется ТОЛЬКО размер
+          («48», «M», «42 / XS»); цвет задаётся матрицей выше и хранится отдельно.
+          Остаток варианта задаётся в таблице ниже.
         </p>
         <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-3">
           <div>
-            <label htmlFor="v-name" className="block text-xs font-medium text-gray-600">Размер / название*</label>
+            <label htmlFor="v-name" className="block text-xs font-medium text-gray-600">Размер*</label>
             <input id="v-name" value={form.name} onChange={(e) => setField('name', e.target.value)}
-              placeholder="напр. 48, M, Красный"
+              placeholder="напр. 48, M, 42 / XS"
               className="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-sm" />
           </div>
           <div>

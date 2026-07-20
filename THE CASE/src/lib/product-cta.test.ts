@@ -8,6 +8,7 @@ function st(over: Partial<ProductCtaState>): ProductCtaState {
     canBuySimple: over.canBuySimple ?? false,
     hasAvailableVariants: over.hasAvailableVariants ?? false,
     hasSelectedVariant: over.hasSelectedVariant ?? false,
+    needsColor: over.needsColor ?? false,
   };
 }
 
@@ -50,5 +51,31 @@ describe("productCtaLabel", () => {
     expect(
       productCtaLabel(st({ hasVariants: true, hasAvailableVariants: false, hasSelectedVariant: true })),
     ).toBe("Нет в наличии");
+  });
+
+  it("матрица цвет×размер: цвет не выбран → «Выберите цвет» (приоритет над размером)", () => {
+    expect(
+      productCtaLabel(
+        st({ hasVariants: true, hasAvailableVariants: true, needsColor: true }),
+      ),
+    ).toBe("Выберите цвет");
+    // размер уже выбран, но без цвета вариант не определить
+    expect(
+      productCtaLabel(
+        st({ hasVariants: true, hasAvailableVariants: true, needsColor: true, hasSelectedVariant: false }),
+      ),
+    ).toBe("Выберите цвет");
+  });
+
+  it("«Нет в наличии» имеет приоритет над «Выберите цвет»", () => {
+    expect(
+      productCtaLabel(st({ hasVariants: true, hasAvailableVariants: false, needsColor: true })),
+    ).toBe("Нет в наличии");
+  });
+
+  it("цвет выбран → снова «Выберите размер»", () => {
+    expect(
+      productCtaLabel(st({ hasVariants: true, hasAvailableVariants: true, needsColor: false })),
+    ).toBe("Выберите размер");
   });
 });

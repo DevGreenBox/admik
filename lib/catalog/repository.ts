@@ -29,6 +29,11 @@ import type {
 } from './types';
 import type { CategoryEdge } from './tree';
 import { discountPercent, isOnSale, resolveIsNew } from './pricing';
+import {
+  COLOR_ATTRIBUTE_CODE_PATTERNS,
+  COLOR_ATTRIBUTE_NAMES,
+  normalizeColorHex,
+} from './color';
 
 // =============================================================================
 // Чистые мапперы row→domain (тестируемы без БД).
@@ -180,10 +185,39 @@ export function mapVariant(row: any): ProductVariant {
     isActive: Boolean(row.is_active),
     sort: Number(row.sort),
     attributesCache: asJson(row.attributes_cache),
+    // Цвет варианта: вариантный EAV (см. variantColorLateral). Отсутствие
+    // джойна (точечные SELECT без него) даёт null, а не undefined — единая
+    // форма для DTO.
+    color:
+      typeof row.color === 'string' && row.color.trim() !== ''
+        ? row.color.trim()
+        : null,
+    colorHex: normalizeColorHex(row.color_hex),
     ...mapDimsFields(row),
     createdAt: asDate(row.created_at),
     updatedAt: asDate(row.updated_at),
   };
+}
+
+/**
+ * Уникальные метки размеров в порядке появления (чистая функция).
+ *
+ * ЗАЧЕМ: variant.name — метка РАЗМЕРА («42 / XS»), а при матрице «цвет × размер»
+ * несколько вариантов делят одно имя. Фасет размеров каталога сравнивает метки
+ * точной строкой, поэтому дубли обязаны схлопываться. Пустые метки отбрасываем.
+ */
+export function uniqueSizes(values: readonly (string | null | undefined)[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of values) {
+    const v = typeof raw === 'string' ? raw.trim() : '';
+    if (v === '' || seen.has(v)) {
+      continue;
+    }
+    seen.add(v);
+    out.push(v);
+  }
+  return out;
 }
 
 export function mapAttribute(row: any): Attribute {
@@ -209,6 +243,7 @@ export function mapAttributeValue(row: any): AttributeValue {
     value: row.value,
     slug: row.slug ?? null,
     sort: Number(row.sort),
+    colorHex: normalizeColorHex(row.color_hex),
   };
 }
 
@@ -455,9 +490,17 @@ export async function listProducts(
       -- Фасеты каталога (Мадина №5): атрибуты товара (цвет/пол) + метки размеров
       -- из имён вариантов (variant.name = «48 / M» и т.п.), отсортированные.
       p.attributes_cache,
-      COALESCE((SELECT array_agg(v.name ORDER BY v.sort)
-        FROM product_variants v
-        WHERE v.product_id = p.id AND v.is_active AND v.name <> ''), '{}') AS variant_sizes
+      -- УНИКАЛЬНЫЕ метки размеров: при матрице «цвет × размер» имена вариантов
+      -- ПОВТОРЯЮТСЯ (2 цвета × 4 размера = 8 вариантов, 4 метки), и фасет
+      -- размеров каталога (точное сравнение строк) получал бы дубли. Схлопываем
+      -- по имени, порядок держим по МИНИМАЛЬНОМУ sort метки (array_agg(DISTINCT …
+      -- ORDER BY v.sort) в Postgres невозможен: с DISTINCT сортировать можно
+      -- только по агрегируемому выражению).
+      COALESCE((SELECT array_agg(s.name ORDER BY s.sort, s.name)
+        FROM (SELECT v.name AS name, min(v.sort) AS sort
+              FROM product_variants v
+              WHERE v.product_id = p.id AND v.is_active AND v.name <> ''
+              GROUP BY v.name) s), '{}') AS variant_sizes
     FROM products p
     LEFT JOIN brands b ON b.id = p.brand_id
     ${where}
@@ -501,9 +544,11 @@ export async function listProducts(
         r.attributes_cache && typeof r.attributes_cache === 'object'
           ? (r.attributes_cache as Record<string, unknown>)
           : {},
-      sizes: Array.isArray(r.variant_sizes)
-        ? (r.variant_sizes as string[]).filter(Boolean)
-        : [],
+      // Второй рубеж дедупа (SQL уже схлопнул): фасет каталога сравнивает метки
+      // строкой, дубль размера ломает фильтр сетки.
+      sizes: uniqueSizes(
+        Array.isArray(r.variant_sizes) ? (r.variant_sizes as string[]) : [],
+      ),
       createdAt,
     };
   });
@@ -538,10 +583,31 @@ export async function getProductById(
       SELECT category_id, is_primary FROM product_categories WHERE product_id = ${id}
     `,
     sql<Record<string, unknown>[]>`
-      SELECT id, product_id, sku, name, price_override, price_delta,
-             compare_at_price, is_active, sort, attributes_cache,
-             weight_g, length_cm, width_cm, height_cm, created_at, updated_at
-      FROM product_variants WHERE product_id = ${id} ORDER BY sort, name
+      -- Цвет варианта (спринт B) — вариантный EAV: product_attributes с
+      -- variant_id → attribute_values (value + color_hex, 0036). Справочник
+      -- «Цвет» узнаём по имени/коду (attributes.is_variant в UI не проставляется,
+      -- полагаться на него нельзя); список признаков — lib/catalog/color.ts,
+      -- единый с JS-предикатом isColorAttribute. LATERAL + LIMIT 1: у варианта
+      -- ровно один цвет, берём стабильно первый по сортировке справочника.
+      SELECT v.id, v.product_id, v.sku, v.name, v.price_override, v.price_delta,
+             v.compare_at_price, v.is_active, v.sort, v.attributes_cache,
+             v.weight_g, v.length_cm, v.width_cm, v.height_cm,
+             v.created_at, v.updated_at,
+             c.color, c.color_hex
+      FROM product_variants v
+      LEFT JOIN LATERAL (
+        SELECT COALESCE(av.value, pa.value_text) AS color,
+               av.color_hex                      AS color_hex
+        FROM product_attributes pa
+        JOIN attributes a ON a.id = pa.attribute_id
+        LEFT JOIN attribute_values av ON av.id = pa.value_id
+        WHERE pa.variant_id = v.id
+          AND (lower(a.name) = ANY(${COLOR_ATTRIBUTE_NAMES})
+               OR lower(a.code) LIKE ANY(${COLOR_ATTRIBUTE_CODE_PATTERNS}))
+        ORDER BY a.sort, a.name
+        LIMIT 1
+      ) c ON true
+      WHERE v.product_id = ${id} ORDER BY v.sort, v.name
     `,
     sql<Record<string, unknown>[]>`
       SELECT id, product_id, variant_id, attribute_id, value_id, value_text
@@ -591,7 +657,7 @@ export async function listAttributeValues(
   attributeId: string,
 ): Promise<AttributeValue[]> {
   const rows = await sql<Record<string, unknown>[]>`
-    SELECT id, attribute_id, value, slug, sort
+    SELECT id, attribute_id, value, slug, sort, color_hex
     FROM attribute_values WHERE attribute_id = ${attributeId} ORDER BY sort, value
   `;
   return rows.map(mapAttributeValue);
@@ -606,7 +672,7 @@ export async function listAttributeValuesByAttribute(): Promise<
   Record<string, AttributeValue[]>
 > {
   const rows = await sql<Record<string, unknown>[]>`
-    SELECT id, attribute_id, value, slug, sort
+    SELECT id, attribute_id, value, slug, sort, color_hex
     FROM attribute_values ORDER BY attribute_id, sort, value
   `;
   const map: Record<string, AttributeValue[]> = {};

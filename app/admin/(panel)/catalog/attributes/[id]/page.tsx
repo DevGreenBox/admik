@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
 import { listAttributes, listAttributeValues } from '@/lib/catalog/repository';
+import { isColorAttribute } from '@/lib/catalog/color';
 
 import { Forbidden } from '../../../_components/Forbidden';
 import { guardCatalog } from '../../_components/guard';
@@ -41,6 +42,10 @@ export default async function AttributeDetailPage({
   // Словарь значений нужен только для select; для прочих типов передаём пустой.
   const values =
     attribute.type === 'select' ? await listAttributeValues(attribute.id) : [];
+  // Справочник «Цвет» узнаём по имени/коду (lib/catalog/color), а НЕ по флагу
+  // is_variant: в реальных данных флаг обычно не проставлен, и фильтр по нему
+  // просто не нашёл бы справочник.
+  const isColor = isColorAttribute(attribute);
 
   return (
     <div>
@@ -56,10 +61,28 @@ export default async function AttributeDetailPage({
         <AttributeForm attribute={attribute} />
       </div>
 
+      {isColor && !attribute.isVariant ? (
+        <p className="mt-6 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          Это справочник цвета, но у него не включён признак{' '}
+          <strong>«Вариантная характеристика»</strong>. Матрица «цвет × размер» в
+          карточке товара работает и без него, но включите признак — так в списке
+          характеристик сразу видно, что значение задаётся у варианта, а не у товара.
+        </p>
+      ) : null}
+
+      {isColor && attribute.type !== 'select' ? (
+        <p className="mt-6 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          Чтобы вести цвета матрицей, у характеристики должен быть тип{' '}
+          <strong>«Список значений (select)»</strong>: цвет варианта хранится ссылкой
+          на значение словаря, а свободный текст такой ссылки не даёт.
+        </p>
+      ) : null}
+
       <AttributeValues
         attributeId={attribute.id}
         values={values}
         editable={attribute.type === 'select'}
+        isColor={isColor}
       />
     </div>
   );

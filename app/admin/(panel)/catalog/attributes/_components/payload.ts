@@ -2,6 +2,7 @@ import type {
   AttributeCreateInput,
   AttributeUpdateInput,
   AttributeValueInput,
+  AttributeValueUpdateInput,
 } from '@/lib/catalog/schemas';
 import type { AttributeType } from '@/lib/catalog/types';
 
@@ -47,6 +48,41 @@ export interface AttributeValueFormValues {
   value: string;
   slug?: string;
   sort?: number;
+  /** HEX цвета для значений справочника «Цвет»; пусто — свотча не будет. */
+  colorHex?: string;
+}
+
+/** Сырые поля формы правки значения словаря (все поля необязательны). */
+export interface AttributeValueUpdateFormValues {
+  value?: string;
+  slug?: string;
+  sort?: number;
+  /** undefined — не трогать; '' — очистить hex; иначе — установить. */
+  colorHex?: string;
+}
+
+/**
+ * Приводит ввод HEX к каноничному '#RRGGBB' (миграция 0036 требует ровно этот
+ * формат). Принимает удобные для человека варианты: без решётки и в
+ * трёхсимвольном сокращении — редактор набирает «fff», а не «#FFFFFF».
+ *
+ * ВАЖНО: мусор НЕ отбрасывается, а возвращается как есть — тогда его отвергнет
+ * Zod и владелец увидит ошибку. Если бы мы «чинили» ввод, превращая опечатку в
+ * undefined, поле сохранилось бы пустым, а редактор считал бы цвет заведённым.
+ */
+export function normalizeHexInput(raw: string | undefined): string | undefined {
+  if (raw == null) return undefined;
+  const v = raw.trim();
+  if (v === '') return undefined;
+  const body = v.startsWith('#') ? v.slice(1) : v;
+  if (/^[0-9a-fA-F]{3}$/.test(body)) {
+    const [r, g, b] = [body[0]!, body[1]!, body[2]!];
+    return `#${r}${r}${g}${g}${b}${b}`.toUpperCase();
+  }
+  if (/^[0-9a-fA-F]{6}$/.test(body)) {
+    return `#${body.toUpperCase()}`;
+  }
+  return v;
 }
 
 /** Пустую/пробельную строку приводим к undefined (поле не передаём). */
@@ -111,5 +147,30 @@ export function buildAttributeValuePayload(
     value: v.value.trim(),
     slug: blankToUndefined(v.slug),
     sort: v.sort,
+    colorHex: normalizeHexInput(v.colorHex),
+  };
+}
+
+/**
+ * Правка значения словаря → вход updateAttributeValue (AttributeValueUpdateSchema).
+ * colorHex: undefined — не трогаем; пустая строка — очистка в null; иначе —
+ * нормализованный HEX (различие undefined/null сервер понимает через CASE).
+ */
+export function buildAttributeValueUpdatePayload(
+  id: string,
+  v: AttributeValueUpdateFormValues,
+): Partial<AttributeValueUpdateInput> & { id: string } {
+  const colorHex =
+    v.colorHex === undefined
+      ? undefined
+      : v.colorHex.trim() === ''
+        ? null
+        : normalizeHexInput(v.colorHex);
+  return {
+    id,
+    value: v.value === undefined ? undefined : v.value.trim(),
+    slug: blankToUndefined(v.slug),
+    sort: v.sort,
+    colorHex,
   };
 }

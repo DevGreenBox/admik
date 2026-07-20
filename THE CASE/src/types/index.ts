@@ -21,6 +21,14 @@ export interface CartItem {
   slug: string;
   name: string;
   size: string;
+  /**
+   * Цвет выбранного варианта (метка справочника, напр. «Белый»).
+   * СТРОГО ОПЦИОНАЛЬНОЕ: корзина живёт в localStorage (zustand persist), и
+   * обязательное поле сломало бы уже сохранённые корзины покупателей — ровно
+   * так же в своё время добавляли `available`. undefined = цвет не выбирался
+   * (товар без цветовой оси) либо позиция из старой корзины.
+   */
+  color?: string;
   price: number;
   imageUrl: string | null;
   quantity: number;
