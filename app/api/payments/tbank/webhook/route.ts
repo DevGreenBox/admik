@@ -4,6 +4,7 @@ import { getTbankConfig } from '@/lib/payments/tbank/config';
 import { PaymentService } from '@/lib/payments/tbank/service';
 import { isModuleEffectivelyEnabled } from '@/lib/config/settings';
 import { logger } from '@/lib/logger';
+import { extractWebhookIp } from '@/lib/server/request-ip';
 
 /** Структурный логгер webhook Т-Банк (docs/15 §7, порт cdek.webhook). */
 const log = logger.child({ module: 'tbank.webhook' });
@@ -16,7 +17,8 @@ const log = logger.child({ module: 'tbank.webhook' });
  *   1) module-gate: модуль payments выключен → 404;
  *   2) (опц.) IP-whitelist (TBANK_WEBHOOK_IPS) — доп. слой, аутентифицирует ТОЛЬКО
  *      за доверенным прокси (TBANK_WEBHOOK_TRUST_PROXY=true). Без trustProxy
- *      клиент-контролируемые X-Forwarded-For/X-Real-IP НЕ доверяются (см. extractIp),
+ *      клиент-контролируемые X-Forwarded-For/X-Real-IP НЕ доверяются (см.
+ *      extractWebhookIp — ОБЩАЯ с webhook СДЭК, lib/server/request-ip.ts),
  *      поэтому подделка заголовков обхода не даёт; ГЛАВНАЯ защита — Token;
  *   3) ГЛАВНОЕ — проверка Token в теле (verifyNotificationToken на TBANK_PASSWORD);
  *      невалидный → 403, НЕ обрабатываем;
@@ -41,28 +43,6 @@ function ok(): NextResponse {
     status: 200,
     headers: { 'Content-Type': 'text/plain; charset=utf-8' },
   });
-}
-
-/**
- * Извлекает клиентский IP источника запроса (порт cdek webhook).
- *
- * SECURITY (волна 4, баг B): X-Forwarded-For / X-Real-IP — клиент-контролируемые
- * заголовки. Доверяем им ТОЛЬКО за доверенным прокси (trustProxy=true, Caddy
- * пробрасывает реальный IP соединения). БЕЗ trustProxy возвращаем '' СРАЗУ, НЕ
- * читая заголовки: иначе атакующий подделкой X-Forwarded-For/X-Real-IP из
- * TBANK_WEBHOOK_IPS прошёл бы непустой whitelist. То есть IP-whitelist
- * аутентифицирует запрос только за доверенным прокси (trustProxy=true);
- * первичная защита webhook — проверка Token в теле (см. JSDoc роута).
- */
-function extractIp(req: NextRequest, trustProxy: boolean): string {
-  if (!trustProxy) return '';
-  const fwd = req.headers.get('x-forwarded-for');
-  if (fwd) {
-    const first = fwd.split(',')[0]?.trim();
-    if (first) return first;
-  }
-  const real = req.headers.get('x-real-ip')?.trim();
-  return real ?? '';
 }
 
 /** Проверка IP по whitelist (CIDR/точные). Пустой whitelist → пропуск (главная защита — Token). */
@@ -113,7 +93,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const cfg = getTbankConfig();
 
   // (1) Доп. IP-whitelist (опц.; главная защита — Token).
-  const ip = extractIp(req, cfg.webhookTrustProxy);
+  // IP источника — ОБЩАЯ функция с webhook СДЭК (lib/server/request-ip.ts):
+  // приоритет доверенного X-Real-IP над клиентским XFF задан в одном месте.
+  const ip = extractWebhookIp(req.headers, cfg.webhookTrustProxy);
   if (!ipAllowed(ip, cfg.webhookAllowedIps)) {
     log.warn('webhook отклонён: IP вне whitelist', { ip, status: 403 });
     return NextResponse.json({ ok: false, error: 'forbidden_ip' }, { status: 403 });

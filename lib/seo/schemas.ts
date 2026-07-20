@@ -38,6 +38,15 @@ export function isSafeCanonical(value: string): boolean {
   // Пробелы/управляющие символы недопустимы (вектор обхода).
   if (/\s/.test(value)) return false;
 
+  // SECURITY (доработка находки #11): обратный слэш эквивалентен прямому для
+  // special-схем в WHATWG URL — new URL('/\evil.com', 'https://shop.ru').href
+  // === 'https://evil.com/'. Без этой строки '/\evil.com' проходил проверку ниже
+  // (ведущий '/' есть, '//' нет) и уводил <link rel=canonical> на чужой домен.
+  // Политика canonical (только https) отличается от политики ссылок контента,
+  // поэтому проверка намеренно НЕ сведена к lib/security/safe-href.ts — но запрет
+  // '\' обязан быть в обеих.
+  if (value.includes('\\')) return false;
+
   // Относительный path: ровно один ведущий '/' (не '//' — protocol-relative).
   if (value.startsWith('/')) {
     return !value.startsWith('//');

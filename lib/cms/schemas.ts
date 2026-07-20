@@ -25,6 +25,7 @@ import {
   noindexSchema,
 } from '@/lib/seo/schemas';
 import { slugSchema } from '@/lib/catalog/schemas';
+import { isSafeHref, SAFE_HREF_MESSAGE } from '@/lib/security/safe-href';
 import { CMS_PAGE_STATUSES, SITEMAP_CHANGEFREQS } from './types';
 
 // -----------------------------------------------------------------------------
@@ -43,8 +44,25 @@ const richTextSchema = z.string().max(50000);
 /** Ключ объекта в хранилище (S3/MinIO). НЕ URL — URL собирает storage.publicUrl. */
 const imageKeySchema = z.string().trim().min(1).max(512);
 
-/** Href: относительный путь или абсолютный URL (детальная санитизация — на рендере). */
-const hrefSchema = z.string().trim().min(1).max(2048);
+/**
+ * Href секции CMS (ctaHref / buttonHref / banner.href).
+ *
+ * SECURITY (аудит 2026-07-18, #11): эти поля НЕ являются rich-text и проходят мимо
+ * sanitizeHtml — их значение попадает прямо в `<Link href>` / `<a href>` на витрине.
+ * Раньше принималась ЛЮБАЯ строка → `javascript:alert(1)` давал хранимый XSS (при
+ * клике), а произвольный внешний URL — open-redirect. Теперь допускаем ТОЛЬКО:
+ *   • корневой относительный путь `/...` (не protocol-relative `//`),
+ *   • якорь `#...`,
+ *   • абсолютный URL со схемой http/https/mailto/tel.
+ * Всё остальное (javascript:, data:, vbscript:, //host, любой '\') — отвергается.
+ * Дублирующий guard на рендере (safeHref в витрине) нейтрализует и ранее сохранённые
+ * данные.
+ *
+ * ПРАВИЛА ЖИВУТ НЕ ЗДЕСЬ. Локальная копия проверки была удалена (доработка находки
+ * #11): она разошлась с одноимённой `hrefSchema` в lib/settings/schemas.ts, и обе
+ * пропускали '/\evil.com'. Единственный источник правды — lib/security/safe-href.ts.
+ */
+const hrefSchema = z.string().trim().min(1).max(2048).refine(isSafeHref, SAFE_HREF_MESSAGE);
 
 /** section_key — стабильный машинный ключ секции в пределах страницы. */
 export const sectionKeySchema = z.string().trim().min(1).max(100);

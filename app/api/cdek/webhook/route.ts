@@ -4,6 +4,7 @@ import { getCdekConfig, isCdekMock } from '@/lib/cdek/config';
 import { verifyWebhookIp, WebhookService } from '@/lib/cdek/services/webhook';
 import { isModuleEffectivelyEnabled } from '@/lib/config/settings';
 import { logger } from '@/lib/logger';
+import { extractWebhookIp } from '@/lib/server/request-ip';
 import { safeEqual } from '@/lib/storefront/order-dto';
 
 /** Структурный логгер webhook СДЭК (наблюдаемость, Этап 6 §6.3). */
@@ -22,7 +23,10 @@ const log = logger.child({ module: 'cdek.webhook' });
  *        (CDEK_WEBHOOK_TRUST_PROXY=true). SECURITY: без trustProxy
  *        клиент-контролируемые X-Forwarded-For/X-Real-IP НЕ доверяются как
  *        источник IP (docs/08 §8.2: «IP из соединения, не из X-Forwarded-For»),
- *        поэтому подделка заголовков обхода не даёт.
+ *        поэтому подделка заголовков обхода не даёт. ЗА доверенным прокси
+ *        источник — X-Real-IP (Caddy перезаписывает его реальным IP пира), а НЕ
+ *        leftmost X-Forwarded-For: см. extractWebhookIp (ОБЩАЯ функция с webhook
+ *        Т-Банка, lib/server/request-ip.ts).
  *      • Вне mock-режима (есть боевые ключи) запрос обязан пройти ИЛИ секрет,
  *        ИЛИ IP-whitelist; если НЕ настроены НИ секрет, НИ whitelist — 401
  *        (роут не работает открытым, чтобы исключить запись произвольного
@@ -39,25 +43,6 @@ const log = logger.child({ module: 'cdek.webhook' });
  */
 
 export const dynamic = 'force-dynamic';
-
-/**
- * Извлекает IP источника запроса (docs/08 §8.2). SECURITY: X-Forwarded-For /
- * X-Real-IP — клиент-контролируемые заголовки; доверяем им ТОЛЬКО за доверенным
- * прокси (trustProxy=true, Caddy пробрасывает реальный IP соединения). БЕЗ
- * trustProxy возвращаем '' — IP-whitelist в таком режиме не аутентифицирует
- * (защита должна идти секретом ?key=), иначе атакующий подделкой заголовка прошёл
- * бы whitelist. Возвращаемый ip также сохраняется в cdek_status_log.ip (аудит).
- */
-function extractIp(req: NextRequest, trustProxy: boolean): string {
-  if (!trustProxy) return '';
-  const fwd = req.headers.get('x-forwarded-for');
-  if (fwd) {
-    const first = fwd.split(',')[0]?.trim();
-    if (first) return first;
-  }
-  const real = req.headers.get('x-real-ip')?.trim();
-  return real ?? '';
-}
 
 /** Результат аутентификации запроса вебхука. */
 type AuthResult =
@@ -78,7 +63,10 @@ type AuthResult =
  */
 function authenticate(req: NextRequest, cfg: ReturnType<typeof getCdekConfig>): AuthResult {
   const mock = isCdekMock();
-  const ip = extractIp(req, cfg.webhookTrustProxy);
+  // IP источника (docs/08 §8.2) — ОБЩАЯ функция с webhook Т-Банка: приоритет
+  // источников (доверенный X-Real-IP над клиентским XFF) задан в одном месте.
+  // Этот же ip уходит в cdek_status_log.ip (аудит), поэтому спуфинг недопустим.
+  const ip = extractWebhookIp(req.headers, cfg.webhookTrustProxy);
 
   // (a) СЕКРЕТ ?key= — обязателен, если задан; первичная аутентификация.
   if (cfg.webhookSecret) {

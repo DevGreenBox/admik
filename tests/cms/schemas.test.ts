@@ -332,3 +332,35 @@ describe('cms/schemas — OG-текст страницы (C18)', () => {
     expect(r.success).toBe(false);
   });
 });
+
+// =============================================================================
+// SECURITY (аудит 2026-07-18, #11): href-поля секций (ctaHref/buttonHref/banner.href)
+// не rich-text и идут прямо в <Link href>/<a href> на витрине. hrefSchema обязан
+// отвергать опасные схемы (javascript:/data:/protocol-relative), допуская лишь
+// относительный путь, якорь и http/https/mailto/tel.
+// =============================================================================
+describe('cms/schemas — hrefSchema: анти-XSS / анти-open-redirect (#11)', () => {
+  const hero = (ctaHref: string) => ({
+    type: 'hero' as const,
+    title: 'T',
+    ctaLabel: 'Go',
+    ctaHref,
+  });
+
+  it('отвергает javascript:-схему (хранимый XSS)', () => {
+    expect(CmsSectionContentSchema.safeParse(hero('javascript:alert(1)')).success).toBe(false);
+    expect(CmsSectionContentSchema.safeParse(hero('  JavaScript:alert(1)')).success).toBe(false);
+  });
+  it('отвергает data: и vbscript:', () => {
+    expect(CmsSectionContentSchema.safeParse(hero('data:text/html,<script>1</script>')).success).toBe(false);
+    expect(CmsSectionContentSchema.safeParse(hero('vbscript:msgbox(1)')).success).toBe(false);
+  });
+  it('отвергает protocol-relative //host (open-redirect)', () => {
+    expect(CmsSectionContentSchema.safeParse(hero('//evil.example')).success).toBe(false);
+  });
+  it('допускает корневой путь, якорь, http/https/mailto/tel', () => {
+    for (const ok of ['/catalog', '#faq', 'https://example.com/p', 'http://x.io', 'mailto:a@b.co', 'tel:+70000000000']) {
+      expect(CmsSectionContentSchema.safeParse(hero(ok)).success).toBe(true);
+    }
+  });
+});

@@ -64,7 +64,26 @@ describe('normalizeClientIp — валидация IP перед записью 
     expect(normalizeClientIp(null, 'still-not-an-ip')).toBeUndefined();
   });
 
-  it('XFF имеет приоритет над x-real-ip, когда XFF валиден', () => {
-    expect(normalizeClientIp('203.0.113.7', '192.0.2.55')).toBe('203.0.113.7');
+  // ===========================================================================
+  // SECURITY (аудит 2026-07-18, HIGH): X-Real-IP (за Caddy перезаписан реальным
+  // IP пира) — ДОВЕРЕННЫЙ источник и имеет ПРИОРИТЕТ над клиент-контролируемым
+  // leftmost X-Forwarded-For. Иначе ротацией XFF атакующий обходит rate-limit
+  // публичных POST (DoS склада) и отравляет orders.ip/audit_log.ip.
+  // ===========================================================================
+  it('X-Real-IP (доверенный, за Caddy) имеет приоритет над X-Forwarded-For', () => {
+    // XFF подделан клиентом, X-Real-IP проставлен прокси → берём X-Real-IP.
+    expect(normalizeClientIp('203.0.113.7', '192.0.2.55')).toBe('192.0.2.55');
+  });
+
+  it('спуфнутый leftmost XFF игнорируется при валидном X-Real-IP', () => {
+    // Классическая атака: свежий случайный XFF на каждый запрос ради нового
+    // ведра rate-limit. За Caddy X-Real-IP стабилен и реален → лимит работает.
+    expect(normalizeClientIp('1.2.3.4', '198.51.100.9')).toBe('198.51.100.9');
+    expect(normalizeClientIp('5.6.7.8', '198.51.100.9')).toBe('198.51.100.9');
+  });
+
+  it('X-Real-IP невалиден → fallback на leftmost XFF (окружение без прокси)', () => {
+    expect(normalizeClientIp('203.0.113.7', 'garbage')).toBe('203.0.113.7');
+    expect(normalizeClientIp('203.0.113.7', null)).toBe('203.0.113.7');
   });
 });

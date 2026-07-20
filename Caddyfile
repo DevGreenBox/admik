@@ -61,7 +61,12 @@ www.{$SHOP_DOMAIN} {
 {$SHOP_DOMAIN} {
 	import security_headers
 	import json_log
-	reverse_proxy storefront:3000
+	reverse_proxy storefront:3000 {
+		# SECURITY: перезаписываем X-Real-IP реальным IP соединения — клиент не
+		# может его подделать (в отличие от leftmost X-Forwarded-For). Приложение
+		# доверяет именно X-Real-IP (lib/server/request-ip.ts) для rate-limit/аудита.
+		header_up X-Real-IP {http.request.remote.host}
+	}
 }
 
 # -----------------------------------------------------------------------------
@@ -86,7 +91,10 @@ www.{$SHOP_DOMAIN} {
 
 	# Всё остальное (админка /admin, API /api/*) — в приложение Admik.
 	handle {
-		reverse_proxy app:3000
+		reverse_proxy app:3000 {
+			# SECURITY: доверенный X-Real-IP (см. комментарий выше у витрины).
+			header_up X-Real-IP {http.request.remote.host}
+		}
 	}
 }
 
@@ -97,5 +105,8 @@ www.{$SHOP_DOMAIN} {
 # -----------------------------------------------------------------------------
 :80 {
 	import security_headers
-	reverse_proxy storefront:3000
+	reverse_proxy storefront:3000 {
+		# SECURITY: доверенный X-Real-IP (см. комментарий выше у витрины).
+		header_up X-Real-IP {http.request.remote.host}
+	}
 }

@@ -9,6 +9,7 @@
  */
 
 import type { AdmikSettingsDto } from '@/lib/admik';
+import { safeHrefOr } from '@/lib/safe-href';
 
 export interface ResolvedHome {
   hero: {
@@ -103,7 +104,9 @@ export function resolveHome(s: AdmikSettingsDto | null): ResolvedHome {
       subtitle: clean(h.hero?.subtitle),
       imageUrl: clean(h.hero?.imageUrl),
       ctaLabel: clean(h.hero?.ctaLabel) ?? HOME_FALLBACK.hero.ctaLabel,
-      ctaHref: clean(h.hero?.ctaHref) ?? HOME_FALLBACK.hero.ctaHref,
+      // Находка #11: в эту ссылку обёрнут весь первый экран — небезопасное значение
+      // из БД подменяем дефолтным маршрутом витрины (см. safeHrefOr).
+      ctaHref: safeHrefOr(clean(h.hero?.ctaHref), HOME_FALLBACK.hero.ctaHref),
     },
     about: {
       title: clean(h.about?.title) ?? HOME_FALLBACK.about.title,
@@ -135,7 +138,8 @@ export function resolveHome(s: AdmikSettingsDto | null): ResolvedHome {
       title: clean(h.philosophy?.title) ?? HOME_FALLBACK.philosophy.title,
       text: clean(h.philosophy?.text) ?? HOME_FALLBACK.philosophy.text,
       linkLabel: clean(h.philosophy?.linkLabel) ?? HOME_FALLBACK.philosophy.linkLabel,
-      linkHref: clean(h.philosophy?.linkHref) ?? HOME_FALLBACK.philosophy.linkHref,
+      // Находка #11 — как и hero.ctaHref, значение приходит из настроек Admik.
+      linkHref: safeHrefOr(clean(h.philosophy?.linkHref), HOME_FALLBACK.philosophy.linkHref),
     },
   };
 }

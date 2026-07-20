@@ -8,6 +8,10 @@ import { Logo } from "@/components/ui/Logo";
 import { selectCartCount, selectWishlistCount, useStore } from "@/lib/store";
 import { flattenCategoryNav } from "@/lib/catalog-view";
 import { buildHeaderNav, NAV_DROPDOWN_PANEL_CLASS } from "@/lib/site-nav";
+// SECURITY (находка #11): ссылки меню приходят из настроек Admik (navigation.header)
+// и из slug'ов CMS-страниц. buildHeaderNav уже выбрасывает небезопасные, это —
+// последний рубеж на самом рендере (на случай нового пути данных мимо site-nav).
+import { safeHrefOr } from "@/lib/safe-href";
 import type { AdmikCategoryDto } from "@/lib/admik";
 
 export function Header({
@@ -71,7 +75,7 @@ export function Header({
                 {NAV_LEFT.map((link) =>
                   link.children ? (
                     <div key={`${link.href}-${link.label}`} className="relative group/nav flex items-center">
-                      <Link href={link.href} aria-haspopup="menu" className="eyebrow leading-none whitespace-nowrap text-graphite link-underline">
+                      <Link href={safeHrefOr(link.href, "/")} aria-haspopup="menu" className="eyebrow leading-none whitespace-nowrap text-graphite link-underline">
                         {link.label}
                       </Link>
                       <div className={NAV_DROPDOWN_PANEL_CLASS}>
@@ -79,7 +83,7 @@ export function Header({
                           {link.children.map((child) => (
                             <Link
                               key={child.href}
-                              href={child.href}
+                              href={safeHrefOr(child.href, "/")}
                               className="eyebrow whitespace-nowrap text-graphite transition-colors duration-300 hover:text-muted"
                             >
                               {child.label}
@@ -89,7 +93,7 @@ export function Header({
                       </div>
                     </div>
                   ) : (
-                    <Link key={`${link.href}-${link.label}`} href={link.href} className="eyebrow leading-none whitespace-nowrap text-graphite link-underline">
+                    <Link key={`${link.href}-${link.label}`} href={safeHrefOr(link.href, "/")} className="eyebrow leading-none whitespace-nowrap text-graphite link-underline">
                       {link.label}
                     </Link>
                   ),
@@ -102,7 +106,7 @@ export function Header({
             <div className="flex min-w-0 items-center justify-end gap-5 md:gap-7">
               <nav className="hidden lg:flex items-center gap-6 lg:gap-8 xl:gap-10 mr-2">
                 {navRight.map((link) => (
-                  <Link key={link.href} href={link.href} className="eyebrow leading-none whitespace-nowrap text-graphite link-underline">
+                  <Link key={link.href} href={safeHrefOr(link.href, "/")} className="eyebrow leading-none whitespace-nowrap text-graphite link-underline">
                     {link.label}
                   </Link>
                 ))}
@@ -161,7 +165,7 @@ export function Header({
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.15 + i * 0.06 }}
                 >
-                  <Link href={link.href} onClick={() => setMenuOpen(false)} className="heading-lg text-graphite">
+                  <Link href={safeHrefOr(link.href, "/")} onClick={() => setMenuOpen(false)} className="heading-lg text-graphite">
                     {link.label}
                   </Link>
                   {link.children ? (
@@ -169,7 +173,7 @@ export function Header({
                       {link.children.map((child) => (
                         <Link
                           key={child.href}
-                          href={child.href}
+                          href={safeHrefOr(child.href, "/")}
                           onClick={() => setMenuOpen(false)}
                           className="link-editorial self-start"
                         >

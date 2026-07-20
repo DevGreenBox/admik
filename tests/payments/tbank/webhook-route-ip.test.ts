@@ -144,3 +144,40 @@ describe('POST /api/payments/tbank/webhook — пустой whitelist (глав�
     expect(handleWebhookMock).toHaveBeenCalledOnce();
   });
 });
+
+/**
+ * SECURITY (аудит 2026-07-18, находка #1): тот же сценарий, что у СДЭК —
+ * оба вебхука ОБЯЗАНЫ вести себя ОДИНАКОВО, потому что оба зовут ОДНУ общую
+ * `extractWebhookIp` (lib/server/request-ip.ts). До фикса у каждого роута была
+ * своя копия extractIp с приоритетом leftmost X-Forwarded-For → whitelist
+ * обходился заголовком при TBANK_WEBHOOK_TRUST_PROXY=true.
+ */
+describe('POST /api/payments/tbank/webhook — спуфинг leftmost XFF ЗА доверенным прокси', () => {
+  it('SECURITY: XFF из whitelist + реальный (чужой) X-Real-IP → 403, обхода нет', async () => {
+    process.env.TBANK_WEBHOOK_TRUST_PROXY = 'true';
+    const res = await callPost({
+      ...body(),
+      headers: {
+        ...(body().headers as Record<string, string>),
+        'x-forwarded-for': VALID_IP, // подделан атакующим
+        'x-real-ip': '198.51.100.7', // проставлен Caddy = реальный IP атакующего
+      },
+    });
+    expect(res.status).toBe(403);
+    expect(handleWebhookMock).not.toHaveBeenCalled();
+  });
+
+  it('легитимный запрос: X-Real-IP из whitelist побеждает чужой XFF → 200', async () => {
+    process.env.TBANK_WEBHOOK_TRUST_PROXY = 'true';
+    const res = await callPost({
+      ...body(),
+      headers: {
+        ...(body().headers as Record<string, string>),
+        'x-forwarded-for': '1.2.3.4',
+        'x-real-ip': VALID_IP,
+      },
+    });
+    expect(res.status).toBe(200);
+    expect(handleWebhookMock).toHaveBeenCalledOnce();
+  });
+});

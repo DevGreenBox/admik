@@ -10,10 +10,23 @@
  */
 
 import type { ResolvedContacts } from '@/lib/store-settings';
+import { isSafeHref } from '@/lib/safe-href';
 
 export interface SiteNavLink {
   href: string;
   label: string;
+}
+
+/**
+ * SECURITY (аудит 2026-07-18, находка #11). Ссылки навигации приходят из настроек
+ * Admik (navigation.header/footer, contacts.socials) и из slug'ов CMS-страниц.
+ * Admik валидирует их на записи, но в БД могут лежать значения, записанные ДО
+ * появления валидации или напрямую через SQL. Здесь — второй рубеж: небезопасная
+ * ссылка не «чинится» фолбэком, а ВЫБРАСЫВАЕТСЯ из меню (мёртвый пункт лучше, чем
+ * пункт, уводящий на чужой домен или исполняющий javascript:).
+ */
+function keepSafe(links: SiteNavLink[]): SiteNavLink[] {
+  return links.filter((l) => isSafeHref(l.href));
 }
 
 export interface NavPage {
@@ -32,10 +45,12 @@ const NAV_HIDE_SLUGS = new Set<string>(['contacts', 'delivery']);
  * ссылка `/{slug}` с её заголовком. Отбрасывает пустые и служебные slug'и.
  */
 export function buildInfoLinks(pages: NavPage[]): SiteNavLink[] {
-  return pages
-    .filter((p) => p && p.slug.trim().length > 0 && p.title.trim().length > 0)
-    .filter((p) => !NAV_HIDE_SLUGS.has(p.slug))
-    .map((p) => ({ href: `/${p.slug}`, label: p.title }));
+  return keepSafe(
+    pages
+      .filter((p) => p && p.slug.trim().length > 0 && p.title.trim().length > 0)
+      .filter((p) => !NAV_HIDE_SLUGS.has(p.slug))
+      .map((p) => ({ href: `/${p.slug}`, label: p.title })),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -89,9 +104,11 @@ export function buildHeaderNav(opts: {
   collectionChildren?: SiteNavLink[];
   infoItems?: SiteNavLink[];
 }): HeaderNav {
-  const headerItems = opts.headerItems ?? [];
-  const collectionChildren = opts.collectionChildren ?? [];
-  const infoItems = opts.infoItems ?? [];
+  // Небезопасные href отсекаются НА ВХОДЕ (находка #11): дальше по функции они
+  // попали бы и в верхний ряд, и в подменю, и в родителя «Информации».
+  const headerItems = keepSafe(opts.headerItems ?? []);
+  const collectionChildren = keepSafe(opts.collectionChildren ?? []);
+  const infoItems = keepSafe(opts.infoItems ?? []);
 
   // «Информация» — выпадающее меню из опубликованных страниц Контента (авто).
   // Родитель ведёт на первую страницу, дети — все страницы.
@@ -153,7 +170,8 @@ export function resolveSocialLinks(c: ResolvedContacts): SiteNavLink[] {
       : c.telegramUrl
         ? [{ label: 'Telegram', href: c.telegramUrl }]
         : [];
-  return links.filter((l) => l.href && l.href.trim() !== '' && l.href !== '#');
+  // isSafeHref уже отсекает пустое; '#' отдельно — мёртвый якорь в футере не нужен.
+  return keepSafe(links).filter((l) => l.href.trim() !== '#');
 }
 
 export interface FooterColumn {
@@ -172,12 +190,17 @@ export function resolveFooterColumns(opts: {
   defaultColumns: FooterColumn[];
   infoLinks?: SiteNavLink[];
 }): FooterColumn[] {
-  const base =
+  const raw =
     opts.settingsColumns && opts.settingsColumns.length > 0
       ? opts.settingsColumns
       : opts.defaultColumns;
+  // Находка #11: чистим ссылки колонок и убираем колонку, которая после чистки
+  // осталась пустой (заголовок без единой ссылки — визуальный мусор).
+  const base = raw
+    .map((c) => ({ ...c, links: keepSafe(c.links) }))
+    .filter((c) => c.links.length > 0);
   const baseHrefs = new Set(base.flatMap((c) => c.links.map((l) => l.href)));
-  const extraPages = (opts.infoLinks ?? []).filter((l) => !baseHrefs.has(l.href));
+  const extraPages = keepSafe(opts.infoLinks ?? []).filter((l) => !baseHrefs.has(l.href));
   return extraPages.length > 0
     ? [...base, { title: 'Информация', links: extraPages }]
     : base;

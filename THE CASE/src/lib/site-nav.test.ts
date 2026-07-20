@@ -219,3 +219,110 @@ describe('resolveSocialLinks — соцссылки футера без биты
     expect(links).toEqual([{ label: 'Instagram', href: 'https://instagram.com/acme' }]);
   });
 });
+
+/**
+ * SECURITY (аудит 2026-07-18, находка #11). Ссылки меню/футера приходят из настроек
+ * Admik (navigation.header / navigation.footer) и из CMS-страниц. Admik валидирует
+ * их на записи, но в БД могут лежать значения, записанные до появления валидации
+ * или напрямую SQL. Навигация обязана выбрасывать такие ссылки, а не рендерить.
+ */
+describe('навигация отбрасывает небезопасные href (находка #11)', () => {
+  const UNSAFE = [
+    'javascript:alert(1)',
+    'JavaScript:alert(1)',
+    'data:text/html,<script>alert(1)</script>',
+    'vbscript:msgbox(1)',
+    '//evil.example',
+    '/\\evil.com',
+    'catalog',
+  ];
+
+  it.each(UNSAFE)('buildHeaderNav выкидывает пункт меню с href %j', (href) => {
+    const nav = buildHeaderNav({
+      headerItems: [
+        { href: '/catalog', label: 'Каталог' },
+        { href, label: 'Зло' },
+      ],
+    });
+    const hrefs = nav.left.map((i) => i.href);
+    expect(hrefs).toContain('/catalog');
+    expect(hrefs).not.toContain(href);
+  });
+
+  it('buildHeaderNav чистит и вложенные пункты подменю', () => {
+    const nav = buildHeaderNav({
+      collectionChildren: [
+        { href: '/catalog/tops', label: 'Топы' },
+        { href: '/\\evil.com', label: 'Зло' },
+      ],
+      infoItems: [
+        { href: 'javascript:alert(1)', label: 'Зло' },
+        { href: '/about', label: 'О нас' },
+      ],
+    });
+    const children = nav.left.flatMap((i) => i.children ?? []).map((c) => c.href);
+    expect(children).toContain('/catalog/tops');
+    expect(children).not.toContain('/\\evil.com');
+    expect(children).not.toContain('javascript:alert(1)');
+    // «Информация» строится только из уцелевших ссылок и ведёт на первую из них.
+    const info = nav.left.find((i) => i.label === 'Информация');
+    expect(info?.href).toBe('/about');
+  });
+
+  it('buildHeaderNav не создаёт «Информацию», если все её ссылки небезопасны', () => {
+    const nav = buildHeaderNav({
+      infoItems: [{ href: '//evil.example', label: 'Зло' }],
+    });
+    expect(nav.left.some((i) => i.label === 'Информация')).toBe(false);
+  });
+
+  it.each(UNSAFE)('resolveFooterColumns выкидывает ссылку %j', (href) => {
+    const cols = resolveFooterColumns({
+      settingsColumns: [
+        {
+          title: 'Магазин',
+          links: [
+            { href: '/catalog', label: 'Каталог' },
+            { href, label: 'Зло' },
+          ],
+        },
+      ],
+      defaultColumns: [],
+    });
+    const hrefs = cols.flatMap((c) => c.links.map((l) => l.href));
+    expect(hrefs).toContain('/catalog');
+    expect(hrefs).not.toContain(href);
+  });
+
+  it('resolveFooterColumns убирает колонку, в которой не осталось ссылок', () => {
+    const cols = resolveFooterColumns({
+      settingsColumns: [
+        { title: 'Зло', links: [{ href: 'javascript:alert(1)', label: 'Зло' }] },
+        { title: 'Магазин', links: [{ href: '/catalog', label: 'Каталог' }] },
+      ],
+      defaultColumns: [],
+    });
+    expect(cols.map((c) => c.title)).toEqual(['Магазин']);
+  });
+
+  it.each(UNSAFE)('resolveSocialLinks выкидывает соцссылку %j', (url) => {
+    const links = resolveSocialLinks(
+      contacts({
+        socials: [
+          { type: 'Telegram', url: 'https://t.me/acme' },
+          { type: 'Зло', url },
+        ],
+      }),
+    );
+    expect(links).toEqual([{ label: 'Telegram', href: 'https://t.me/acme' }]);
+  });
+
+  it('buildInfoLinks не может породить небезопасный href (slug экранируется в путь)', () => {
+    // Ссылка собирается как `/${slug}` — но slug вида '\evil.com' дал бы '/\evil.com'.
+    const links = buildInfoLinks([
+      { slug: 'about', title: 'О нас' },
+      { slug: '\\evil.com', title: 'Зло' },
+    ]);
+    expect(links.map((l) => l.href)).toEqual(['/about']);
+  });
+});

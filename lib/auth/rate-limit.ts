@@ -7,12 +7,15 @@ import { getEnv } from '@/lib/config/env';
  * Стратегия — fixed window: на ключ (login:fail:{ip} / login:fail:{email})
  * считаем неудачные попытки; при достижении порога в пределах окна логин
  * временно блокируется. Бэкенд по умолчанию — Redis (масштабируется между
- * инстансами, ADR-002). Если REDIS_URL не задан (demo-магазин без Redis) —
- * безопасный fallback на in-memory Map с одноразовым warn (требование
- * mock-режима зависимостей, docs/02).
+ * инстансами, ADR-002). Если REDIS_URL не задан ВНЕ production (dev/CI,
+ * demo-магазин без Redis) — fallback на in-memory Map с одноразовым warn
+ * (требование mock-режима зависимостей, docs/02). В production без REDIS_URL —
+ * fail-closed, см. resolveRateBackend() (аудит 2026-07-18, #17).
  *
- * Выбор бэкенда вынесен в фабрику createRateLimiter({ backend }), чтобы его
- * можно было тестировать без живого Redis (см. tests/auth/rate-limit.test.ts).
+ * Выбор бэкенда сосредоточен в ОДНОЙ функции resolveRateBackend() (её зовут обе
+ * фабрики — админская и storefront), а бизнес-правила — в createRateLimiter({
+ * backend }), чтобы тестировать без живого Redis (tests/auth/rate-limit.test.ts,
+ * tests/auth/rate-limit-fail-closed.test.ts).
  */
 
 /** Порог и окно блокировки. */
@@ -270,26 +273,53 @@ function warnMockOnce(): void {
   }
 }
 
+/**
+ * ЕДИНСТВЕННАЯ точка выбора бэкенда rate-limit — для ВСЕХ лимитеров модуля
+ * (админский login-лимитер и storefront-лимитер). Двойников быть не должно.
+ *
+ * SECURITY (аудит 2026-07-18, #17): rate-limit/lockout — контроль безопасности
+ * (защита логина от брутфорса, публичных ручек витрины от абуза). In-memory
+ * бэкенд не делится между инстансами и обнуляется при рестарте → в production
+ * это тихая деградация защиты. Поэтому в production без REDIS_URL — fail-closed
+ * (не стартуем лимитер молча на памяти). Вне production (dev/CI) — mock допустим
+ * с одноразовым warn.
+ *
+ * История: гвард изначально стоял только в getDefaultLimiter(), а весь боевой
+ * трафик витрины (18 публичных ручек → runStorefront → checkStorefrontRate) шёл
+ * через getStorefrontLimiter() БЕЗ гварда. Условие вынесено сюда, чтобы
+ * скопировать его «мимо проверки» было физически невозможно: любая новая фабрика
+ * обязана брать бэкенд отсюда.
+ *
+ * Ленивость + динамический import('ioredis') нужны, чтобы импорт модуля не
+ * открывал соединение с Redis, mock-режим не тянул драйвер, а код оставался
+ * ESM-совместимым (без require()).
+ */
+async function resolveRateBackend(): Promise<RateBackend> {
+  const { REDIS_URL, NODE_ENV } = getEnv();
+  if (REDIS_URL) {
+    const { default: IORedis } = await import('ioredis');
+    return new RedisRateBackend(new IORedis(REDIS_URL, { lazyConnect: true }));
+  }
+  if (NODE_ENV === 'production') {
+    throw new Error(
+      'REDIS_URL не задан в production: rate-limit/lockout нельзя держать в памяти ' +
+        '(счётчики не масштабируются между инстансами и сбрасываются при рестарте — ' +
+        'брутфорс логина и абуз публичных ручек проходят). ' +
+        'Починка: задайте REDIS_URL (адрес Redis) в окружении приложения и перезапустите его.',
+    );
+  }
+  warnMockOnce();
+  return new MemoryRateBackend();
+}
+
 let defaultLimiter: Promise<RateLimiter> | undefined;
 
-/**
- * Лениво строит дефолтный лимитер: Redis при наличии REDIS_URL, иначе
- * in-memory mock (с одноразовым warn). Ленивость + динамический import('ioredis')
- * нужны, чтобы импорт модуля не открывал соединение с Redis и mock-режим не
- * тянул драйвер (и чтобы код оставался ESM-совместимым, без require()).
- */
+/** Лениво строит дефолтный (админский) лимитер поверх resolveRateBackend(). */
 function getDefaultLimiter(): Promise<RateLimiter> {
   if (defaultLimiter) return defaultLimiter;
 
   defaultLimiter = (async (): Promise<RateLimiter> => {
-    const { REDIS_URL } = getEnv();
-    if (REDIS_URL) {
-      const { default: IORedis } = await import('ioredis');
-      const redis = new IORedis(REDIS_URL, { lazyConnect: true });
-      return createRateLimiter({ backend: new RedisRateBackend(redis) });
-    }
-    warnMockOnce();
-    return createRateLimiter({ backend: new MemoryRateBackend() });
+    return createRateLimiter({ backend: await resolveRateBackend() });
   })();
 
   return defaultLimiter;
@@ -324,21 +354,19 @@ export const STOREFRONT_RATE_LIMIT = {
 
 let storefrontLimiter: Promise<RateLimiter> | undefined;
 
+/**
+ * Лениво строит storefront-лимитер. Бэкенд берётся ИЗ ТОЙ ЖЕ resolveRateBackend(),
+ * что и админский, — включая fail-closed в production без REDIS_URL (#17).
+ * Отличаются только пороги (щедрое окно для публичного read-API витрины).
+ */
 function getStorefrontLimiter(): Promise<RateLimiter> {
   if (storefrontLimiter) return storefrontLimiter;
   storefrontLimiter = (async (): Promise<RateLimiter> => {
-    const opts = {
+    return createRateLimiter({
+      backend: await resolveRateBackend(),
       maxAttempts: STOREFRONT_RATE_LIMIT.maxAttempts,
       windowSec: STOREFRONT_RATE_LIMIT.windowSec,
-    };
-    const { REDIS_URL } = getEnv();
-    if (REDIS_URL) {
-      const { default: IORedis } = await import('ioredis');
-      const redis = new IORedis(REDIS_URL, { lazyConnect: true });
-      return createRateLimiter({ backend: new RedisRateBackend(redis), ...opts });
-    }
-    warnMockOnce();
-    return createRateLimiter({ backend: new MemoryRateBackend(), ...opts });
+    });
   })();
   return storefrontLimiter;
 }

@@ -12,6 +12,11 @@ import { LuxuryImageSwap } from "@/components/ui/LuxuryImageSwap";
 import { resolveCategoryHref, splitByGender } from "@/lib/catalog-view";
 import type { AdmikCategoryDto, StorefrontProduct } from "@/lib/admik";
 import { HOME_FALLBACK, type ResolvedHome } from "@/lib/home-content";
+// SECURITY (находка #11): в hero.ctaHref обёрнут ВЕСЬ первый экран главной, а его
+// значение приходит из настроек Admik (settings.home.hero) — второй рубеж защиты от
+// строк, попавших в БД до появления валидации. Ссылка тут обязана существовать,
+// поэтому небезопасное значение подменяется дефолтным маршрутом витрины, а не null.
+import { safeHrefOr } from "@/lib/safe-href";
 
 /** Full-width banner — первый блок под меню (+ заголовок/подзаголовок и CTA) */
 export function HomeBanner({ hero = HOME_FALLBACK.hero }: { hero?: ResolvedHome["hero"] }) {
@@ -30,7 +35,7 @@ export function HomeBanner({ hero = HOME_FALLBACK.hero }: { hero?: ResolvedHome[
       {/* Весь первый блок кликабелен → каталог; текст/заголовок и ссылка CTA — из
           настроек Admik (G-03, settings.home.hero) с фолбэком на дефолт витрины. */}
       <Link
-        href={hero.ctaHref}
+        href={safeHrefOr(hero.ctaHref, HOME_FALLBACK.hero.ctaHref)}
         aria-label={hero.ctaLabel}
         className="group relative block w-full"
       >
@@ -471,7 +476,7 @@ export function EditorialStatement({
             <div className="md:pb-1">
               <p className="body-editorial text-white/65 mb-10">{philosophy.text}</p>
               <Link
-                href={philosophy.linkHref}
+                href={safeHrefOr(philosophy.linkHref, HOME_FALLBACK.philosophy.linkHref)}
                 className="text-[10px] uppercase tracking-[0.22em] text-white border-b border-white/40 pb-1 hover:opacity-60 transition-opacity duration-700"
               >
                 {philosophy.linkLabel}

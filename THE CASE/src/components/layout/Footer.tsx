@@ -3,6 +3,9 @@
 import { useState } from "react";
 import Link from "next/link";
 import { FadeIn } from "@/components/ui/Animations";
+// SECURITY (находка #11): ссылки футера (колонки, соцсети, Telegram поддержки)
+// приходят из настроек Admik — последний рубеж перед подстановкой в href.
+import { safeHref, safeHrefOr } from "@/lib/safe-href";
 import { Logo } from "@/components/ui/Logo";
 import { IMAGES } from "@/lib/images";
 import { categoryLinks } from "@/lib/catalog-view";
@@ -126,7 +129,7 @@ export function Footer({
               <ul className="space-y-3">
                 {shopLinks.map((link) => (
                   <li key={link.href}>
-                    <Link href={link.href} className="text-[11px] tracking-[0.1em] text-white/55 hover:text-white transition-colors duration-500">
+                    <Link href={safeHrefOr(link.href, "/")} className="text-[11px] tracking-[0.1em] text-white/55 hover:text-white transition-colors duration-500">
                       {link.label}
                     </Link>
                   </li>
@@ -139,8 +142,8 @@ export function Footer({
             <div className="md:col-span-2">
               <h4 className="eyebrow text-white/40 mb-6">Поддержка</h4>
               <div className="space-y-3 text-[11px] text-white/55">
-                {c.telegramUrl ? (
-                  <a href={c.telegramUrl} target="_blank" rel="noopener noreferrer" className="block hover:text-white transition-colors">
+                {safeHref(c.telegramUrl) ? (
+                  <a href={safeHref(c.telegramUrl)!} target="_blank" rel="noopener noreferrer" className="block hover:text-white transition-colors">
                     Написать в Telegram
                   </a>
                 ) : null}
@@ -157,7 +160,7 @@ export function Footer({
                 <ul className="space-y-3">
                   {col.links.map((link) => (
                     <li key={`${link.href}-${link.label}`}>
-                      <Link href={link.href} className="text-[11px] tracking-[0.1em] text-white/55 hover:text-white transition-colors duration-500">
+                      <Link href={safeHrefOr(link.href, "/")} className="text-[11px] tracking-[0.1em] text-white/55 hover:text-white transition-colors duration-500">
                         {link.label}
                       </Link>
                     </li>
@@ -167,7 +170,7 @@ export function Footer({
                 {ci === lastCol ? (
                   <div className="mt-8 flex gap-6">
                     {socialLinks.map((s) => (
-                      <a key={s.label} href={s.href} target="_blank" rel="noopener noreferrer" className="eyebrow text-white/35 hover:text-white transition-colors">
+                      <a key={s.label} href={safeHrefOr(s.href, "/")} target="_blank" rel="noopener noreferrer" className="eyebrow text-white/35 hover:text-white transition-colors">
                         {s.label}
                       </a>
                     ))}

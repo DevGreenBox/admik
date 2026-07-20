@@ -1,6 +1,8 @@
 import { Send, Phone, Mail, MapPin } from "lucide-react";
 import { FadeIn } from "@/components/ui/Animations";
 import { getStoreSettings, resolveContacts } from "@/lib/store-settings";
+// SECURITY (находка #11): telegramUrl приходит из настроек Admik (contacts).
+import { safeHref } from "@/lib/safe-href";
 import { ContactsForm } from "./ContactsForm";
 
 // Серверный компонент: контакты тянутся из настроек Admik (G-01/G-07) с
@@ -30,10 +32,10 @@ export default async function ContactsPage() {
           <FadeIn delay={0.1}>
             <h2 className="heading-md mb-6">Прямые контакты</h2>
             <ul className="space-y-6">
-              {c.telegramUrl && (
+              {safeHref(c.telegramUrl) && (
                 <li>
                   <a
-                    href={c.telegramUrl}
+                    href={safeHref(c.telegramUrl)!}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="group flex items-start gap-4"

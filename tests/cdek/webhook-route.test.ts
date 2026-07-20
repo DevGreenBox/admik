@@ -266,3 +266,44 @@ describe('POST /api/cdek/webhook — module-gate и mock-режим', () => {
     expect(handleWebhookEventMock).toHaveBeenCalledOnce();
   });
 });
+
+/**
+ * SECURITY (аудит 2026-07-18, находки #1/#3): за ДОВЕРЕННЫМ прокси источником
+ * IP обязан быть X-Real-IP (Caddy перезаписывает его реальным IP пира), а НЕ
+ * leftmost X-Forwarded-For — тот полностью подконтролен клиенту, Caddy лишь
+ * дописывает реальный IP СПРАВА.
+ *
+ * До фикса роут имел СВОЮ копию extractIp с обратным приоритетом (XFF первым):
+ * при CDEK_WEBHOOK_TRUST_PROXY=true whitelist обходился заголовком
+ * `X-Forwarded-For: <IP из whitelist>`, а спуфнутый IP уезжал в
+ * `cdek_status_log.ip` (отравление аудита, находка #3).
+ */
+describe('POST /api/cdek/webhook — спуфинг leftmost XFF ЗА доверенным прокси', () => {
+  it('SECURITY: XFF из whitelist + реальный (чужой) X-Real-IP → 403, обхода нет', async () => {
+    // trustProxy=true (дефолт beforeEach), whitelist 203.0.113.0/24, секрета нет.
+    const res = await callPost('http://localhost/api/cdek/webhook', {
+      ...body(),
+      headers: {
+        ...(body().headers as Record<string, string>),
+        'x-forwarded-for': VALID_IP, // подделан атакующим
+        'x-real-ip': FOREIGN_IP, // проставлен Caddy = реальный IP атакующего
+      },
+    });
+    expect(res.status).toBe(403);
+    expect(handleWebhookEventMock).not.toHaveBeenCalled();
+  });
+
+  it('SECURITY(#3): в аудит (cdek_status_log.ip) уходит X-Real-IP, а не спуфнутый XFF', async () => {
+    const res = await callPost('http://localhost/api/cdek/webhook', {
+      ...body(),
+      headers: {
+        ...(body().headers as Record<string, string>),
+        'x-forwarded-for': '1.2.3.4', // клиентская подделка
+        'x-real-ip': VALID_IP, // реальный пир, проходит whitelist
+      },
+    });
+    expect(res.status).toBe(200);
+    expect(handleWebhookEventMock).toHaveBeenCalledOnce();
+    expect(handleWebhookEventMock.mock.calls[0]?.[1]).toBe(VALID_IP);
+  });
+});

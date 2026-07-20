@@ -52,3 +52,26 @@ describe('seo/schemas — canonicalUrlSchema (отклоняемый мусор)
     expect(canonicalUrlSchema.safeParse('//evil.com/x').success).toBe(false);
   });
 });
+
+/**
+ * SECURITY (аудит 2026-07-18, доработка находки #11). canonicalUrlSchema — ОТДЕЛЬНАЯ
+ * от lib/security/safe-href.ts проверка с другой политикой (canonical допускает
+ * ТОЛЬКО https, не mailto/tel/якоря), поэтому она намеренно НЕ сведена к общему
+ * модулю. Но обход через обратный слэш у неё был тот же: условие
+ * `startsWith('/') && !startsWith('//')` истинно для '/\evil.com', а WHATWG URL
+ * резолвит его в 'https://evil.com/' — то есть <link rel=canonical> уводил бы
+ * поисковики на чужой домен.
+ */
+describe('seo/schemas — canonicalUrlSchema и обратный слэш (находка #11)', () => {
+  it.each(['/\\evil.com', '/\\\\evil.com', '\\\\evil.com', '/path\\..\\evil'])(
+    'отвергает %j',
+    (v) => {
+      expect(canonicalUrlSchema.safeParse(v).success).toBe(false);
+    },
+  );
+
+  it('обычный путь и https по-прежнему принимаются', () => {
+    expect(canonicalUrlSchema.safeParse('/catalog/x').success).toBe(true);
+    expect(canonicalUrlSchema.safeParse('https://shop.example/x').success).toBe(true);
+  });
+});

@@ -10,6 +10,11 @@ import {
   type StorefrontProduct,
 } from "@/lib/admik";
 import { ProductCard } from "@/components/catalog/ProductCard";
+// SECURITY (находка #11): локальная копия safeHref жила прямо в этом файле, не
+// экспортировалась и не была покрыта тестом — из-за чего в ней остался обход через
+// обратный слэш ('/\evil.com'). Теперь guard берётся из общего проверенного модуля
+// src/lib/safe-href.ts (зеркало admik-модуля lib/security/safe-href.ts).
+import { safeHref } from "@/lib/safe-href";
 
 /**
  * Рендерер секций CMS-страницы (G-13). Серверный компонент: секции приходят
@@ -62,7 +67,7 @@ async function renderSection(s: AdmikSectionDto, i: number) {
       const html = str(c.html);
       const imageUrl = str(c.imageUrl);
       const ctaLabel = str(c.ctaLabel);
-      const ctaHref = str(c.ctaHref);
+      const ctaHref = safeHref(str(c.ctaHref));
       return (
         <section key={key} className="container-brand py-10 md:py-14">
           {imageUrl ? (
@@ -93,7 +98,7 @@ async function renderSection(s: AdmikSectionDto, i: number) {
     case "banner": {
       const imageUrl = str(c.imageUrl);
       if (!imageUrl) return null;
-      const href = str(c.href);
+      const href = safeHref(str(c.href));
       const alt = str(c.alt) ?? "";
       const img = (
         <div className="relative aspect-[21/9] overflow-hidden bg-surface">
@@ -149,7 +154,7 @@ async function renderSection(s: AdmikSectionDto, i: number) {
       const title = str(c.title);
       const html = str(c.html);
       const buttonLabel = str(c.buttonLabel);
-      const buttonHref = str(c.buttonHref);
+      const buttonHref = safeHref(str(c.buttonHref));
       return (
         <section key={key} className="container-brand py-12 text-center md:py-16">
           {title ? <h2 className="heading-md mb-4">{title}</h2> : null}

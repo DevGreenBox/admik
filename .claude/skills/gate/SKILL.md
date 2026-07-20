@@ -14,7 +14,18 @@ description: Прогнать полный код-гейт admik перед ко
 2. **Линт:** `pnpm lint` (= `eslint .`).
 3. **Юнит/интеграция:** `pnpm test` (= `vitest run`) — падений быть не должно.
 4. **Миграции** (если трогал `db/migrations/*` или схему): `./scripts/check-migrations.sh` — аддитивны и идемпотентны.
-5. **Безопасность** (если трогал оплату, RBAC-гвард, токены заказа, webhook, `.env`, S3): вызови встроенный скилл `security-review`.
+5. **Прокси / доверие IP (ВСЕГДА):** `./scripts/check-caddy-real-ip.sh` — ожидаем exit 0.
+   Проверяет, что у КАЖДОГО `reverse_proxy`, ведущего в `app` или `storefront`,
+   задан `header_up X-Real-IP {http.request.remote.host}` (маршрут в `minio` исключён —
+   раздача медиа решений по IP не принимает; список исключений — `CADDY_REALIP_EXEMPT`).
+   **Почему в гейте:** безопасность кода опирается на допущение о КОНФИГЕ. Приложение
+   доверяет `X-Real-IP` (`lib/server/request-ip.ts`), потому что прокси перезаписывает его
+   реальным IP соединения. Новый `reverse_proxy` без `header_up` оставляет код корректным,
+   но роняет защиту на клиентский leftmost `X-Forwarded-For` → обход IP-whitelist вебхуков
+   СДЭК/Т-Банка, обход rate-limit ротацией заголовка, отравление `audit_log.ip`/`orders.ip`
+   (находки #1/#3 аудита 2026-07-18). Юнит-тесты кода это НЕ ловят.
+   Линтер покрыт тестами `tests/check-caddy-real-ip.test.ts` (гоняются шагом 3).
+6. **Безопасность** (если трогал оплату, RBAC-гвард, токены заказа, webhook, `.env`, S3): вызови встроенный скилл `security-review`.
 
 ## Опционально
 - E2E витрины/админки: `pnpm test:e2e` (Playwright). Браузеры в `~/.cache/ms-playwright`.
@@ -26,5 +37,5 @@ description: Прогнать полный код-гейт admik перед ко
 - Красный шаг = стоп, не коммить, чини и перезапускай гейт с шага 1.
 
 ## Итог
-Сводка: `typecheck/lint/test/migrations/security` = OK/FAIL + числа тестов.
+Сводка: `typecheck/lint/test/migrations/proxy-real-ip/security` = OK/FAIL + числа тестов.
 Напомни: коммит только после ВТОРОЙ проверки (живой прогон — `deploy-stand` или `verify`).
