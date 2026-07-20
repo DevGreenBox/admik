@@ -19,7 +19,7 @@
  * mock-данные живут отдельным слоем lib/payments/tbank/mock/*.
  */
 
-import { getTbankConfig, type TbankConfig } from './config';
+import { getTbankConfig, resolveTbankMock, type TbankConfig } from './config';
 import { TbankClient, type ITbankClient } from './client';
 import { TbankError } from './errors';
 import * as mock from './mock';
@@ -49,9 +49,17 @@ export class TbankManager {
     this.fetchImpl = opts.fetchImpl;
   }
 
-  /** true при пустых TBANK_TERMINAL_KEY/TBANK_PASSWORD (mock-режим, docs/15 §2.1). */
+  /**
+   * true при пустых TBANK_TERMINAL_KEY/TBANK_PASSWORD (mock-режим, docs/15 §2.1).
+   *
+   * SECURITY (аудит 2026-07-18, #2, HIGH): в production без боевых ключей БРОСАЕТ,
+   * если демо не разрешён явно флагом TBANK_ALLOW_MOCK=true. Иначе потерянный
+   * TBANK_PASSWORD молча уводит боевой магазин в mock, где Init не ходит в банк,
+   * а confirmMockPayment доводит заказ до `paid` — то есть товар отдаётся бесплатно.
+   * Решение вынесено в resolveTbankMock, чтобы совпадало с isTbankMock().
+   */
   get isMock(): boolean {
-    return !this.config.terminalKey || !this.config.password;
+    return resolveTbankMock(this.config);
   }
 
   /**

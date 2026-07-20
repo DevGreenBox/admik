@@ -36,6 +36,41 @@ describe('tbank/config — isTbankMock (ключевая mock-детекция)'
   });
 });
 
+// =============================================================================
+// SECURITY (аудит 2026-07-18, #2, HIGH): fail-closed mock в production.
+// Молчаливая деградация в mock без боевых ключей → заказы «оплачены» бесплатно
+// (confirmMockPayment доводит до paid). В production без ключей isTbankMock должен
+// БРОСАТЬ, если демо не разрешён явным флагом TBANK_ALLOW_MOCK=true.
+// =============================================================================
+describe('tbank/config — fail-closed mock в production (#2)', () => {
+  it('production без ключей и без opt-in → БРОСАЕТ', () => {
+    expect(() => isTbankMock({ NODE_ENV: 'production' })).toThrow(/mock-режим в проде запрещён/);
+  });
+
+  it('production, только один ключ → тоже БРОСАЕТ (mock не полон)', () => {
+    expect(() =>
+      isTbankMock({ NODE_ENV: 'production', TBANK_TERMINAL_KEY: 'tk' }),
+    ).toThrow();
+  });
+
+  it('production + TBANK_ALLOW_MOCK=true → mock разрешён (демо-стенд), true', () => {
+    expect(
+      isTbankMock({ NODE_ENV: 'production', TBANK_ALLOW_MOCK: 'true' }),
+    ).toBe(true);
+  });
+
+  it('production с боевыми ключами → mock=false (не бросает)', () => {
+    expect(
+      isTbankMock({ NODE_ENV: 'production', TBANK_TERMINAL_KEY: 'tk', TBANK_PASSWORD: 'pw' }),
+    ).toBe(false);
+  });
+
+  it('вне production (dev/test) без ключей → mock=true, не бросает', () => {
+    expect(isTbankMock({ NODE_ENV: 'development' })).toBe(true);
+    expect(isTbankMock({ NODE_ENV: 'test' })).toBe(true);
+  });
+});
+
 describe('tbank/config — getTbankConfig (чтение env)', () => {
   it('дефолты при пустом окружении (mock-готово)', () => {
     const cfg = getTbankConfig({ NODE_ENV: 'test' });

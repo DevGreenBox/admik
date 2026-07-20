@@ -44,6 +44,8 @@ const envSchema = z.object({
   // Выделенный секрет HMAC токена доступа к заказу (m10). Если не задан — фолбэк на
   // APP_PASSWORD/OWNER_PASSWORD; в production без какого-либо секрета токены небезопасны
   // (orderTokenSecret бросает — fail-closed). Развязывает токен заказа от пароля админки.
+  // SECURITY (аудит 2026-07-18, #15): в production, если задан, — минимум 16
+  // символов (проверка ниже в superRefine). Короткий HMAC-секрет подбирается.
   ORDER_TOKEN_SECRET: z.string().optional(),
 
   // Кеш / rate-limit.
@@ -138,7 +140,7 @@ const envSchema = z.object({
   CDEK_DEFAULT_LENGTH_CM: z.coerce.number().int().min(0).default(30),
   CDEK_DEFAULT_WIDTH_CM: z.coerce.number().int().min(0).default(20),
   CDEK_DEFAULT_HEIGHT_CM: z.coerce.number().int().min(0).default(10),
-  // Секрет ?key= для webhook (пакет F).
+  // Секрет ?key= для webhook (пакет F). SECURITY (#15): ≥16 символов в production.
   CDEK_WEBHOOK_SECRET: z.string().optional(),
   // IP/CIDR whitelist webhook (csv); пусто допустимо лишь в test-режиме.
   CDEK_WEBHOOK_IPS: z.string().optional(),
@@ -147,7 +149,7 @@ const envSchema = z.object({
     .enum(['true', 'false', '1', '0'])
     .default('false')
     .transform((v) => v === 'true' || v === '1'),
-  // Секрет cron-роутов (пакет G).
+  // Секрет cron-роутов (пакет G). SECURITY (#15): ≥16 символов в production.
   CDEK_CRON_SECRET: z.string().optional(),
   // Kill-switch авто-создания отправлений (дефолт true).
   CDEK_CREATE_ENABLED: z
@@ -171,8 +173,17 @@ const envSchema = z.object({
   // тестовый (sandbox): https://rest-api-test.tinkoff.ru/v2.
   TBANK_BASE_URL: z.string().url().default('https://securepay.tinkoff.ru/v2'),
   // Идентификатор терминала / пароль терминала (подпись Token). ПУСТО → mock.
+  // (Провайдерские значения — без .min(): длину задаёт Т-Банк, не мы.)
   TBANK_TERMINAL_KEY: z.string().optional(),
   TBANK_PASSWORD: z.string().optional(),
+  // SECURITY (аудит 2026-07-18, #2, HIGH): mock-режим оплаты (пустые ключи) в
+  // production ОПАСЕН — заказы помечаются «оплаченными» бесплатно. По умолчанию
+  // isTbankMock() в production без ключей БРОСАЕТ (fail-closed). Этот флаг —
+  // ЯВНЫЙ opt-in для легального демо-стенда без боевого терминала (keyless demo).
+  TBANK_ALLOW_MOCK: z
+    .enum(['true', 'false', '1', '0'])
+    .default('false')
+    .transform((v) => v === 'true' || v === '1'),
   // Стадийность: O — одностадийная (списание сразу), T — двухстадийная (hold→Confirm).
   TBANK_PAY_TYPE: z.enum(['O', 'T']).default('O'),
   // Формировать ли чек 54-ФЗ (только если к терминалу подключена онлайн-касса).
@@ -198,6 +209,25 @@ const envSchema = z.object({
     .transform((v) => v === 'true' || v === '1'),
   // Срок жизни ссылки/QR оплаты (минуты) → Init.RedirectDueDate.
   TBANK_REDIRECT_DUE_MIN: z.coerce.number().int().min(1).default(60),
+}).superRefine((env, ctx) => {
+  // SECURITY (аудит 2026-07-18, #15): наши генерируемые секреты в PRODUCTION
+  // обязаны быть не короче 16 символов. Проверяем ТОЛЬКО в production и ТОЛЬКО для
+  // заданных значений — dev/CI-фикстуры и mock-режим (пустые секреты) не ломаются.
+  if (env.NODE_ENV !== 'production') return;
+  const MIN = 16;
+  const checkSecret = (name: 'ORDER_TOKEN_SECRET' | 'CDEK_WEBHOOK_SECRET' | 'CDEK_CRON_SECRET') => {
+    const val = env[name];
+    if (typeof val === 'string' && val.length > 0 && val.length < MIN) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [name],
+        message: `${name} должен быть не короче ${MIN} символов (production)`,
+      });
+    }
+  };
+  checkSecret('ORDER_TOKEN_SECRET');
+  checkSecret('CDEK_WEBHOOK_SECRET');
+  checkSecret('CDEK_CRON_SECRET');
 });
 
 export type Env = z.infer<typeof envSchema>;
