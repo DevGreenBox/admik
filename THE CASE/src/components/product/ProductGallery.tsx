@@ -14,6 +14,14 @@ export function ProductGallery({ images, name }: ProductGalleryProps) {
   const [active, setActive] = useState(0);
   const [lightbox, setLightbox] = useState(false);
 
+  // Смена цвета подменяет НАБОР снимков (см. imagesForColor). Без сброса индекс
+  // указывал бы в старый список: при переходе с цвета с 3 фото на цвет с 1 фото
+  // images[active] = undefined → <Image src={undefined}> роняет рендер карточки.
+  // Ключ сброса — сам список: смена цвета меняет ссылку на массив.
+  useEffect(() => {
+    setActive(0);
+  }, [images]);
+
   const next = useCallback(() => setActive((i) => (i + 1) % images.length), [images.length]);
   const prev = useCallback(() => setActive((i) => (i - 1 + images.length) % images.length), [images.length]);
 

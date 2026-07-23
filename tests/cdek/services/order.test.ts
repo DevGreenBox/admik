@@ -124,6 +124,7 @@ function makeOrder(over: Partial<Order> = {}): Order {
     customerEmail: 'ivan@example.com',
     customerPhone: '+7 (912) 345-67-89',
     comment: '',
+    giftWrap: false,
     idempotencyKey: null,
     source: 'storefront',
     ip: null,

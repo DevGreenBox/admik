@@ -45,6 +45,12 @@ function makeEffective(): EffectiveSettings {
     catalog: { newProductDays: 30 },
     delivery: { freeDeliveryThreshold: 300000 },
     orders: { orderPrefix: 'GA' },
+    checkout: {
+      onlinePaymentEnabled: true,
+      paymentDisabledNotice: null,
+      giftWrapEnabled: false,
+      giftWrapLabel: null,
+    },
     seo: {
       site_name: 'Gang Auto',
       site_url: 'https://gangauto.ru',

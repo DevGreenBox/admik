@@ -85,6 +85,13 @@ export interface MediaDto {
   type: string;
   alt: string;
   isPrimary: boolean;
+  /**
+   * Вариант, к которому привязано фото (product_media.variant_id); null — общее
+   * фото товара. Нужен витрине, чтобы показывать снимки ВЫБРАННОГО цвета:
+   * без этого поля галерея не отличает белый костюм от графитового.
+   * Публичен только идентификатор связи — storage_key/mime/размеры приватны.
+   */
+  variantId: string | null;
 }
 
 export interface VariantDto {
@@ -338,6 +345,7 @@ export function toMediaDto(media: ProductMedia): MediaDto {
     type: media.type,
     alt: media.alt,
     isPrimary: media.isPrimary,
+    variantId: media.variantId ?? null,
   };
 }
 

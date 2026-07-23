@@ -188,6 +188,12 @@ export interface Order {
 
   comment: string;
 
+  /**
+   * Покупатель попросил подарочную упаковку (галочка в корзине). Признак для
+   * комплектовщика; не путать с OrderItem.isGift — товаром-подарком промокода.
+   */
+  giftWrap: boolean;
+
   /** Ключ идемпотентности от витрины (anti-double-submit). */
   idempotencyKey: string | null;
 

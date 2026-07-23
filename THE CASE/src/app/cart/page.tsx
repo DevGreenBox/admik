@@ -10,6 +10,7 @@ import { quoteCart, AdmikApiError } from "@/lib/admik";
 import { cartToItems } from "@/lib/checkout";
 import { Button } from "@/components/ui/Button";
 import { FadeIn } from "@/components/ui/Animations";
+import { useCheckoutMode } from "@/components/CheckoutModeProvider";
 
 export default function CartPage() {
   const cart = useStore((s) => s.cart);
@@ -18,6 +19,10 @@ export default function CartPage() {
   const total = useStore(selectCartTotal);
   const promoCode = useStore((s) => s.promoCode);
   const setPromoCode = useStore((s) => s.setPromoCode);
+  const giftWrap = useStore((s) => s.giftWrap);
+  const setGiftWrap = useStore((s) => s.setGiftWrap);
+  // Режим оформления магазина: показывать ли пункт подарочной упаковки.
+  const checkoutMode = useCheckoutMode();
   const hydrated = useHydrated();
 
   // Промокод в корзине (Мадина: перенести из чекаута). Ввод хранится в store и
@@ -191,6 +196,26 @@ export default function CartPage() {
                   <p className={`text-[11px] mt-2 ${promoMsg.ok ? "text-muted" : "text-accent"}`}>{promoMsg.text}</p>
                 )}
               </div>
+
+              {/* Подарочная упаковка (правка владельца 2026-07-22 п.5). Пункт
+                  показывается, только если услуга включена в настройках магазина
+                  — платформа обслуживает магазины и без неё. Флаг живёт в store
+                  (как промокод) и едет в заказ на шаге подтверждения. */}
+              {checkoutMode.giftWrapEnabled && (
+                <label
+                  htmlFor="cart-gift-wrap"
+                  className="mb-6 flex cursor-pointer items-start gap-3 border border-border p-4 transition-colors hover:border-graphite"
+                >
+                  <input
+                    id="cart-gift-wrap"
+                    type="checkbox"
+                    checked={giftWrap}
+                    onChange={(e) => setGiftWrap(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 shrink-0 accent-graphite"
+                  />
+                  <span className="text-sm leading-snug">{checkoutMode.giftWrapLabel}</span>
+                </label>
+              )}
 
               <div className="space-y-3 mb-6">
                 <div className="flex justify-between text-sm">

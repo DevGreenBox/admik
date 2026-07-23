@@ -8,6 +8,7 @@ import { productCtaLabel } from "@/lib/product-cta";
 import { brandLabel } from "@/lib/brand-label";
 import { variantUnavailableLabel } from "@/lib/variant-availability";
 import { colorHex } from "@/lib/color-swatch";
+import { imagesForColor } from "@/lib/product-gallery";
 import {
   clampQuantity,
   colorUnavailableLabel,
@@ -74,6 +75,18 @@ export function ProductDetailClient({ product, related, sizeCharts }: ProductDet
   const [added, setAdded] = useState(false);
 
   const selectedVariant = selection.variant;
+
+  // Фото под выбранный цвет (правка владельца п.2). Логика фолбэков — в чистой
+  // imagesForColor (покрыта тестами): у цвета нет своих снимков → общие фото
+  // товара, лишь бы галерея не опустела. gallery может отсутствовать у товара,
+  // пришедшего из листинга, — тогда работаем по плоскому images, как раньше.
+  const galleryImages = useMemo(
+    () =>
+      product.gallery?.length
+        ? imagesForColor(product.gallery, product.variants, selection.color)
+        : product.images,
+    [product.gallery, product.images, product.variants, selection.color],
+  );
   // Размеры — в разрезе выбранного цвета: комбинация, которой нет или которой
   // нет в наличии, приходит сюда с available = false и дизейблится.
   const sizeOptions = useMemo(
@@ -195,7 +208,7 @@ export function ProductDetailClient({ product, related, sizeCharts }: ProductDet
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-8 xl:gap-12">
           <FadeIn direction="left" className="lg:col-span-7">
-            <ProductGallery images={product.images} name={product.name} />
+            <ProductGallery images={galleryImages} name={product.name} />
           </FadeIn>
 
           <FadeIn direction="right" delay={0.15} className="lg:col-span-4 lg:col-start-9">
@@ -215,8 +228,6 @@ export function ProductDetailClient({ product, related, sizeCharts }: ProductDet
                   <span className="tabular-nums">{formatPrice(activePrice)}</span>
                 )}
               </div>
-              <p className="body-editorial">{product.description || DEFAULT_DESCRIPTION}</p>
-
               {/* Цвет, заведённый ещё атрибутом ТОВАРА (каталог не переведён на
                   вариантные цвета): показываем подписью, как было до спринта B.
                   В ось выбора не подмешиваем — под него нет вариантов, и кнопка
@@ -385,7 +396,13 @@ export function ProductDetailClient({ product, related, sizeCharts }: ProductDet
                 </button>
               </div>
 
+              {/* Описание — НИЖЕ кнопки покупки, вплотную к «Составу и уходу»
+                  (правка владельца 2026-07-22 п.3): раньше стояло сразу под ценой
+                  и на телефоне отодвигало выбор размера и «В корзину» за экран.
+                  Порядок покупки теперь: цена → цвет → размер → количество →
+                  кнопка, и только потом справочный текст. */}
               <div className="space-y-6 border-t border-border pt-10">
+                <p className="body-editorial">{product.description || DEFAULT_DESCRIPTION}</p>
                 <p className="text-[10px] uppercase tracking-[0.2em] text-graphite">Состав и уход</p>
                 <Detail label="Состав" value={product.composition || DEFAULT_COMPOSITION} />
                 <Detail label="Рекомендации по уходу" value={product.care || DEFAULT_CARE} />

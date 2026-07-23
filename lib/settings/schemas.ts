@@ -190,6 +190,36 @@ export const ordersSettingsSchema = z
   .strip();
 
 /**
+ * Текст настроек, где ПУСТАЯ строка значит «не задано» (владелец очистил поле),
+ * а не «показать пустоту». `.transform` схлопывает '' и пробелы в undefined,
+ * чтобы потребитель мягко деградировал на свой дефолт.
+ */
+const optionalText = z
+  .string()
+  .trim()
+  .transform((v) => (v.length > 0 ? v : undefined))
+  .optional();
+
+/**
+ * checkout — режим оформления заказа (мультитенантно, без правки кода витрины).
+ *
+ *  • onlinePaymentEnabled — есть ли у магазина работающий эквайринг. При false
+ *    витрина НЕ инициирует платёж: заказ оформляется как ЗАЯВКА, покупателю
+ *    показывается paymentDisabledNotice. Дефолт (поле не задано) — ВКЛЮЧЕНО,
+ *    чтобы настройка не меняла поведение магазинов, где оплата уже работает.
+ *  • giftWrapEnabled/giftWrapLabel — пункт «подарочная упаковка» в корзине.
+ *    Дефолт — ВЫКЛЮЧЕНО: у магазина может не быть такой услуги.
+ */
+export const checkoutSettingsSchema = z
+  .object({
+    onlinePaymentEnabled: z.boolean().optional(),
+    paymentDisabledNotice: optionalText,
+    giftWrapEnabled: z.boolean().optional(),
+    giftWrapLabel: optionalText,
+  })
+  .strip();
+
+/**
  * module_overrides — частичный оверрайд ADMIK_MODULES.
  * Отсутствие поля → берётся env-набор (getEnabledModules); явный true/false —
  * включает/выключает соответствующий модуль поверх env. `settings` НЕ входит в
@@ -456,6 +486,7 @@ export const SETTING_KEYS = [
   'catalog',
   'delivery',
   'orders',
+  'checkout',
   'module_overrides',
   'seo',
   'home',
@@ -476,6 +507,7 @@ export const SETTING_SCHEMAS = {
   catalog: catalogSettingsSchema,
   delivery: deliverySettingsSchema,
   orders: ordersSettingsSchema,
+  checkout: checkoutSettingsSchema,
   module_overrides: moduleOverridesSchema,
   seo: seoSettingsSchema,
   home: homeSchema,
@@ -493,6 +525,7 @@ export type LegalEntitySettings = z.infer<typeof legalEntitySchema>;
 export type CatalogSettings = z.infer<typeof catalogSettingsSchema>;
 export type DeliverySettings = z.infer<typeof deliverySettingsSchema>;
 export type OrdersSettings = z.infer<typeof ordersSettingsSchema>;
+export type CheckoutSettings = z.infer<typeof checkoutSettingsSchema>;
 export type ModuleOverrides = z.infer<typeof moduleOverridesSchema>;
 export type SeoSettings = z.infer<typeof seoSettingsSchema>;
 export type HomeSettings = z.infer<typeof homeSchema>;

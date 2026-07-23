@@ -155,6 +155,11 @@ const createOrderShape = {
   paymentMethod: z.enum(PAYMENT_METHODS),
   promoCode: promoCodeSchema.optional(),
   comment: z.string().trim().max(2000).optional(),
+  /**
+   * Подарочная упаковка заказа (галочка в корзине). Отсутствие поля = false —
+   * старые клиенты витрины, не знающие о поле, продолжают работать.
+   */
+  giftWrap: z.boolean().optional(),
   /** Ключ идемпотентности (обычно из заголовка Idempotency-Key). */
   idempotencyKey: z.string().trim().min(1).max(200).optional(),
 };

@@ -129,8 +129,13 @@ export async function uploadMediaAction(
     return { ok: false, error: 'validation', fieldErrors: { file: ['Файл не выбран.'] } };
   }
   const bytes = Buffer.from(await file.arrayBuffer());
+  // Привязка фото к варианту (правка владельца 2026-07-22, п.2): по ней витрина
+  // показывает снимки выбранного цвета. Пустая строка из <select> = «общее фото
+  // товара» → null, иначе uuid-схема отвергла бы ''.
+  const variantId = String(formData.get('variantId') ?? '').trim() || null;
   return attachMedia({
     productId,
+    variantId,
     filename: file.name,
     bytes,
     alt: String(formData.get('alt') ?? ''),

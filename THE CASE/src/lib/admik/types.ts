@@ -25,6 +25,12 @@ export interface AdmikMediaDto {
   type: string;
   alt: string;
   isPrimary: boolean;
+  /**
+   * Вариант, к которому привязано фото; null — общее фото товара. Опционально:
+   * бэкенд старой версии поле не отдаёт → undefined, галерея показывает все
+   * снимки как раньше (мягкая деградация).
+   */
+  variantId?: string | null;
 }
 
 export interface AdmikVariantDto {
@@ -167,6 +173,8 @@ export interface AdmikCreateOrderInput {
   paymentMethod: AdmikPaymentMethod;
   promoCode?: string;
   comment?: string;
+  /** Подарочная упаковка заказа (галочка в корзине). */
+  giftWrap?: boolean;
 }
 
 export interface AdmikQuoteLineDto {
@@ -357,6 +365,17 @@ export interface AdmikSettingsDto {
     legalAddress: string | null;
   };
   delivery: { freeDeliveryThreshold: number };
+  /**
+   * Режим оформления заказа (мультитенантно). Опционально: бэкенд старой версии
+   * поле не отдаёт → undefined, и витрина берёт свои дефолты (оплата включена,
+   * упаковки нет) — то есть ведёт себя как до появления настройки.
+   */
+  checkout?: {
+    onlinePaymentEnabled?: boolean | null;
+    paymentDisabledNotice?: string | null;
+    giftWrapEnabled?: boolean | null;
+    giftWrapLabel?: string | null;
+  } | null;
   seo: {
     siteName: string | null;
     siteUrl: string | null;
@@ -471,6 +490,12 @@ export interface StorefrontProduct {
   availableQty: number;
   imageUrl: string | null;
   images: string[];
+  /**
+   * Те же снимки, но с привязкой к вариантам — для смены фото при выборе цвета
+   * (см. imagesForColor). `images` оставлен как есть: им пользуются карточки
+   * каталога и превью, где выбора цвета нет.
+   */
+  gallery?: { url: string; variantId?: string | null }[];
   brand: { slug: string; name: string } | null;
   /** Slug-и категорий товара (для связанных/фильтров). */
   categories: string[];

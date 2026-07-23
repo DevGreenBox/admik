@@ -80,6 +80,19 @@ export interface EffectiveSettings {
   orders: {
     orderPrefix: string;
   };
+  /**
+   * Режим оформления заказа. Дефолты подобраны так, чтобы отсутствие настройки
+   * не меняло поведение существующих магазинов: онлайн-оплата ВКЛЮЧЕНА (как было
+   * всегда), подарочная упаковка ВЫКЛЮЧЕНА (услуги раньше не существовало).
+   */
+  checkout: {
+    /** false → витрина не инициирует эквайринг, оформляет заявку. */
+    onlinePaymentEnabled: boolean;
+    /** Текст заглушки; null → витрина покажет свой дефолт. */
+    paymentDisabledNotice: string | null;
+    giftWrapEnabled: boolean;
+    giftWrapLabel: string | null;
+  };
   seo: SeoSettings & {
     /** Гарантированно непустой шаблон заголовка. */
     title_template: string;
@@ -242,6 +255,7 @@ export function mergeSettings(env: Env, dbRows: SettingRow[]): EffectiveSettings
   const catalog = parseSettingValue('catalog', rows.get('catalog')) ?? {};
   const delivery = parseSettingValue('delivery', rows.get('delivery')) ?? {};
   const orders = parseSettingValue('orders', rows.get('orders')) ?? {};
+  const checkout = parseSettingValue('checkout', rows.get('checkout')) ?? {};
   const seo: SeoSettings = parseSettingValue('seo', rows.get('seo')) ?? {};
   const home: HomeSettings = parseSettingValue('home', rows.get('home')) ?? {};
   const navigation: NavigationSettings =
@@ -291,6 +305,13 @@ export function mergeSettings(env: Env, dbRows: SettingRow[]): EffectiveSettings
     },
     orders: {
       orderPrefix: orders.orderPrefix ?? env.SHOP_ORDER_PREFIX,
+    },
+    checkout: {
+      // ?? (не ||): явный false владельца должен побеждать дефолт true.
+      onlinePaymentEnabled: checkout.onlinePaymentEnabled ?? true,
+      paymentDisabledNotice: checkout.paymentDisabledNotice ?? null,
+      giftWrapEnabled: checkout.giftWrapEnabled ?? false,
+      giftWrapLabel: checkout.giftWrapLabel ?? null,
     },
     seo: {
       site_name: seo.site_name ?? branding.shopName ?? env.SHOP_NAME ?? undefined,

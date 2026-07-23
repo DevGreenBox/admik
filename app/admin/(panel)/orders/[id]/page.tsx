@@ -319,6 +319,18 @@ export default async function OrderDetailPage({
                 <Row label="Стоимость" value={formatPrice(order.deliveryCost, order.currency)} />
               ) : null}
               {order.cdekTrack ? <Row label="Трек" value={order.cdekTrack} /> : null}
+              {/* Подарочная упаковка — в блоке «Доставка», а не «Покупатель»:
+                  это указание КОМПЛЕКТОВЩИКУ при сборке. Выделено цветом, чтобы
+                  не потеряться среди служебных строк и не уехать в обычной
+                  коробке (правка владельца 2026-07-22 п.5). */}
+              {order.giftWrap ? (
+                <Row
+                  label="Упаковка"
+                  value={
+                    <span className="font-semibold text-rose-700">Подарочная — упаковать</span>
+                  }
+                />
+              ) : null}
             </dl>
           </section>
 

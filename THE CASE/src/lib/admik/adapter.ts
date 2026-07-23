@@ -173,6 +173,8 @@ export function fromListItem(dto: AdmikProductListItemDto): StorefrontProduct {
     availableQty: Math.max(0, Math.trunc(dto.availableQty ?? 0)),
     imageUrl: dto.imageUrl,
     images: dto.imageUrl ? [dto.imageUrl] : [],
+    // Листинг отдаёт лишь обложку — привязки к варианту в нём нет по контракту.
+    gallery: dto.imageUrl ? [{ url: dto.imageUrl, variantId: null }] : [],
     brand: dto.brand ? { slug: dto.brand.slug, name: dto.brand.name } : null,
     categories: [],
     // Фасеты: gender резолвим той же логикой, что и в detail (из строки атрибута).
@@ -194,9 +196,12 @@ export function fromDetail(dto: AdmikProductDetailDto): StorefrontProduct {
   const variants = sortVariants(
     dto.variants.map(toStorefrontVariant),
   );
-  const images = dto.media
-    .map((m) => m.url)
-    .filter((u): u is string => Boolean(u));
+  // Галерея с привязкой к вариантам (для смены фото при выборе цвета, п.2);
+  // `images` — тот же список без привязки, для остального UI.
+  const gallery = dto.media
+    .filter((m): m is typeof m & { url: string } => Boolean(m.url))
+    .map((m) => ({ url: m.url, variantId: m.variantId ?? null }));
+  const images = gallery.map((g) => g.url);
 
   return {
     id: dto.id,
@@ -212,6 +217,7 @@ export function fromDetail(dto: AdmikProductDetailDto): StorefrontProduct {
     availableQty: Math.max(0, Math.trunc(dto.availableQty ?? 0)),
     imageUrl: images[0] ?? null,
     images,
+    gallery,
     brand: dto.brand ? { slug: dto.brand.slug, name: dto.brand.name } : null,
     categories: dto.categories,
     gender: resolveGender(dto.attributes, dto.categories),

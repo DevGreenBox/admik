@@ -36,6 +36,12 @@ function fakeEffective(): EffectiveSettings {
     catalog: { newProductDays: 30 },
     delivery: { freeDeliveryThreshold: 0 },
     orders: { orderPrefix: '' },
+    checkout: {
+      onlinePaymentEnabled: true,
+      paymentDisabledNotice: null,
+      giftWrapEnabled: false,
+      giftWrapLabel: null,
+    },
     seo: {
       title_template: '%s',
       noindex_site: false,

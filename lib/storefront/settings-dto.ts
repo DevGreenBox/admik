@@ -121,6 +121,16 @@ export interface PublicSettingsDto {
     /** Порог бесплатной доставки — в КОПЕЙКАХ (0 = выключено). */
     freeDeliveryThreshold: number;
   };
+  /**
+   * Режим оформления заказа — публичный: витрина по нему решает, показывать
+   * оплату или заглушку-заявку, и рисовать ли пункт подарочной упаковки.
+   */
+  checkout: {
+    onlinePaymentEnabled: boolean;
+    paymentDisabledNotice: string | null;
+    giftWrapEnabled: boolean;
+    giftWrapLabel: string | null;
+  };
   seo: {
     siteName: string | null;
     siteUrl: string | null;
@@ -192,6 +202,12 @@ export function toPublicSettingsDto(
     },
     delivery: {
       freeDeliveryThreshold: eff.delivery.freeDeliveryThreshold,
+    },
+    checkout: {
+      onlinePaymentEnabled: eff.checkout.onlinePaymentEnabled,
+      paymentDisabledNotice: eff.checkout.paymentDisabledNotice,
+      giftWrapEnabled: eff.checkout.giftWrapEnabled,
+      giftWrapLabel: eff.checkout.giftWrapLabel,
     },
     seo: {
       siteName: eff.seo.site_name ?? null,

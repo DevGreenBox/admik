@@ -14,12 +14,17 @@ interface StoreState {
   /** Промокод, введённый в корзине — переносится в чекаут (Мадина: промокод в
    *  корзину). Применённость/скидку подтверждает сервер (quoteCart), это лишь ввод. */
   promoCode: string;
+  /** Подарочная упаковка: галочка ставится в корзине, едет в чекаут и в заказ
+   *  (правка владельца 2026-07-22 п.5). Показывается, только если услуга
+   *  включена настройкой магазина (см. useCheckoutMode). */
+  giftWrap: boolean;
 
   addToCart: (item: Omit<CartItem, "quantity">, quantity?: number) => void;
   removeFromCart: (variantId: string) => void;
   updateQuantity: (variantId: string, quantity: number) => void;
   clearCart: () => void;
   setPromoCode: (code: string) => void;
+  setGiftWrap: (on: boolean) => void;
 
   toggleWishlist: (slug: string) => void;
   isInWishlist: (slug: string) => boolean;
@@ -41,6 +46,7 @@ export const useStore = create<StoreState>()(
       user: null,
       orders: [],
       promoCode: "",
+      giftWrap: false,
 
       addToCart: (item, quantity = 1) => {
         set((state) => {
@@ -95,8 +101,11 @@ export const useStore = create<StoreState>()(
         }));
       },
 
-      clearCart: () => set({ cart: [], promoCode: "" }),
+      // giftWrap сбрасывается вместе с корзиной: просьба относилась к
+      // оформленному заказу и не должна молча переехать в следующий.
+      clearCart: () => set({ cart: [], promoCode: "", giftWrap: false }),
       setPromoCode: (code) => set({ promoCode: code }),
+      setGiftWrap: (on) => set({ giftWrap: on }),
 
       toggleWishlist: (slug) => {
         set((state) => ({
@@ -130,6 +139,7 @@ export const useStore = create<StoreState>()(
         wishlist: state.wishlist,
         orders: state.orders,
         promoCode: state.promoCode,
+        giftWrap: state.giftWrap,
       }),
     }
   )

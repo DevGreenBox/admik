@@ -148,6 +148,7 @@ export function mapOrder(row: Record<string, unknown>): Order {
     customerEmail: String(row.customer_email),
     customerPhone: String(row.customer_phone),
     comment: String(row.comment ?? ''),
+    giftWrap: Boolean(row.gift_wrap),
     idempotencyKey: strOrNull(row.idempotency_key),
     source: row.source as Order['source'],
     ip: strOrNull(row.ip),
@@ -1082,8 +1083,8 @@ export async function createOrder(
           currency, payment_method, payment_status, delivery_type, delivery_city,
           delivery_city_code, delivery_address, delivery_pvz_code, delivery_cost,
           promo_code_id, promo_code,
-          customer_name, customer_email, customer_phone, comment, idempotency_key,
-          source, ip
+          customer_name, customer_email, customer_phone, comment, gift_wrap,
+          idempotency_key, source, ip
         ) VALUES (
           ${number}, 'new', ${quote.itemsTotal}, ${quote.discount}, ${quote.deliveryCost},
           ${quote.grandTotal}, ${env.SHOP_CURRENCY}, ${input.paymentMethod}, 'pending',
@@ -1096,7 +1097,8 @@ export async function createOrder(
           -- доставка бесплатна, реальная цена — только в заказе для магазина).
           ${quote.delivery.baseCost}, ${promoRow?.id ?? null}, ${appliedPromo?.code ?? null},
           ${input.customer.name}, ${input.customer.email}, ${input.customer.phone},
-          ${input.comment ?? ''}, ${input.idempotencyKey ?? null}, ${source}, ${ctx.ip ?? null}
+          ${input.comment ?? ''}, ${input.giftWrap ?? false},
+          ${input.idempotencyKey ?? null}, ${source}, ${ctx.ip ?? null}
         )
         RETURNING *
       `;

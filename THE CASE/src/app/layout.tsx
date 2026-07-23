@@ -4,6 +4,9 @@ import { Footer } from "@/components/layout/Footer";
 import Providers from "@/components/Providers";
 import PageviewBeacon from "@/components/PageviewBeacon";
 import { CurrencyProvider } from "@/components/CurrencyProvider";
+import { CheckoutModeProvider } from "@/components/CheckoutModeProvider";
+import { resolveCheckoutMode } from "@/lib/checkout-mode";
+import { legalEntityLine, resolveLegalEntity } from "@/lib/legal-entity";
 import { getSiteUrlFromSources, isNoindexFromSources } from "@/lib/site-url";
 import { getCategories, listPages, type AdmikCategoryDto } from "@/lib/admik";
 import {
@@ -109,6 +112,12 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const logoUrl = resolveLogoUrl(settings);
   const theme = resolveTheme(settings);
   const currency = resolveCurrency(settings);
+  // Режим оформления заказа (оплата/подарочная упаковка) — из того же
+  // мемоизированного запроса настроек, без отдельного обращения к API.
+  const checkoutMode = resolveCheckoutMode(settings);
+  // Реквизиты продавца для подвала (обязательны при дистанционной продаже).
+  // Не заполнены в админке → null, и блок в подвале не рендерится.
+  const legalLine = legalEntityLine(resolveLegalEntity(settings));
   // Ручная навигация шапки/футера из настроек Admik (G-10/G-11, Находка #18):
   // пустые массивы → Header/Footer показывают навигацию по умолчанию (+ авто-меню
   // «Информация» из страниц Контента сохраняется в обоих случаях).
@@ -128,6 +137,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <Providers>
           <PageviewBeacon />
           <CurrencyProvider currency={currency}>
+            <CheckoutModeProvider mode={checkoutMode}>
             <Header
               categories={categories}
               shopName={shopName}
@@ -143,7 +153,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
               contacts={contacts}
               infoLinks={infoLinks}
               columns={nav.footer}
+              legalLine={legalLine}
             />
+            </CheckoutModeProvider>
           </CurrencyProvider>
         </Providers>
       </body>

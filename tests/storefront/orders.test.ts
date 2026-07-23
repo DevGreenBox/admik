@@ -70,6 +70,7 @@ function makeOrder(over: Partial<Order> = {}): Order {
     customerEmail: 'Ivan@Example.COM',
     customerPhone: '+79991234567',
     comment: 'Позвонить заранее',
+    giftWrap: false,
     idempotencyKey: 'idem-key-secret',
     source: 'storefront',
     ip: '203.0.113.7',

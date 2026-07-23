@@ -46,6 +46,7 @@ export function Footer({
   contacts,
   infoLinks,
   columns,
+  legalLine = null,
 }: {
   categories?: AdmikCategoryDto[];
   /** Имя магазина из настроек Admik (G-01). */
@@ -59,6 +60,8 @@ export function Footer({
   infoLinks?: { href: string; label: string }[];
   /** Колонки футера из настроек Admik (G-11, Находка #18); пусто → DEFAULT_COLUMNS. */
   columns?: FooterColumn[];
+  /** Готовая строка реквизитов продавца (ИНН/ОГРН/адрес); null → блок не выводится. */
+  legalLine?: string | null;
 }) {
   const [email, setEmail] = useState("");
   const [subscribed, setSubscribed] = useState(false);
@@ -110,15 +113,15 @@ export function Footer({
   const socialLinks = resolveSocialLinks(c);
 
   return (
-    <footer id="contacts" className="relative bg-graphite text-white mt-16 md:mt-24 lg:mt-28 overflow-hidden">
+    <footer id="contacts" className="relative bg-graphite text-white mt-12 md:mt-16 lg:mt-20 overflow-hidden">
       <div
         className="absolute inset-0 bg-cover bg-center pointer-events-none saturate-0 blur-[2px]"
         style={{ backgroundImage: `url(${IMAGES.footer.bg})` }}
       />
       <div className="absolute inset-0 bg-black/25 pointer-events-none" />
-      <div className="container-brand py-14 md:py-20 relative z-10">
+      <div className="container-brand py-10 md:py-14 relative z-10">
         <FadeIn>
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-14 md:gap-8 lg:gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-10 md:gap-8 lg:gap-6">
             <div className="md:col-span-3">
               <Logo variant="light" size="md" showSubtitle shopName={shopName} logoUrl={logoUrl} />
             </div>
@@ -212,14 +215,25 @@ export function Footer({
           </div>
         </FadeIn>
 
-        <div className="mt-20 md:mt-28 pt-10 border-t border-white/10">
+        {/* Нижняя строка подвала. Правка владельца п.1: отступы и вордмарк ужаты
+            (было mt-20/28 + pt-10 + вордмарк до 9rem), плюс добавлены реквизиты
+            продавца — их обязан сообщать продавец при дистанционной продаже
+            (ст. 9 ФЗ «О защите прав потребителей»). */}
+        <div className="mt-12 md:mt-16 pt-8 border-t border-white/10">
           <p className="footer-wordmark text-center select-none">{shopName}</p>
-          <div className="flex justify-center mt-5">
+          <div className="flex justify-center mt-3">
             <span className="h-[2px] w-14 bg-accent" />
           </div>
-          <p className="text-center eyebrow text-white/30 mt-6">
+          <p className="text-center eyebrow text-white/30 mt-5">
             © {new Date().getFullYear()} · {shopName}
           </p>
+          {/* Реквизиты берутся из настроек магазина. Не заполнены → строки нет:
+              подставлять выдуманные данные продавца недопустимо. */}
+          {legalLine ? (
+            <p className="mt-3 text-center text-[11px] leading-relaxed text-white/35">
+              {legalLine}
+            </p>
+          ) : null}
         </div>
       </div>
     </footer>

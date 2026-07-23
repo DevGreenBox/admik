@@ -172,6 +172,9 @@ export interface OrderPublicDto {
     track: string | null;
   };
 
+  /** Заказ упакуют в подарочную упаковку — покупатель видит, что просьба учтена. */
+  giftWrap: boolean;
+
   items: OrderItemDto[];
 
   createdAt: string;
@@ -234,6 +237,8 @@ export function toOrderPublicDto(order: Order, items: OrderItem[]): OrderPublicD
       city: order.deliveryCity,
       track: order.cdekTrack,
     },
+
+    giftWrap: order.giftWrap,
 
     items: items.map(toOrderItemDto),
 

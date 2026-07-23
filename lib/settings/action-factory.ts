@@ -37,6 +37,7 @@ import {
   legalEntitySchema,
   catalogSettingsSchema,
   ordersSettingsSchema,
+  checkoutSettingsSchema,
   seoSettingsSchema,
   homeSchema,
   navigationSchema,
@@ -92,6 +93,8 @@ export const CatalogOrdersInputSchema = z.object({
   catalog: catalogSettingsSchema.optional(),
   delivery: deliveryInputSchema.optional(),
   orders: ordersSettingsSchema.optional(),
+  /** Режим оформления: онлайн-оплата и подарочная упаковка (правки 2026-07-22). */
+  checkout: checkoutSettingsSchema.optional(),
 });
 /**
  * module_overrides на ВХОДЕ действия — `.strict()`: неизвестный модуль (опечатка
@@ -330,6 +333,7 @@ export function createSettingsActions(deps: SettingsActionDeps) {
         catalog: (await deps.getSetting('catalog'))?.value,
         delivery: (await deps.getSetting('delivery'))?.value,
         orders: (await deps.getSetting('orders'))?.value,
+        checkout: (await deps.getSetting('checkout'))?.value,
       };
       if (data.catalog) await deps.upsertSetting('catalog', data.catalog, ctx.user.id);
       // freeDeliveryThreshold: рубли (ввод) → копейки (хранение).
@@ -339,16 +343,22 @@ export function createSettingsActions(deps: SettingsActionDeps) {
         await deps.upsertSetting('delivery', deliveryValue, ctx.user.id);
       }
       if (data.orders) await deps.upsertSetting('orders', data.orders, ctx.user.id);
+      if (data.checkout) await deps.upsertSetting('checkout', data.checkout, ctx.user.id);
       deps.invalidateCache();
       return {
-        result: { keys: ['catalog', 'delivery', 'orders'] as const },
+        result: { keys: ['catalog', 'delivery', 'orders', 'checkout'] as const },
         revalidate: ['/admin', SETTINGS_PATH, ...STOREFRONT_PATHS],
         audit: {
           action: 'settings.catalog_orders.update',
           entityType: 'shop_settings',
-          entityId: 'catalog,delivery,orders',
+          entityId: 'catalog,delivery,orders,checkout',
           before,
-          after: { catalog: data.catalog, delivery: deliveryValue, orders: data.orders },
+          after: {
+            catalog: data.catalog,
+            delivery: deliveryValue,
+            orders: data.orders,
+            checkout: data.checkout,
+          },
         },
       };
     },

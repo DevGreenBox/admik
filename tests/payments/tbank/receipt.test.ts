@@ -39,6 +39,7 @@ function order(extra: Partial<Order> = {}): Order {
     customerEmail: 'buyer@example.com',
     customerPhone: '+79991234567',
     comment: '',
+    giftWrap: false,
     idempotencyKey: null,
     source: 'storefront',
     ip: null,

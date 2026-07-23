@@ -34,6 +34,7 @@ import {
 import { appliedPromoCode, isPromoInSync } from "@/lib/promo";
 import { Button } from "@/components/ui/Button";
 import { FadeIn } from "@/components/ui/Animations";
+import { useCheckoutMode } from "@/components/CheckoutModeProvider";
 
 export default function CheckoutPage() {
   const router = useRouter();
@@ -62,6 +63,10 @@ export default function CheckoutPage() {
   // шаге оплаты нет. Сервер подтверждает применённость/скидку (quote.promo /
   // quote.discountTotal, anti-tamper).
   const promoCode = useStore((s) => s.promoCode);
+  // Подарочная упаковка отмечена в корзине — здесь только доносим её до заказа.
+  const giftWrap = useStore((s) => s.giftWrap);
+  // Режим оформления: работает ли онлайн-оплата у этого магазина (п.7).
+  const checkoutMode = useCheckoutMode();
 
   const [form, setForm] = useState({ firstName: "", lastName: "", email: "", phone: "" });
   // Правка Ани2 #7: показывать подсветку незаполненных/неверных полей ПОСЛЕ первой
@@ -252,6 +257,9 @@ export default function CheckoutPage() {
           // посчитан показанный итог), а НЕ сырое значение поля ввода. Так заказ
           // не расходится с тем, что покупатель видел на экране (находка 19).
           promoCode: appliedPromoCode(quote.promo),
+          // Просьба об упаковке отмечена в корзине (п.5) — едет отдельным полем
+          // заказа, чтобы комплектовщик видел признак, а не искал его в тексте.
+          giftWrap,
         },
         { idempotencyKey: idempotencyKey.current },
       );
@@ -267,6 +275,15 @@ export default function CheckoutPage() {
 
       const accountUrl = `/account?order=${encodeURIComponent(created.number)}&token=${encodeURIComponent(created.accessToken)}`;
       const method = mapPaymentMethod(paymentMethod);
+
+      // У магазина нет работающей кассы (настройка checkout.onlinePaymentEnabled
+      // = false, правка владельца п.7): заказ принят как ЗАЯВКА, эквайринг не
+      // трогаем вовсе. Иначе покупателя увело бы на страницу оплаты, которая без
+      // ключей падает. Заказ создан и виден в админке — магазин перезвонит.
+      if (!checkoutMode.onlinePaymentEnabled) {
+        router.push(accountUrl);
+        return;
+      }
 
       // Онлайн-эквайринг Т-Банк инициируем ТОЛЬКО для карты/СБП. СДЭК PAY (cdek-pay) —
       // оплата через СДЭК (на ПВЗ/при получении), отдельная онлайн-инициация не нужна →
@@ -479,8 +496,22 @@ export default function CheckoutPage() {
         {step === 3 && (
           <FadeIn>
             <div className="space-y-6 mt-8">
-              <OptionGroup title="Оплата" options={PAYMENT_METHODS} selected={paymentMethod}
-                onSelect={(m) => setPaymentMethod(m.id)} render={(m) => m.name} sub={(m) => m.description} />
+              {/* Оплата: либо выбор способа, либо честная заглушка-заявка (п.7).
+                  Выбор способа при выключенной кассе прятать ОБЯЗАТЕЛЬНО — иначе
+                  покупатель выбирает «Банковская карта» и ждёт списания, которого
+                  не будет. Способ заказа при этом остаётся дефолтным: владелец
+                  видит его в админке и уточняет по телефону. */}
+              {checkoutMode.onlinePaymentEnabled ? (
+                <OptionGroup title="Оплата" options={PAYMENT_METHODS} selected={paymentMethod}
+                  onSelect={(m) => setPaymentMethod(m.id)} render={(m) => m.name} sub={(m) => m.description} />
+              ) : (
+                <div>
+                  <p className="label-caps text-muted mb-3">Оплата</p>
+                  <div className="border border-border bg-surface p-5">
+                    <p className="text-sm leading-relaxed">{checkoutMode.paymentDisabledNotice}</p>
+                  </div>
+                </div>
+              )}
 
               <div className="bg-surface p-6 space-y-3">
                 <Row label="Товары" value={formatPrice(Number(quote?.itemsTotal ?? 0))} />
@@ -522,7 +553,11 @@ export default function CheckoutPage() {
               <div className="flex gap-4">
                 <Button variant="outline" size="md" onClick={() => setStep(2)}>Назад</Button>
                 <Button variant="primary" size="lg" magnetic disabled={loading || !fulfillable || deliveryUnavailable} onClick={handleSubmit} className="flex-1">
-                  {loading ? "Оформление..." : "Подтвердить заказ"}
+                  {loading
+                    ? "Оформление..."
+                    : checkoutMode.onlinePaymentEnabled
+                      ? "Подтвердить заказ"
+                      : "Отправить заявку"}
                 </Button>
               </div>
             </div>

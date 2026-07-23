@@ -115,12 +115,18 @@ export default async function SettingsPage() {
           </Section>
 
           <Section id="catalog" title="Каталог, доставка, заказы">
-            <CatalogOrdersForm catalog={eff.catalog} delivery={eff.delivery} orders={eff.orders} />
+            <CatalogOrdersForm
+              catalog={eff.catalog}
+              delivery={eff.delivery}
+              orders={eff.orders}
+              checkout={eff.checkout}
+            />
             <ResetRow
               keys={[
                 { key: 'catalog', label: 'Сбросить каталог' },
                 { key: 'delivery', label: 'Сбросить доставку' },
                 { key: 'orders', label: 'Сбросить заказы' },
+                { key: 'checkout', label: 'Сбросить оформление' },
               ]}
             />
           </Section>
