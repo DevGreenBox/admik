@@ -610,7 +610,13 @@ export function About({ about = HOME_FALLBACK.about }: { about?: ResolvedHome["a
           {/* Текст слева (~60%). Заголовок/абзацы/ценности — из настроек Admik
               (G-02, settings.home.about). */}
           <FadeIn className="lg:col-span-3">
-            <p className="eyebrow mb-6">О бренде</p>
+            {/* Надзаголовок-рубрика показывается, ТОЛЬКО если он не дублирует сам
+                заголовок: владелец задал about.title = «О бренде», и eyebrow с тем
+                же текстом читался как дубль (правка 2026-07-24). Сравнение без
+                регистра/пробелов, т.к. заголовок рендерится в CAPS через CSS. */}
+            {about.title.trim().toLowerCase() !== "о бренде" ? (
+              <p className="eyebrow mb-6">О бренде</p>
+            ) : null}
             <h2 className="heading-lg heading-rule mb-10 md:mb-12">{about.title}</h2>
             <div className="space-y-6 body-editorial [&>p]:max-w-none">
               {about.paragraphs.map((p, i) => (

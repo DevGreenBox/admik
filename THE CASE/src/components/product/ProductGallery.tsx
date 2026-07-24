@@ -121,8 +121,13 @@ export function ProductGallery({ images, name }: ProductGalleryProps) {
             >
               <X className="h-6 w-6" strokeWidth={1} />
             </button>
+            {/* Контейнер НЕ навязывает пропорцию: раньше стоял aspect-[3/4] +
+                max-w-3xl, и широкое (почти квадратное) фото упиралось в узкую
+                рамку и обрезалось по вертикали. Теперь бокс = почти весь экран
+                (с полями под стрелки/крестик), а object-contain вписывает фото
+                ЦЕЛИКОМ в любой ориентации. Правка владельца 2026-07-24. */}
             <motion.div
-              className="relative w-full max-w-3xl aspect-[3/4] mx-6"
+              className="relative h-[88vh] w-[88vw] max-w-6xl"
               onClick={(e) => e.stopPropagation()}
             >
               <Image key={active} src={images[active]} alt={name} fill quality={90} className="object-contain" sizes="100vw" />

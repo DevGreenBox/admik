@@ -247,7 +247,7 @@ function AccountContent() {
   };
 
   return (
-    <div className="page-transition pt-16 md:pt-20 relative min-h-screen">
+    <div className="page-transition flush-footer pt-16 md:pt-20 relative">
       <div className="absolute inset-0 bg-cover bg-center opacity-[0.04] pointer-events-none" style={{ backgroundImage: `url(${IMAGES.checkout.bg})` }} />
       <div className="container-brand py-10 md:py-16 max-w-4xl relative z-10">
         {/* Отмена/неудача оплаты: заказ создан, но не оплачен — честно сообщаем и
