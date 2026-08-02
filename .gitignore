@@ -50,3 +50,6 @@ backups/
 
 # Описи уязвимостей: остаются локально, в репозиторий не уезжают
 docs/SECURITY-AUDIT-*.md
+
+# Local Claude Code settings
+.claude/settings.local.json
